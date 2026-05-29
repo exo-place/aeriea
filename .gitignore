@@ -1,0 +1,38 @@
+# Rust
+target/
+
+# Nix
+result
+.direnv/
+
+# Node (docs)
+node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+
+# Secrets
+.envrc.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Godot
+.godot/
+.import/
+*.translation
+export.cfg
+export_presets.cfg
+.tmp/
+*.tmp
+
+# Normalize
+.normalize/*
+!.normalize/config.toml
+!.normalize/duplicate-functions-allow
+!.normalize/duplicate-types-allow
+!.normalize/hotspots-allow
+!.normalize/large-files-allow
+!.normalize/memory/

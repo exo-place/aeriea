@@ -1,0 +1,32 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the properties before and after such edits are different.
+;
+; Format:
+;   [section] ; section goes in header
+;   param=value ; compat format
+;   param="value" ; entry format with type information
+;   param=Array[type](...) ; entry with typed array
+
+config_version=5
+
+[application]
+
+config/name="aeriea"
+config/description="A place to be — embodied modern-life sandbox built around 100% immersion"
+config/version="0.1.0"
+config/tags=PackedStringArray("sandbox", "immersive", "modern-life")
+run/main_scene=""
+config/features=PackedStringArray("4.3", "Forward Plus")
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/resizable=true
+window/stretch/mode="canvas_items"
+
+[rendering]
+
+renderer/rendering_method="forward_plus"

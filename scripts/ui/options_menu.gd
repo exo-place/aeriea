@@ -15,6 +15,7 @@ signal close_requested
 @onready var _dynamic_fov_check: CheckButton  = %DynamicFovCheck
 @onready var _mouse_sens_slider: HSlider      = %MouseSensSlider
 @onready var _mouse_sens_label: Label         = %MouseSensLabel
+@onready var _sprint_mode_option: OptionButton = %SprintModeOption
 @onready var _reset_button: Button            = %ResetButton
 @onready var _back_button: Button             = %BackButton
 
@@ -34,13 +35,21 @@ func _ready() -> void:
 	_mouse_sens_slider.max_value = GameSettings.MOUSE_SENS_MAX
 	_mouse_sens_slider.step = 0.0001
 
+	# Sprint mode dropdown (accessibility #5): Hold (default) vs Toggle. Items added
+	# in InputMode order so the item index IS the GameSettings.InputMode value.
+	_sprint_mode_option.clear()
+	_sprint_mode_option.add_item("Hold", GameSettings.InputMode.HOLD)
+	_sprint_mode_option.add_item("Toggle (tap)", GameSettings.InputMode.TOGGLE)
+
 	# Seed current values without emitting (ranges are already set).
 	_dynamic_fov_check.set_pressed_no_signal(GameSettings.dynamic_fov_enabled)
 	_mouse_sens_slider.set_value_no_signal(GameSettings.mouse_sensitivity)
+	_sprint_mode_option.select(_sprint_mode_option.get_item_index(GameSettings.sprint_mode))
 
 	# Now it is safe to listen for genuine user changes.
 	_dynamic_fov_check.toggled.connect(_on_dynamic_fov_toggled)
 	_mouse_sens_slider.value_changed.connect(_on_mouse_sens_changed)
+	_sprint_mode_option.item_selected.connect(_on_sprint_mode_selected)
 
 	GameSettings.settings_changed.connect(_refresh_from_settings)
 	_update_labels()
@@ -53,9 +62,12 @@ func _refresh_from_settings() -> void:
 
 	_dynamic_fov_check.button_pressed = GameSettings.dynamic_fov_enabled
 	_mouse_sens_slider.value = GameSettings.mouse_sensitivity
+	_sprint_mode_option.set_block_signals(true)
+	_sprint_mode_option.select(_sprint_mode_option.get_item_index(GameSettings.sprint_mode))
 
 	_dynamic_fov_check.set_block_signals(false)
 	_mouse_sens_slider.set_block_signals(false)
+	_sprint_mode_option.set_block_signals(false)
 
 	_update_labels()
 
@@ -72,6 +84,11 @@ func _on_dynamic_fov_toggled(pressed: bool) -> void:
 
 func _on_mouse_sens_changed(value: float) -> void:
 	GameSettings.set_mouse_sensitivity(value)
+
+
+func _on_sprint_mode_selected(index: int) -> void:
+	# Item id == GameSettings.InputMode value (added in order).
+	GameSettings.set_sprint_mode(_sprint_mode_option.get_item_id(index))
 
 
 func _on_reset() -> void:

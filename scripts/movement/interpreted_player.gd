@@ -187,9 +187,39 @@ func _ready() -> void:
 		interpreter = MovementInterpreter.new()
 	interpreter.setup(kit, self)
 
+	# Accessibility (#5): register the sprint tap-vs-hold resolver from GameSettings.
+	# The interpreter's once-per-tick InputFrame then exposes a single coherent
+	# "sprint active" signal regardless of mode, so the kit's sprint condition is
+	# mode-agnostic. Reusable: register another action's ToggleHold the same way.
+	_refresh_input_modes()
+	var gs := get_node_or_null("/root/GameSettings")
+	if gs and gs.has_signal("settings_changed") and not gs.settings_changed.is_connected(_refresh_input_modes):
+		gs.settings_changed.connect(_refresh_input_modes)
+
 	if Engine.is_editor_hint():
 		return
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+## (Re)build the per-action tap-vs-hold resolvers from GameSettings. Called on
+## ready and whenever settings change. Preserves an existing sprint latch across a
+## pure mode-change so the player doesn't get a surprise sprint flip.
+func _refresh_input_modes() -> void:
+	if interpreter == null:
+		return
+	var gs := get_node_or_null("/root/GameSettings")
+	var sprint_mode := 0
+	if gs:
+		sprint_mode = int(gs.sprint_mode)
+	var th = interpreter.toggle_actions.get("sprint")
+	if th == null:
+		# The ToggleHold class is nested in whichever driver is active (interpreter
+		# or compiled). Both expose the same surface; construct the matching one.
+		if use_compiled:
+			th = CompiledBaseMovement.ToggleHold.new()
+		else:
+			th = MovementInterpreter.ToggleHold.new()
+		interpreter.toggle_actions["sprint"] = th
+	th.mode = sprint_mode
 
 # ---------------------------------------------------------------------------
 # Physics / input

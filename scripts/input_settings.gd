@@ -134,20 +134,47 @@ func _load_and_apply() -> void:
 	var cfg := ConfigFile.new()
 	var err := cfg.load(SAVE_PATH)
 	if err != OK:
-		# No saved file — use project defaults as-is.
+		# Missing, unreadable, or corrupt/unparseable file — keep project
+		# defaults as-is. We never honour a file we cannot parse.
+		_heal_unbound_actions()
 		return
 
 	for entry in REBINDABLE_ACTIONS:
 		var a: String = entry["action"]
-		if not cfg.has_section_key("bindings", a):
-			continue
 		if not InputMap.has_action(a):
+			continue
+		# A missing entry, an explicit null (written by _save for an empty
+		# action), or a malformed value all FALL BACK to the project default
+		# for this action — we never leave a known action unbound just because
+		# a stale/partial override file lacks a usable entry for it.
+		if not cfg.has_section_key("bindings", a):
 			continue
 		var stored = cfg.get_value("bindings", a, null)
 		if stored == null or not (stored is InputEvent):
 			continue
 		InputMap.action_erase_events(a)
 		InputMap.action_add_event(a, stored)
+
+	# Final safety net: any rebindable action that ended up with no events at
+	# all (e.g. healed-from corruption, or a past conflict-resolution that left
+	# it cleared) is restored to its captured project default. A known action
+	# must never be left unbound.
+	_heal_unbound_actions()
+
+
+## Restore the captured project default for any rebindable action that has no
+## events bound. Idempotent; safe to call after every load.
+func _heal_unbound_actions() -> void:
+	for entry in REBINDABLE_ACTIONS:
+		var a: String = entry["action"]
+		if not InputMap.has_action(a):
+			continue
+		if not InputMap.action_get_events(a).is_empty():
+			continue
+		if not _defaults.has(a):
+			continue
+		for ev in _defaults[a]:
+			InputMap.action_add_event(a, ev)
 
 
 func _save() -> void:

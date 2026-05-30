@@ -34,7 +34,10 @@ func _run() -> void:
 
 	await _test_default_mouse_sensitivity_nonzero()
 	await _test_mouse_motion_rotates_camera()
-	await _test_jump_produces_upward_velocity()
+	_test_jump_binding_survives_autoload_init()
+	_test_crouch_binding_survives_autoload_init()
+	await _test_jump_from_real_key_event()
+	await _test_crouch_from_real_key_event()
 	await _test_jump_after_pause_unpause()
 	await _test_crouch_no_vertical_jitter()
 	await _test_wallrun_not_triggered_by_crouch()
@@ -102,6 +105,27 @@ func _make_key(physical_keycode: int, pressed: bool) -> InputEventKey:
 	return ev
 
 
+## Drive a physical key through the REAL global input pipeline — the same path
+## a hardware key press takes — rather than calling a controller method or
+## Input.action_press(). This exercises the InputMap binding (physical key →
+## action) end to end, which is what was silently bypassed before.
+func _send_key(physical_keycode: int, pressed: bool) -> void:
+	Input.parse_input_event(_make_key(physical_keycode, pressed))
+	Input.flush_buffered_events()
+
+
+## First InputEventKey bound to an action whose physical_keycode matches, or
+## null if none. Used to assert the project default binding survived autoload
+## init (InputSettings must never clobber a known action into unbound state).
+func _action_has_physical_key(action: String, physical_keycode: int) -> bool:
+	if not InputMap.has_action(action):
+		return false
+	for ev in InputMap.action_get_events(action):
+		if ev is InputEventKey and (ev as InputEventKey).physical_keycode == physical_keycode:
+			return true
+	return false
+
+
 # ---------------------------------------------------------------------------
 # Item 1 — mouse sensitivity / look
 # ---------------------------------------------------------------------------
@@ -154,20 +178,41 @@ func _test_mouse_motion_rotates_camera() -> void:
 # Item 2 — jump, crouch jitter, dynamic FOV, leniency, recapture
 # ---------------------------------------------------------------------------
 
-func _test_jump_produces_upward_velocity() -> void:
+## Binding-survival: after the InputSettings autoload has run its _ready
+## (capture defaults + load/apply overrides), the project default Space→jump
+## binding MUST still be present in the live InputMap. If InputSettings clobbers
+## or fails to fall back to defaults, the action ends up unbound and physical
+## Space does nothing in the running game — exactly the dead-jump bug. This is
+## a pure InputMap assertion; it does not spawn the level.
+func _test_jump_binding_survives_autoload_init() -> void:
+	_assert(
+		"Space→jump binding survives InputSettings autoload init",
+		_action_has_physical_key("jump", KEY_SPACE),
+		"jump events=%s" % str(InputMap.action_get_events("jump"))
+	)
+
+
+func _test_crouch_binding_survives_autoload_init() -> void:
+	_assert(
+		"Ctrl→crouch binding survives InputSettings autoload init",
+		_action_has_physical_key("crouch", KEY_CTRL),
+		"crouch events=%s" % str(InputMap.action_get_events("crouch"))
+	)
+
+
+## Drive jump by injecting a real physical Space key through Input.parse_input_event
+## (NOT Input.action_press, NOT a direct method call) so the whole physical-key →
+## InputMap action → controller pipeline is exercised. Asserts the body gains
+## upward velocity.
+func _test_jump_from_real_key_event() -> void:
 	var ctx := await _spawn_level()
 	var player: PlayerController = ctx["player"]
 
-	# Ensure grounded before jumping.
 	var on_floor := await _settle_on_floor(player)
 
-	# Sanity: confirm the synthetic event is recognised as the jump action,
-	# so a failure points at movement logic rather than a bad test stimulus.
-	var ev := _make_key(KEY_SPACE, true)
-	var recognised := ev.is_action_pressed("jump")
-
-	# Press jump via the real input handler (sets the jump buffer).
-	player._input(ev)
+	# Clean key state, then inject a real Space-down through the input pipeline.
+	_send_key(KEY_SPACE, false)
+	_send_key(KEY_SPACE, true)
 	var buffered := player._jump_buffer_timer
 	# Allow up to two physics frames: the jump may fire on the landing frame.
 	await get_tree().physics_frame
@@ -175,11 +220,48 @@ func _test_jump_produces_upward_velocity() -> void:
 	if vy <= 0.0:
 		await get_tree().physics_frame
 		vy = maxf(vy, player.velocity.y)
+	_send_key(KEY_SPACE, false)
 
 	_assert(
-		"jump sets velocity.y positive",
+		"physical Space key (real input pipeline) makes velocity.y positive",
 		vy > 0.0,
-		"on_floor_before=%s, recognised_as_jump=%s, buffer_set=%.3f, velocity.y=%.3f after jump" % [str(on_floor), str(recognised), buffered, vy]
+		"on_floor_before=%s, buffer_set=%.3f, velocity.y=%.3f after Space" % [str(on_floor), buffered, vy]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## Drive crouch by injecting a real physical Ctrl key through the input pipeline,
+## while moving fast enough to slide, and assert the slide state + crouched
+## collider engage. This exercises the polled Input.is_action_pressed("crouch")
+## path through the real InputMap binding rather than Input.action_press.
+func _test_crouch_from_real_key_event() -> void:
+	var ctx := await _spawn_level()
+	var player: PlayerController = ctx["player"]
+
+	await _settle_on_floor(player)
+
+	# Give the player forward speed above slide_min_speed so a crouch triggers
+	# a slide (the controller's crouch behaviour). Hold W + sprint, then Ctrl.
+	_send_key(KEY_W, true)
+	_send_key(KEY_SHIFT, true)
+	await _step_physics(player, 30)
+	var speed_before := Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+
+	var stand_h := player._capsule.height
+	_send_key(KEY_CTRL, true)
+	await _step_physics(player, 8)
+	var crouched := player._is_crouched
+	var crouch_h := player._capsule.height
+	var state := player._state
+	_send_key(KEY_CTRL, false)
+	_send_key(KEY_W, false)
+	_send_key(KEY_SHIFT, false)
+
+	_assert(
+		"physical Ctrl key (real input pipeline) engages crouch/slide",
+		crouched and crouch_h < stand_h and state == PlayerController.State.SLIDE,
+		"speed_before=%.2f, crouched=%s, capsule h %.2f->%.2f, state=%d (SLIDE=%d)" % [speed_before, str(crouched), stand_h, crouch_h, state, PlayerController.State.SLIDE]
 	)
 	ctx["level"].queue_free()
 	await get_tree().process_frame
@@ -199,9 +281,9 @@ func _test_jump_after_pause_unpause() -> void:
 	# Let physics resume and the body re-settle on the floor after unpausing.
 	await _settle_on_floor(player)
 
-	# Release jump first (clean state), then press.
-	player._input(_make_key(KEY_SPACE, false))
-	player._input(_make_key(KEY_SPACE, true))
+	# Release jump first (clean state), then press — via the real input pipeline.
+	_send_key(KEY_SPACE, false)
+	_send_key(KEY_SPACE, true)
 	# Allow up to two physics frames: the jump may fire on the landing frame.
 	await get_tree().physics_frame
 	var vy := player.velocity.y
@@ -225,8 +307,8 @@ func _test_crouch_no_vertical_jitter() -> void:
 	# Settle on flat ground.
 	await _step_physics(player, 15)
 
-	# Hold crouch (Ctrl) while stationary on flat ground.
-	Input.action_press("crouch")
+	# Hold crouch (Ctrl) while stationary on flat ground — via the real pipeline.
+	_send_key(KEY_CTRL, true)
 	# Step several frames to let any height transition settle.
 	await _step_physics(player, 10)
 
@@ -234,7 +316,7 @@ func _test_crouch_no_vertical_jitter() -> void:
 	for i in 30:
 		await get_tree().physics_frame
 		samples.append(player.global_position.y)
-	Input.action_release("crouch")
+	_send_key(KEY_CTRL, false)
 
 	# Compute variance of the body Y over the sampled window.
 	var mean := 0.0
@@ -266,11 +348,11 @@ func _test_wallrun_not_triggered_by_crouch() -> void:
 	await _step_physics(player, 10)
 
 	# Press crouch (Ctrl) and step. The player must NOT enter WALL_RUN state
-	# merely from pressing crouch on flat ground.
-	Input.action_press("crouch")
+	# merely from pressing crouch on flat ground. Drive via the real pipeline.
+	_send_key(KEY_CTRL, true)
 	await _step_physics(player, 20)
 	var state: int = player._state
-	Input.action_release("crouch")
+	_send_key(KEY_CTRL, false)
 
 	_assert(
 		"crouch/Ctrl does NOT trigger wall-run",

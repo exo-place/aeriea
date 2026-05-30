@@ -82,6 +82,11 @@ func _input_logs() -> Array:
 				+ _hold(["move_forward", "sprint", "crouch"], 4)
 				+ _hold(["move_forward", "crouch", "jump"], 3)
 				+ _hold(["move_forward"], 30)},
+		{"name": "bullet jump from slide while PITCHED UP (exercises the aim/look space directionality)", "spawn": Vector3(0, 1.2, 0), "with_walls": false,
+			"log": _hold_vp(["move_forward", "sprint"], 35, 0.0, 0.6)
+				+ _hold_vp(["move_forward", "sprint", "crouch"], 4, 0.0, 0.6)
+				+ _hold_vp(["move_forward", "crouch", "jump"], 3, 0.0, 0.6)
+				+ _hold_vp(["move_forward"], 30, 0.0, 0.6)},
 	]
 
 
@@ -90,9 +95,15 @@ func _hold(actions: Array, n: int) -> Array:
 	return _hold_v(actions, n, 0.0)
 
 func _hold_v(actions: Array, n: int, yaw: float) -> Array:
+	return _hold_vp(actions, n, yaw, 0.0)
+
+## n ticks holding `actions` at a given yaw AND pitch (radians, +up). Pitch drives
+## the `aim`/look space so directional verbs (bullet jump) launch along the full
+## look vector — this is how the golden trace exercises pitch-tracking.
+func _hold_vp(actions: Array, n: int, yaw: float, pitch: float) -> Array:
 	var out: Array = []
 	for _i in n:
-		out.append({"actions": actions.duplicate(), "yaw": yaw})
+		out.append({"actions": actions.duplicate(), "yaw": yaw, "pitch": pitch})
 	return out
 
 
@@ -220,6 +231,7 @@ func _apply_input(entry: Dictionary, p: InterpretedPlayer) -> void:
 			Input.action_release(action)
 	Input.flush_buffered_events()
 	p._yaw = entry["yaw"]
+	p._pitch = float(entry.get("pitch", 0.0))
 
 
 ## Drive one lone world through the input_log and return its per-tick trajectory

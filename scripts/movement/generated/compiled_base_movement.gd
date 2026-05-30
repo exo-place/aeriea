@@ -29,14 +29,15 @@ var wall_normal: Vector3 = Vector3.ZERO
 var wall_side: float = 0.0
 var _held_last: Dictionary = {}
 var yaw: float = 0.0
+var pitch: float = 0.0
 
 # --- Params lowered to consts (referenced by name in the kit) ---
 const P_air_acceleration := 20.0
 const P_air_speed_cap := 12.0
+const P_bullet_jump_base_up := 4.5
 const P_bullet_jump_buffer_time := 0.15
 const P_bullet_jump_cooldown := 0.6
-const P_bullet_jump_forward_boost := 12.0
-const P_bullet_jump_up := 6.0
+const P_bullet_jump_impulse := 13.0
 const P_camera_height_crouch := 0.85
 const P_camera_height_lerp_speed := 12.0
 const P_camera_height_stand := 1.65
@@ -169,7 +170,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			active_state = "VAULT"
 			return false
 		elif (frame.is_pressed("crouch") and (_speed_h() >= P_slide_entry_speed)):
-			_k_add_velocity(frame, P_slide_boost, "velocity", "SLIDE", false)
+			_k_add_velocity(frame, P_slide_boost, "velocity", "SLIDE", false, false)
 			_k_clamp_speed_h(P_max_slide_speed)
 			body.host_set_collider_height(P_crouch_height, false)
 			timers["slide"] = P_slide_max_time
@@ -194,7 +195,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			active_state = "AIR"
 			return true
 		elif ((float(timers.get("jump", 0.0)) > 0.0) and (float(timers.get("wall_jump_grace", 0.0)) > 0.0)):
-			_k_add_velocity(frame, P_wall_jump_lateral, "wall_normal", "", true)
+			_k_add_velocity(frame, P_wall_jump_lateral, "wall_normal", "", true, false)
 			body.velocity.y = P_wall_jump_up
 			timers["wall_jump_grace"] = 0.0
 			timers["jump_buffer"] = 0.0
@@ -216,8 +217,8 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 	elif active_state == "SLIDE":
 		if ((float(timers.get("jump", 0.0)) > 0.0) and (float(timers.get("bullet_jump_cd", 0.0)) <= 0.0)):
 			body.host_set_collider_height(P_stand_height, true)
-			body.velocity.y = P_bullet_jump_up
-			_k_add_velocity(frame, P_bullet_jump_forward_boost, "forward", "", false)
+			body.velocity.y = P_bullet_jump_base_up
+			_k_add_velocity(frame, P_bullet_jump_impulse, "aim", "", false, true)
 			timers["bullet_jump_cd"] = P_bullet_jump_cooldown
 			timers["jump_buffer"] = 0.0
 			timers["jump_hold"] = 0.0
@@ -241,8 +242,8 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 	elif active_state == "CROUCH":
 		if ((float(timers.get("jump", 0.0)) > 0.0) and (float(timers.get("bullet_jump_cd", 0.0)) <= 0.0)):
 			body.host_set_collider_height(P_stand_height, true)
-			body.velocity.y = P_bullet_jump_up
-			_k_add_velocity(frame, P_bullet_jump_forward_boost, "forward", "", false)
+			body.velocity.y = P_bullet_jump_base_up
+			_k_add_velocity(frame, P_bullet_jump_impulse, "aim", "", false, true)
 			timers["bullet_jump_cd"] = P_bullet_jump_cooldown
 			timers["jump_buffer"] = 0.0
 			timers["jump_hold"] = 0.0
@@ -264,7 +265,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 		return false
 	elif active_state == "WALL_RUN":
 		if (float(timers.get("jump", 0.0)) > 0.0):
-			_k_add_velocity(frame, P_wall_jump_lateral, "wall_normal", "", true)
+			_k_add_velocity(frame, P_wall_jump_lateral, "wall_normal", "", true, false)
 			body.velocity.y = P_wall_jump_up
 			timers["wall_jump_grace"] = 0.0
 			timers["jump_buffer"] = 0.0
@@ -361,6 +362,9 @@ func _resolve_space(space: String, frame: InputFrame) -> Vector3:
 			return frame.wish_dir
 		"forward":
 			return -body.transform.basis.z
+		"aim":
+			var aim := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch) * Vector3.FORWARD
+			return aim.normalized()
 		"wall_tangent":
 			if wall_normal.length_squared() < 0.001:
 				return Vector3.ZERO
@@ -415,7 +419,7 @@ func _wall_still_near() -> bool:
 		return absf(normal.y) < 0.3
 	return false
 
-func _k_add_velocity(frame: InputFrame, mag: float, space: String, guard_not_in: String, replace: bool) -> void:
+func _k_add_velocity(frame: InputFrame, mag: float, space: String, guard_not_in: String, replace: bool, include_y: bool) -> void:
 	if guard_not_in != "" and active_state == guard_not_in:
 		return
 	if space == "velocity":
@@ -430,9 +434,13 @@ func _k_add_velocity(frame: InputFrame, mag: float, space: String, guard_not_in:
 	if replace:
 		body.velocity.x = v.x
 		body.velocity.z = v.z
+		if include_y:
+			body.velocity.y = v.y
 	else:
 		body.velocity.x += v.x
 		body.velocity.z += v.z
+		if include_y:
+			body.velocity.y += v.y
 
 func _k_accelerate_toward(frame: InputFrame, dt: float, space: String, top_speed: float, rate: float) -> void:
 	if space == "wall_tangent":

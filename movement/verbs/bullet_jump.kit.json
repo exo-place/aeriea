@@ -1,10 +1,10 @@
 {
   "$patch": "aeriea-movement-verb/1",
-  "comment": "Bullet jump (cf. Warframe): from a CROUCH or SLIDE, a directional burst that launches the player forward (along aim/look = the `forward` space) AND up. Triggered by the SAME `jump` input (buffered) while in a slide or crouch — exactly the Warframe idiom. Priority 95 supersedes the base kit's plain slide-jump / crouch-jump (which fired on `jump` at priority 90 and 90 respectively); those base transitions have been removed so there is no unreachable duplicate and no (state, priority) collision. Pure DATA: composed onto base.kit.json via kit overlay; uses ONLY existing Condition/Effect primitives (input_buffered, timer, all; add_velocity(forward), set_velocity_y, set_collider_height, set_timer). A cooldown timer (bullet_jump_cd) is the guard, expressed entirely as data. NO ENGINE CODE CHANGE. See docs/decisions/movement-substrate.md §2 (composition), Slice 4.",
+  "comment": "Bullet jump (cf. Warframe): from a CROUCH or SLIDE, a directional burst that launches the player along the FULL LOOK/AIM direction (camera forward INCLUDING pitch). Look up → launch up, look down → dive, level look → forward arc. Triggered by the SAME `jump` input (buffered) while in a slide or crouch — exactly the Warframe idiom. Priority 95 supersedes the base kit's plain slide-jump / crouch-jump (which the base removed so there is no unreachable duplicate and no (state, priority) collision). DATA: composed onto base.kit.json via kit overlay. The launch is a single along-aim impulse (`add_velocity` space `aim`, include_y) so its horizontal AND vertical both track the look vector; a small guaranteed `bullet_jump_base_up` (set FIRST via set_velocity_y, before the aim impulse adds to vy) keeps a level-aim bullet jump arcing UPWARD (usable as a traversal launch) while still letting a downward look produce NEGATIVE vy (dive). The only engine change this verb relies on is the new `aim` space leaf (+ the include_y flag on add_velocity to carry the vertical component); conditions/effects-ordering/tuning are all data. A cooldown timer (bullet_jump_cd) is the guard, expressed entirely as data. See docs/decisions/movement-substrate.md §2 (composition), Slice 4.",
 
   "params": {
-    "bullet_jump_forward_boost": 12.0,
-    "bullet_jump_up": 6.0,
+    "bullet_jump_impulse": 13.0,
+    "bullet_jump_base_up": 4.5,
     "bullet_jump_cooldown": 0.6,
     "bullet_jump_buffer_time": 0.15
   },
@@ -12,7 +12,7 @@
   "add_transitions": {
     "SLIDE": [
       {
-        "comment": "Bullet jump out of a slide: jump input while in SLIDE. Priority 95 — the base kit's plain slide-jump (priority 90) has been removed so this is the sole jump-from-slide handler, with no race or unreachable duplicate. Stands up (with headroom), bursts forward+up along aim, arms the cooldown.",
+        "comment": "Bullet jump out of a slide: jump input while in SLIDE. Priority 95. Stands up (with headroom), sets the guaranteed base-up FIRST, then bursts along the full aim vector (forward+vertical), arms the cooldown. set_velocity_y(base_up) then add_velocity(aim, include_y) => vy = base_up + aim.y*impulse, so level→up arc, up→strong up, down→dive (negative vy).",
         "when": { "op": "all", "of": [
           { "op": "input_buffered", "action": "jump" },
           { "op": "timer", "name": "bullet_jump_cd", "cmp": "le", "value": 0 }
@@ -21,8 +21,8 @@
         "priority": 95,
         "do": [
           { "do": "set_collider_height", "value": "stand_height", "require_headroom": true },
-          { "do": "set_velocity_y", "value": "bullet_jump_up" },
-          { "do": "add_velocity", "space": "forward", "vector": "bullet_jump_forward_boost" },
+          { "do": "set_velocity_y", "value": "bullet_jump_base_up" },
+          { "do": "add_velocity", "space": "aim", "vector": "bullet_jump_impulse", "include_y": true },
           { "do": "set_timer", "name": "bullet_jump_cd", "value": "bullet_jump_cooldown" },
           { "do": "set_timer", "name": "jump_buffer", "value": 0 },
           { "do": "set_timer", "name": "jump_hold", "value": 0 },
@@ -32,7 +32,7 @@
     ],
     "CROUCH": [
       {
-        "comment": "Bullet jump out of a crouch: jump input while in CROUCH. Priority 95 — the base kit's plain crouch-jump (priority 90) has been removed so this is the sole jump-from-crouch handler, with no race or unreachable duplicate. Stands up, bursts forward+up along aim, arms the cooldown.",
+        "comment": "Bullet jump out of a crouch: jump input while in CROUCH. Priority 95. Stands up, sets the guaranteed base-up FIRST, then bursts along the full aim vector (forward+vertical), arms the cooldown. Same along-aim launch as the slide variant.",
         "when": { "op": "all", "of": [
           { "op": "input_buffered", "action": "jump" },
           { "op": "timer", "name": "bullet_jump_cd", "cmp": "le", "value": 0 }
@@ -41,8 +41,8 @@
         "priority": 95,
         "do": [
           { "do": "set_collider_height", "value": "stand_height", "require_headroom": true },
-          { "do": "set_velocity_y", "value": "bullet_jump_up" },
-          { "do": "add_velocity", "space": "forward", "vector": "bullet_jump_forward_boost" },
+          { "do": "set_velocity_y", "value": "bullet_jump_base_up" },
+          { "do": "add_velocity", "space": "aim", "vector": "bullet_jump_impulse", "include_y": true },
           { "do": "set_timer", "name": "bullet_jump_cd", "value": "bullet_jump_cooldown" },
           { "do": "set_timer", "name": "jump_buffer", "value": 0 },
           { "do": "set_timer", "name": "jump_hold", "value": 0 }

@@ -95,6 +95,7 @@ func _run_suite() -> void:
 	await _test_high_speed_crouch_is_slide()
 	await _test_slide_is_steerable_and_cancelable()
 	await _test_bullet_jump_forward_up_burst()
+	await _test_bullet_jump_tracks_aim_pitch()
 	await _test_slope_holds_position_without_crouch()
 	await _test_crouchwalk_no_vertical_jitter()
 	await _test_slide_speed_does_not_compound()
@@ -642,6 +643,58 @@ func _test_bullet_jump_forward_up_burst() -> void:
 			"bj_vy=%.3f, bj_fwd=%.2f vs jump_fwd=%.2f (burst_delta=%+.2f), state=%d (no burst expected; AIR=%d)" % [
 				bj_vy, bj_fwd_speed, jump_fwd_speed, bj_fwd_speed - jump_fwd_speed, bj_state, S_AIR]
 		)
+
+
+## Directionality: a bullet jump launches along the FULL LOOK/AIM vector (the new
+## `aim` space = yaw+pitch). Look UP → greater vy; LEVEL → a sensible upward arc;
+## DOWN → lower / negative vy (dive). Proves the burst tracks camera pitch. Data
+## paths only (interpreter/compiled); the imperative oracle has no aim verb.
+func _test_bullet_jump_tracks_aim_pitch() -> void:
+	if _target_label == "imperative":
+		return
+	var vy_up := await _bullet_jump_vy_at_pitch(0.7)     # ~40 deg up
+	var vy_level := await _bullet_jump_vy_at_pitch(0.0)   # level
+	var vy_down := await _bullet_jump_vy_at_pitch(-0.7)   # ~40 deg down
+
+	# vy_down is read after the physics commit: a downward dive launched from the
+	# ground immediately re-contacts the floor, so move_and_slide clamps its
+	# negative vy to 0 (it cannot gain height). Hence the floor-faithful assertion
+	# is vy_down <= 0 (no upward gain), strictly below the level arc — together with
+	# up > level this proves the burst tracks camera pitch. (The raw launch vy at
+	# down-pitch is negative, ~base_up + sin(pitch)*impulse; the golden-trace
+	# pitched case verifies the airborne trajectory bit-for-bit on both paths.)
+	_assert(
+		"bullet jump vy tracks aim pitch: up > level, level arcs up (>0), down does not gain height (<=0 and < level)",
+		vy_up > vy_level and vy_level > vy_down and vy_level > 0.0 and vy_down <= 0.0,
+		"vy_up=%.3f, vy_level=%.3f, vy_down=%.3f (expect up>level>down, level>0, down<=0)" % [
+			vy_up, vy_level, vy_down]
+	)
+
+
+## Drive one bullet jump from a slide while looking at `pitch_rad` (radians, +up),
+## return the post-burst velocity.y. Pitch is fed to the sim via the host each
+## physics frame (host: interpreter.pitch = _pitch), exactly as mouse-look does.
+func _bullet_jump_vy_at_pitch(pitch_rad: float) -> float:
+	var ctx := await _spawn_level()
+	var p: CharacterBody3D = ctx["player"]
+	await _settle_on_floor(p)
+	p._pitch = pitch_rad
+	_send_key(KEY_W, true)
+	_send_key(KEY_SHIFT, true)
+	await _step_physics(p, 30)
+	_send_key(KEY_CTRL, true)            # crouch → SLIDE at speed
+	await _step_physics(p, 4)
+	p._pitch = pitch_rad                 # ensure pitch held through the launch tick
+	_send_key(KEY_SPACE, true)
+	await _step_physics(p, 1)            # the SLIDE→AIR bullet-jump transition tick
+	var vy := p.velocity.y
+	_send_key(KEY_SPACE, false)
+	_send_key(KEY_CTRL, false)
+	_send_key(KEY_W, false)
+	_send_key(KEY_SHIFT, false)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+	return vy
 
 
 ## (d) Standing on the slope with NO crouch input → horizontal position is stable

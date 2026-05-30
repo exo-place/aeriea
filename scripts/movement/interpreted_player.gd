@@ -199,6 +199,12 @@ func _physics_process(delta: float) -> void:
 	if interpreter == null:
 		return
 	interpreter.yaw = _yaw
+	# Feed the camera pitch into the sim too, so verbs naming the `aim`/look space
+	# launch along the FULL 3D look direction (Warframe bullet jump: look up → up,
+	# down → dive, level → forward arc). Only the `aim` space reads it; all other
+	# motion is yaw-only, so this changes nothing for the rest of the kit. Mirrors
+	# the existing yaw plumbing (mouse-look already maintains _pitch in _apply_look).
+	interpreter.pitch = _pitch
 	interpreter.step(delta)
 
 func _input(event: InputEvent) -> void:

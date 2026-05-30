@@ -99,6 +99,7 @@ func _emit_fields() -> void:
 	_line("var wall_side: float = 0.0")
 	_line("var _held_last: Dictionary = {}")
 	_line("var yaw: float = 0.0")
+	_line("var pitch: float = 0.0")
 	_line("")
 
 func _emit_consts() -> void:
@@ -417,9 +418,10 @@ func _emit_effect(e: Dictionary, indent: String) -> void:
 		"add_timer":
 			_emit_add_timer(e, indent)
 		"add_velocity":
-			_line("%s_k_add_velocity(frame, %s, %s, %s, %s)" % [
+			_line("%s_k_add_velocity(frame, %s, %s, %s, %s, %s)" % [
 				indent, _lower_value(e.get("vector")), _quote(str(e.get("space", "world"))),
-				_quote(str(e.get("guard_not_in", ""))), str(bool(e.get("replace", false))).to_lower()])
+				_quote(str(e.get("guard_not_in", ""))), str(bool(e.get("replace", false))).to_lower(),
+				str(bool(e.get("include_y", false))).to_lower()])
 		"accelerate_toward":
 			_line("%s_k_accelerate_toward(frame, dt, %s, %s, %s)" % [
 				indent, _quote(str(e.get("space", "wish"))),
@@ -517,6 +519,9 @@ func _resolve_space(space: String, frame: InputFrame) -> Vector3:
 			return frame.wish_dir
 		"forward":
 			return -body.transform.basis.z
+		"aim":
+			var aim := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch) * Vector3.FORWARD
+			return aim.normalized()
 		"wall_tangent":
 			if wall_normal.length_squared() < 0.001:
 				return Vector3.ZERO
@@ -571,7 +576,7 @@ func _wall_still_near() -> bool:
 		return absf(normal.y) < 0.3
 	return false
 
-func _k_add_velocity(frame: InputFrame, mag: float, space: String, guard_not_in: String, replace: bool) -> void:
+func _k_add_velocity(frame: InputFrame, mag: float, space: String, guard_not_in: String, replace: bool, include_y: bool) -> void:
 	if guard_not_in != "" and active_state == guard_not_in:
 		return
 	if space == "velocity":
@@ -586,9 +591,13 @@ func _k_add_velocity(frame: InputFrame, mag: float, space: String, guard_not_in:
 	if replace:
 		body.velocity.x = v.x
 		body.velocity.z = v.z
+		if include_y:
+			body.velocity.y = v.y
 	else:
 		body.velocity.x += v.x
 		body.velocity.z += v.z
+		if include_y:
+			body.velocity.y += v.y
 
 func _k_accelerate_toward(frame: InputFrame, dt: float, space: String, top_speed: float, rate: float) -> void:
 	if space == "wall_tangent":

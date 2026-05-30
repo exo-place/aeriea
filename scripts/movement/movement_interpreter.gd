@@ -63,6 +63,15 @@ var _held_last: Dictionary = {}   # action -> bool (held at end of previous tick
 ## host can override for tests. Mouse-look stays separate (yaw only, sampled once).
 var yaw: float = 0.0
 
+## Source of pitch for the `aim`/look space (radians, +up). Fed by the host from
+## its camera-pivot pitch each tick (parallel to `yaw`). Mouse-look already drives
+## the camera transform; this wires that same look state into the sim so a verb can
+## launch along the FULL 3D look direction (Warframe bullet jump). `yaw` alone is
+## horizontal-only (`forward` space); `aim` = yaw+pitch. Render-only for every other
+## effect — only verbs that name the `aim` space read it, so the rest of the sim is
+## unchanged. Sampled once per tick (deterministic), like yaw.
+var pitch: float = 0.0
+
 # ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
@@ -358,15 +367,24 @@ func _eff_add_velocity(e: Dictionary, frame: InputFrame) -> void:
 		body.velocity.z += dir.z * mag
 		return
 	var v := _resolve_space(space, frame) * mag
+	# include_y: also apply the vertical component of the (3D) space vector. Default
+	# false → horizontal-only, exactly as before (every existing add_velocity is
+	# 2D and unaffected). The `aim`/look space is 3D, so bullet jump launches along
+	# the full look vector (up/down/level) by setting include_y on its aim impulse.
+	var include_y := bool(e.get("include_y", false))
 	if bool(e.get("replace", false)):
 		# Replace horizontal velocity with space*mag (wall-jump lateral: the
 		# imperative controller sets velocity outright, it does not add). y is set
-		# separately via set_velocity_y.
+		# separately via set_velocity_y (unless include_y is set).
 		body.velocity.x = v.x
 		body.velocity.z = v.z
+		if include_y:
+			body.velocity.y = v.y
 	else:
 		body.velocity.x += v.x
 		body.velocity.z += v.z
+		if include_y:
+			body.velocity.y += v.y
 
 func _eff_accelerate_toward(e: Dictionary, frame: InputFrame, dt: float) -> void:
 	# Two modes:
@@ -612,6 +630,14 @@ func _resolve_space(space: String, frame: InputFrame) -> Vector3:
 			return frame.wish_dir
 		"forward":
 			return -body.transform.basis.z
+		"aim":
+			# Full 3D look/aim direction: yaw + pitch (the camera forward), normalized.
+			# `forward` is yaw-only (the body never pitches); `aim` includes the
+			# camera-pivot pitch fed by the host. Looking up → +Y, down → -Y, level →
+			# horizontal. This is the Warframe bullet-jump launch axis. Computed from
+			# the sampled yaw/pitch so it is deterministic (no node read at resolve time).
+			var aim := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch) * Vector3.FORWARD
+			return aim.normalized()
 		"wall_tangent":
 			# Along the wall = wall_normal × UP, oriented toward where the camera
 			# (yaw) mostly faces (PlayerController._process_wall_run).

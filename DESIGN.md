@@ -110,8 +110,11 @@ contributes is in scope; anything that doesn't, defer.
   exhaust it.
 - **Rhythms** — rituals and cycles you can fall into. Daily, seasonal,
   ad-hoc.
-- **Habitability** — you can make a home in it. Persistent personal
-  space, accumulated stuff, your spot.
+- **Habitability** — you can make a home in it, and *authoring* that
+  home is a first-class pursuit (see *Authoring your environment*).
+  Persistent personal space you decorate and build, accumulated stuff,
+  a soundscape you curate — your spot, looking and sounding the way you
+  made it.
 
 ## What it is *not*
 
@@ -181,9 +184,15 @@ reasons don't have to be re-derived later.
   axis*; the actual axis is *existence not frequency*.
 - **Resonite/NeosVR-style in-world programmability as a major
   feature** — Resonite already occupies that niche, and its perf is
-  garbage and it lacks a real cosmetic-shopping economy. aeriea
-  includes player-authored content / decoration as a low-priority
-  nice-to-have at the Warframe-decoration tier, no more.
+  garbage and it lacks a real cosmetic-shopping economy. aeriea does
+  *not* compete on arbitrary in-world programming / scripting; turning
+  the game into a programmable metaverse stays out of scope. (Note:
+  this is the *programmability* niche specifically. Space and
+  soundscape authoring — decorating, building, and curating your spot
+  — is a separate matter and is now a committed first-class power
+  fantasy with real depth; see *Variety of power fantasies* and
+  *Authoring your environment* below. What's out of scope is
+  arbitrary in-engine scripting, not the decoration/curation pursuit.)
 - **VRChat's custom-avatar workflow** — requires Unity, which is
   insane. aeriea will not make players open Unity to bring an avatar
   in. Resonite/NeosVR-style in-engine creation is the better
@@ -263,8 +272,24 @@ Currently committed (in priority order):
    being able to see and re-enter your own arc, not just one
    continuous line. Rare and distinct — most games only give you
    one save-slot's worth of "you."
+6. **Authoring your environment — your space, your sound.** The
+   counterpart to cosmetics, at full parity. Cosmetics is curating how
+   *you* look; this is curating the *space you inhabit* — how your spot
+   looks and how it sounds. One fantasy covering both the visual and
+   the sonic: decorating and building your personal space (furniture,
+   decor, layout, lighting, the arrangement of a place that's yours)
+   *and* curating its soundscape (Somachord-style playlist / jukebox
+   music curation, ambient bed, the sound of your spot). The verbs are
+   the same ones the design already commits to for cosmetics —
+   browsing, acquiring, arranging, curating, expressing — pointed at
+   surroundings instead of body. And like cosmetics it carries a real
+   economy: acquiring furniture / decor / music tracks, arranging a
+   space, curating a soundscape are *real activities* and an investment
+   vertical, not an afterthought. References: Warframe (Somachord music
+   curation; orbiter / dojo decoration), Palia house-building, Animal
+   Crossing interiors, VRChat world / space personalization.
 
-**The list grows.** Five is the current foundation, not the cap.
+**The list grows.** Six is the current foundation, not the cap.
 Further power fantasies will be committed as concrete ones are
 identified. The doc's job is to record them as they land, not to
 freeze the catalogue.
@@ -753,7 +778,9 @@ What each reference contributes.
   investment, persistent character, "yes-and" sampler structure,
   hub-as-place, KIM as the structural pattern for character depth,
   Dormizone/Cetus/1999 as the "modern is the aesthetic of inhabitance"
-  evidence, multi-radial-menus (gear wheel / emote wheel).
+  evidence, multi-radial-menus (gear wheel / emote wheel), Somachord
+  music curation and orbiter / dojo decoration (the environment-
+  authoring power fantasy).
 - **Trials in Tainted Space**, **Flexible Survival** — deep character
   customization and transformation; body as customization surface;
   identity fluidity; rich individual-NPC content; NSFW-first posture
@@ -790,28 +817,62 @@ What each reference contributes.
   shape to compare against.
 - **VRChat** — live expressive system (toggles/sliders/items),
   mid-session avatar/form swapping, embodiment in non-human forms,
-  pure-social-presence-as-activity, mirrors as foundational. The
+  pure-social-presence-as-activity, mirrors as foundational, world /
+  space personalization (the environment-authoring power fantasy). The
   *content* aeriea ships at quality; the *workflow* (Unity-required
   custom avatars) is rejected.
 - **Resonite / NeosVR** — in-world programmability reference, in-
   engine creation workflow (the *good* answer to VRChat's
   Unity-required avatars). Perf and cosmetic-economy gaps are real —
-  aeriea fills those. The project doesn't compete on in-world
-  programmability; included only as low-priority nice-to-have (see
-  below).
+  aeriea fills those. The project doesn't compete on arbitrary
+  in-world *programmability* — that stays out of scope (see
+  *Nice-to-haves*); space / soundscape *authoring* is a separate,
+  committed power fantasy (see *Authoring your environment*).
 - **`playmate`** — most directly relevant prior art in the user's
   ecosystem; bring back in as cross-reference once aeriea's
   scaffolding stabilizes.
 
+### Authoring your environment (space + soundscape)
+
+A committed first-class power fantasy at full parity with cosmetics
+(see *Variety of power fantasies*). Where cosmetics curates how *you*
+look, this curates the *space you inhabit* — how your spot looks and
+how it sounds — using the same verbs (browsing, acquiring, arranging,
+curating, expressing).
+
+- **Space / decoration** — decorating and building your personal
+  space: furniture, decor, layout, lighting, the arrangement of a
+  place that's yours. Warframe orbiter / dojo decoration, Palia
+  house-building, Animal Crossing interiors, VRChat world / space
+  personalization are the references. Real depth, not a token gesture.
+- **Soundscape / music curation** — curating the sound of your spot:
+  Somachord-style playlist / jukebox curation, ambient beds, the
+  music that plays where you are. This is the player-facing
+  counterpart to the *Environmental ambience* rendering system (system
+  19) — soundscape authoring is a thing the player *does*, not only a
+  thing the engine renders.
+- **A real economy** — acquiring furniture / decor / music tracks,
+  arranging a space, curating a soundscape are real activities and an
+  investment vertical, exactly as the cosmetic economy is. Content-side
+  change (Warframe-cadence drops) applies here too: new furniture, new
+  decor, new tracks to acquire and arrange.
+- **Concrete persistence accumulator** — this fantasy partly answers
+  the open *Persistence model* question: your home, your accumulated
+  stuff, and your curated soundscape are things that *accumulate*
+  without gear/stats/levels. (It doesn't resolve that question on its
+  own; it supplies one concrete accumulator.)
+
 ## Nice-to-haves (low priority)
 
-### Player-authored content / in-world creation
+### In-world programmability (out of scope as a major feature)
 
-ChatMUD-style player programming and Warframe-style dojo decoration
-both gesture at this. Useful but not core. Resonite / NeosVR already
-occupy the in-world-programmability niche. Worth including at the
-Warframe-decoration tier — limited, present, better-than-nothing,
-not the spine.
+ChatMUD-style player programming and Resonite/NeosVR-style in-world
+scripting gesture at a programmable-metaverse niche aeriea does *not*
+pursue. Resonite / NeosVR already occupy it; aeriea doesn't compete on
+arbitrary in-world programming. (This is distinct from space /
+soundscape authoring, which *was* promoted to a committed power
+fantasy — see *Authoring your environment* above. What stays out of
+scope here is arbitrary scripting, not decoration or curation.)
 
 ## Persona research and the activity surface
 
@@ -941,7 +1002,8 @@ design progresses.
 - Mall / shopping district
 - Pet store / dog park
 - Garden / community garden — slow caregiving
-- Your home — decoration, hosting, parallel play, wind-down
+- Your home — decoration / building, soundscape curation, hosting,
+  parallel play, wind-down (see *Authoring your environment*)
 - Friends' homes / NPC homes — visiting, hangout
 - Festivals / markets / public events — ephemeral content
 - Museums / galleries
@@ -955,6 +1017,9 @@ design progresses.
 - Walking your pet
 - Reading at a cafe (the sacred-thing mode)
 - Browsing for its own sake
+- Decorating / building your space (furniture, decor, layout, lighting)
+- Curating your soundscape (Somachord-style playlist / jukebox music
+  curation, ambient beds)
 - Group hangouts at someone's place
 - Performing (karaoke, open mic, dance)
 - Attending a concert / festival
@@ -1020,13 +1085,16 @@ scaffold under.
   *Setting / fiction* section above.
 - ~~**Adult-content posture**~~ — **decided: NSFW-first with SFW
   toggle.** See *NSFW-first with SFW toggle* under Cosmetic depth.
-- **Further power fantasies beyond the five committed** — the design
+- **Further power fantasies beyond the six committed** — the design
   expects the list to grow as more concrete fantasies are identified.
-  Five is the current foundation, not the cap.
+  Six is the current foundation, not the cap.
 - **Content authoring strategy** — procedural? AI-assisted?
   Hand-authored? Community? Hybrid? (Likely all four; weights TBD.)
 - **Persistence model** for character investment — what *accumulates*
-  if not gear/stats/levels?
+  if not gear/stats/levels? (Partly answered by *Authoring your
+  environment*: your home, your accumulated stuff, your curated
+  soundscape are concrete accumulators. Not fully resolved — that
+  fantasy supplies one accumulator, not the whole answer.)
 - **Sources of change priority** — which sources the project leans on
   hardest.
 - **Single seed + action log in multiplayer** — the determinism

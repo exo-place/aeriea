@@ -192,7 +192,7 @@ var _wall_run_side: float = 0.0  # +1 = right wall, -1 = left wall
 ## Whether player is currently holding jump (for floaty apex)
 var _jump_held: bool = false
 
-## Whether mouse is currently captured
+## Whether mouse is currently captured — synced from Input.mouse_mode.
 var _mouse_captured: bool = true
 
 ## Vault state
@@ -238,20 +238,13 @@ func _ready() -> void:
 # ---------------------------------------------------------------------------
 
 func _input(event: InputEvent) -> void:
-	# Toggle mouse capture
-	if event.is_action_pressed("ui_cancel"):
-		if _mouse_captured:
-			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-			_mouse_captured = false
-		else:
-			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-			_mouse_captured = true
-		return
+	# Sync captured flag from actual mouse mode (pause menu owns this state).
+	_mouse_captured = (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED)
 
+	# Mouse look — only while captured.
 	if not _mouse_captured:
 		return
 
-	# Mouse look
 	if event is InputEventMouseMotion:
 		_yaw -= event.relative.x * mouse_sensitivity
 		_pitch -= event.relative.y * mouse_sensitivity

@@ -1,0 +1,54 @@
+[gd_scene load_steps=2 format=3 uid="uid://controls_overlay_v1"]
+
+[ext_resource type="Script" path="res://scripts/ui/controls_overlay.gd" id="1_script"]
+
+[node name="ControlsOverlay" type="CanvasLayer"]
+script = ExtResource("1_script")
+
+[node name="HintLabel" type="Label" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -32.0
+offset_right = 300.0
+offset_bottom = 0.0
+theme_override_colors/font_color = Color(1, 1, 1, 0.8)
+theme_override_font_sizes/font_size = 14
+text = "Press F1 for controls"
+
+[node name="OverlayPanel" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 1
+anchor_right = 0.0
+anchor_bottom = 0.0
+offset_right = 360.0
+offset_bottom = 400.0
+visible = false
+
+[node name="MarginContainer" type="MarginContainer" parent="OverlayPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="VBox" type="VBoxContainer" parent="OverlayPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Title" type="Label" parent="OverlayPanel/MarginContainer/VBox"]
+layout_mode = 2
+text = "Controls"
+theme_override_font_sizes/font_size = 16
+horizontal_alignment = 1
+
+[node name="Separator" type="HSeparator" parent="OverlayPanel/MarginContainer/VBox"]
+layout_mode = 2
+
+[node name="OverlayRows" type="VBoxContainer" parent="OverlayPanel/MarginContainer/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 3

@@ -1,0 +1,59 @@
+[gd_scene load_steps=3 format=3 uid="uid://pause_menu_v1"]
+
+[ext_resource type="Script" path="res://scripts/ui/pause_menu.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://scenes/ui/controls_menu.tscn" id="2_controls_menu"]
+
+[node name="PauseMenu" type="CanvasLayer"]
+script = ExtResource("1_script")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.6)
+
+[node name="PausePanel" type="CenterContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Panel" type="PanelContainer" parent="PausePanel"]
+custom_minimum_size = Vector2(320, 280)
+
+[node name="VBox" type="VBoxContainer" parent="PausePanel/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="PausePanel/Panel/VBox"]
+layout_mode = 2
+text = "Paused"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 28
+
+[node name="Separator" type="HSeparator" parent="PausePanel/Panel/VBox"]
+layout_mode = 2
+
+[node name="ResumeButton" type="Button" parent="PausePanel/Panel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(0, 44)
+text = "Resume"
+
+[node name="ControlsButton" type="Button" parent="PausePanel/Panel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(0, 44)
+text = "Controls / Rebind"
+
+[node name="QuitButton" type="Button" parent="PausePanel/Panel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(0, 44)
+text = "Quit to Desktop"
+
+[node name="ControlsMenuScene" parent="." instance=ExtResource("2_controls_menu")]
+unique_name_in_owner = true
+visible = false

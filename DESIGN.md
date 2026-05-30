@@ -677,6 +677,21 @@ parts that VRChat doesn't deliver, which is what we're filling.
 Dropping target hardware support is unacceptable; Quest standalone
 stays in scope through every phase.
 
+**World scale: 1 Godot unit = 1 meter, avatar at real human scale.**
+Because VR is first-class, the world renders in *real meters* — a
+1.75 m doorway must be 1.75 m to the headset, or presence breaks. So
+the avatar is built at real human dimensions and 1 unit = 1 meter
+everywhere; gravity is real (9.8 m/s²). The heightened movement
+(big jumps, wall-runs, bullet-jumps) is framed **diegetically** — the
+avatar is a superhuman/augmented body doing what *that* body can do,
+not an arcade exaggeration of a normal human. The numbers stay in real
+units; only the *capability* is above baseline. The full convention,
+the reference avatar dimensions, and the movement-magnitude table
+(real value / human baseline / multiplier) live in
+`docs/decisions/units-and-scale.md`. The in-fiction grounding for *why*
+the avatar is superhuman is an open lore question, deferred to the
+power-fantasy/lore design — not decided here.
+
 **Diegetic UI** — menus live on the body or in the world, not as
 screen overlays. Wrist menus, palm panels, in-world objects. Works
 for both VR (proprioceptive — your hands know where your wrists are)

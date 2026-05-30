@@ -183,16 +183,22 @@ reasons don't have to be re-derived later.
   as a tempo for this game. Animal Crossing tempo even is the *wrong
   axis*; the actual axis is *existence not frequency*.
 - **Resonite/NeosVR-style in-world programmability as a major
-  feature** — Resonite already occupies that niche, and its perf is
-  garbage and it lacks a real cosmetic-shopping economy. aeriea does
-  *not* compete on arbitrary in-world programming / scripting; turning
-  the game into a programmable metaverse stays out of scope. (Note:
-  this is the *programmability* niche specifically. Space and
-  soundscape authoring — decorating, building, and curating your spot
-  — is a separate matter and is now a committed first-class power
-  fantasy with real depth; see *Variety of power fantasies* and
-  *Authoring your environment* below. What's out of scope is
-  arbitrary in-engine scripting, not the decoration/curation pursuit.)
+  feature** — reframed rather than flatly rejected. Resonite's
+  ProtoFlux is the anchor example of *spatially diegetic but
+  semantically exposed* compositional power: manipulated in-world with
+  your hands, but still a floating logic / node graph — a dev tool
+  rendered in 3D, in the world but not in the fiction. That exposed
+  graph is the immersion break aeriea refuses; what aeriea aims at is
+  full-diegetic compositional depth (the *Noita* end of the axis).
+  Resonite's perf is also garbage and it lacks a real cosmetic-shopping
+  economy. The precise stance lives in *Compositional power and the
+  diegetic-integration axis*. (Note: this concerns exposed
+  *programmability* surfaces specifically. Space and soundscape
+  authoring — decorating, building, and curating your spot — is a
+  separate matter and is a committed first-class power fantasy with
+  real depth; see *Variety of power fantasies* and *Authoring your
+  environment* below. What aeriea refuses is exposed scripting
+  surfaces, not the decoration/curation pursuit.)
 - **VRChat's custom-avatar workflow** — requires Unity, which is
   insane. aeriea will not make players open Unity to bring an avatar
   in. Resonite/NeosVR-style in-engine creation is the better
@@ -821,13 +827,16 @@ What each reference contributes.
   space personalization (the environment-authoring power fantasy). The
   *content* aeriea ships at quality; the *workflow* (Unity-required
   custom avatars) is rejected.
-- **Resonite / NeosVR** — in-world programmability reference, in-
+- **Resonite / NeosVR** — in-world compositional-power reference, in-
   engine creation workflow (the *good* answer to VRChat's
-  Unity-required avatars). Perf and cosmetic-economy gaps are real —
-  aeriea fills those. The project doesn't compete on arbitrary
-  in-world *programmability* — that stays out of scope (see
-  *Nice-to-haves*); space / soundscape *authoring* is a separate,
-  committed power fantasy (see *Authoring your environment*).
+  Unity-required avatars). ProtoFlux is the anchor for *spatially
+  diegetic but semantically exposed* power — in the world but not in
+  the fiction — which is the immersion break aeriea refuses, aiming
+  instead for full-diegetic compositional depth (see *Compositional
+  power and the diegetic-integration axis*). Perf and cosmetic-economy
+  gaps are real — aeriea fills those. Space / soundscape *authoring*
+  is a separate, committed power fantasy (see *Authoring your
+  environment*).
 - **`playmate`** — most directly relevant prior art in the user's
   ecosystem; bring back in as cross-reference once aeriea's
   scaffolding stabilizes.
@@ -862,17 +871,53 @@ curating, expressing).
   without gear/stats/levels. (It doesn't resolve that question on its
   own; it supplies one concrete accumulator.)
 
-## Nice-to-haves (low priority)
+## Compositional power and immersion
 
-### In-world programmability (out of scope as a major feature)
+### Compositional power and the diegetic-integration axis
 
-ChatMUD-style player programming and Resonite/NeosVR-style in-world
-scripting gesture at a programmable-metaverse niche aeriea does *not*
-pursue. Resonite / NeosVR already occupy it; aeriea doesn't compete on
-arbitrary in-world programming. (This is distinct from space /
-soundscape authoring, which *was* promoted to a committed power
-fantasy — see *Authoring your environment* above. What stays out of
-scope here is arbitrary scripting, not decoration or curation.)
+"Programmability" was too blunt a word for what's actually in question
+here. The real axis is **degree of diegetic integration** — how
+integrated into the *fiction* a system of compositional / systemic
+power is. It's a spectrum, not a binary. From least to most integrated:
+
+- **Out-of-band** — a separate editor / console outside the world.
+  Pure immersion break.
+- **Spatially diegetic but semantically exposed** — Resonite's
+  ProtoFlux: you manipulate it in-world with your hands, but it's a
+  floating logic / node graph, a dev tool rendered in 3D. *In the
+  world, not in the fiction.* Resonite stopped here because full
+  diegetic integration wasn't one of their goals.
+- **In-fiction composition** — Noita's wand-building: the "program" is
+  expressed as world-objects (spells, wands) and hidden inside the
+  play; you never feel like you're writing code. This is also exactly
+  the project's own "simulation underneath, rendering on top" and
+  "small composable verbs" commitments applied to systemic power.
+- **Full diegeticism** — compositional / systemic power expressed
+  *entirely* through in-fiction objects and actions, with zero exposed
+  graph / editor / language. Largely unsolved in the medium.
+
+The 100% immersion north star applied to this question: an exposed
+logic graph is an immersion break *by definition*. So the stance is
+**not** "programmability is out of scope." It is: **non-diegetic
+programmability — out-of-band tooling, or exposed logic graphs à la
+ProtoFlux — is the immersion break we refuse; full-diegetic
+compositional depth is the frontier we aim at.** Compositional /
+systemic emergence is welcome and on-thesis; the constraint is that it
+must climb as far up the diegetic-integration axis as it can.
+
+This preserves the still-valid refusal the earlier "out of scope"
+framing was reaching for: aeriea does *not* become a programmable
+metaverse or a general-purpose authoring environment, because that
+means exposing out-of-band tooling and semantically-exposed logic
+graphs — the bottom of the axis. (This is distinct from space /
+soundscape authoring, a committed power fantasy — see *Authoring your
+environment* above. The decoration / curation pursuit stays in; what
+the axis rules against is exposed scripting surfaces, not the act of
+arranging your space.)
+
+How far full diegeticism is actually reachable, and for which systems,
+is a genuine open question — an aspiration aligned with the thesis,
+not a solved build commitment (see *Open questions*).
 
 ## Persona research and the activity surface
 
@@ -1104,6 +1149,13 @@ scaffold under.
   needs its own design pass on loop, friction, dopamine source,
   content authoring, returnability. The list itself will grow/shrink
   as design progresses.
+- **How far full diegeticism is reachable** — for compositional /
+  systemic power, nobody has fully solved expressing it *entirely*
+  through in-fiction objects and actions (zero exposed graph / editor
+  / language). How far up the diegetic-integration axis aeriea can
+  climb, and for which systems, is an open aspiration aligned with the
+  thesis — not a solved build commitment. See *Compositional power and
+  the diegetic-integration axis*.
 
 ## Systems that compose 100% immersion
 

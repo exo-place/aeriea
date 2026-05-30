@@ -124,8 +124,22 @@ Currently committed (in priority order):
 1. **Movement** — parkour 2.0 fluency. Embodied, weighty, composable.
 2. **Cosmetics** — fashion-frame depth. Looking sick is endgame.
 3. **Rich worldbuilding / NPCs** — being-in-a-world-with-characters
-   that have presence and individual depth (TiTS-grade).
-4. *(open — see below)*
+   that have presence and individual depth (TiTS/KIM-grade).
+4. **Variety itself** (meta) — the *act of choosing which mode to
+   inhabit today* is its own power fantasy. Warframe's lesson is that
+   waking up and deciding "today I want to feel like X" with many real
+   options is distinctly satisfying. The variety isn't just a means to
+   per-mode power; it's its own pleasure.
+5. **Lived history** — your timeline-tree as accumulated trajectory.
+   Deterministic seeded simulation + branching (see *Architecture
+   commitments*) makes your past a first-class object you can inhabit,
+   explore, and branch from. Git-for-yourself; the empowerment of
+   being able to see and re-enter your own arc, not just one
+   continuous line. Rare and distinct — most games only give you
+   one save-slot's worth of "you."
+
+The list will grow as more concrete fantasies are committed, but
+these five are the foundation.
 
 ### Cosmetic depth / fanservice
 
@@ -557,9 +571,9 @@ authoring strategy, what makes it returnable rather than one-and-done.
   modern intimacy rather than sci-fi spectacle. Modern is the
   aesthetic of inhabitance; sci-fi/fantasy work harder for awe but
   worse for *being-there*.
-- **Fourth power fantasy** — movement, cosmetics, worldbuilding/NPCs
-  are committed; the fourth slot is open. The "what do you do" axis
-  that isn't combat/fetch/tradeskill/puzzle.
+- **Further power fantasies beyond the five committed** — the design
+  expects the list to grow as more concrete fantasies are identified.
+  Five is the current foundation, not the cap.
 - ~~**Adult-content posture**~~ — **decided: NSFW-first with SFW
   toggle.** All systems (body, transformation, relationships,
   intimacy, identity) are designed assuming NSFW is the default. NPCs

@@ -13,7 +13,15 @@ Parkour 2.0 movement is load-bearing per DESIGN.md (the per-second dopamine engi
 
 ## Movement abilities / extra movement (future design pass)
 
-Placeholder for additional movement verbs to compose with the existing slide/crouch/wall-run/vault set — e.g. dash / air-dash, double-jump, wall-climb, grapple/swing. To be designed (loop, momentum interaction, NSFW/SFW parity), not built yet.
+Placeholder for additional movement verbs to compose with the existing slide/crouch/wall-run/vault set. The following verbs are earmarked for a future data-driven / composable movement system design pass — not built yet, each needs its own loop/momentum interaction/NSFW–SFW parity pass:
+
+- **Bullet jump** — mid-air velocity burst (cf. Warframe)
+- **Air burst** — radial upward/outward push (cf. Warframe Zephyr)
+- **Charge** — forward dash with collision knockback (cf. Warframe Rhino)
+- **Wormhole** — area-denial teleport portal (cf. Warframe Nova)
+- **Teleport** — instant directional blink (cf. Warframe Ash / Loki)
+- **Aim / ADS** — precision mode; interact with momentum (slow? steady?)
+- **Wall cling / wall latch** — momentary grip, interrupt wall-run momentum
 
 ## Open design questions (from DESIGN.md)
 

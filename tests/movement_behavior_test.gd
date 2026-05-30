@@ -47,6 +47,8 @@ func _run() -> void:
 	await _test_slide_is_steerable_and_cancelable()
 	await _test_slope_holds_position_without_crouch()
 	await _test_crouchwalk_no_vertical_jitter()
+	await _test_slide_speed_does_not_compound()
+	await _test_wallrun_backward_does_not_accelerate_forward()
 	await _test_respawn_below_kill_y()
 
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass_count, _fail_count])
@@ -572,6 +574,146 @@ func _test_crouchwalk_no_vertical_jitter() -> void:
 		variance < 0.0005,
 		"y variance=%.6f over %d frames (mean y=%.3f), state=%d" % [
 			variance, samples.size(), mean, player._state]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+# ---------------------------------------------------------------------------
+# Bug 1 — slide speed must not compound unboundedly on flat ground
+# ---------------------------------------------------------------------------
+
+## Enter a slide on flat ground and step many physics frames. Assert that
+## horizontal speed does NOT increase over time (friction must win over any
+## other force on flat ground) and stays under max_slide_speed at all times.
+## On the buggy code (no max_slide_speed cap, no entry-boost guard) the speed
+## would grow on repeated re-entry or via the uncapped slope-accel path. With
+## the fix it must monotonically decay toward zero on flat ground.
+func _test_slide_speed_does_not_compound() -> void:
+	var ctx := await _spawn_level()
+	var player: PlayerController = ctx["player"]
+	await _settle_on_floor(player)
+
+	# Build up sprint speed, then enter a slide.
+	_send_key(KEY_W, true)
+	_send_key(KEY_SHIFT, true)
+	await _step_physics(player, 30)
+	_send_key(KEY_SHIFT, false)
+
+	# Enter slide via real Ctrl key.
+	_send_key(KEY_CTRL, true)
+	await _step_physics(player, 3)
+	var entered_slide := player._state == PlayerController.State.SLIDE
+
+	# Sample speed every frame for 60 frames of sliding on flat ground.
+	# Allow one frame of "entry" settling, then assert: speed never increases
+	# significantly and always stays under max_slide_speed.
+	await get_tree().physics_frame
+	var prev_speed := Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+	var grew := false
+	var exceeded_cap := false
+	var max_cap: float = player.max_slide_speed
+
+	for _i in 60:
+		await get_tree().physics_frame
+		var sp := Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+		# Speed must not climb by more than a negligible epsilon on flat ground.
+		if sp > prev_speed + 0.05:
+			grew = true
+		if sp > max_cap + 0.01:
+			exceeded_cap = true
+		prev_speed = sp
+		if player._state != PlayerController.State.SLIDE:
+			break  # slide exited (speed decayed below exit threshold) — that's fine
+
+	_send_key(KEY_CTRL, false)
+	_send_key(KEY_W, false)
+
+	_assert(
+		"slide speed does not compound: never increases on flat ground",
+		entered_slide and not grew,
+		"entered_slide=%s, speed_grew=%s" % [str(entered_slide), str(grew)]
+	)
+	_assert(
+		"slide speed never exceeds max_slide_speed cap",
+		not exceeded_cap,
+		"exceeded_cap=%s (max_slide_speed=%.1f)" % [str(exceeded_cap), max_cap]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+# ---------------------------------------------------------------------------
+# Bug 2 — backward input during wall-run must NOT accelerate the player forward
+# ---------------------------------------------------------------------------
+
+## Place the player in the wall-run corridor (WallA at x=-3.5, WallB at x=3.5,
+## both 18 m long in Z centred around z=8) so the automatic wall-run detection
+## engages on the RIGHT wall (WallB, normal points -X). Then inject backward (S)
+## input and assert the player does NOT gain forward speed along the wall.
+##
+## On the buggy code, `velocity = along_wall * wall_run_speed` was set
+## unconditionally regardless of input, so backward (S) silently ran at full
+## forward speed. With the fix, backward drives target_along = 0 and the speed
+## must decay rather than hold or increase.
+func _test_wallrun_backward_does_not_accelerate_forward() -> void:
+	var ctx := await _spawn_level()
+	var player: PlayerController = ctx["player"]
+
+	# Place player inside the wall corridor, near the right wall (WallB x=3.5).
+	# Wall surface faces inward at x≈3.0; player capsule radius 0.35 → centre
+	# at x≈2.6 is comfortably within wall_detect_distance (0.65) of the surface.
+	# Face +Z (yaw=0) and give enough +Z velocity to trigger wall-run entry.
+	player.global_position = Vector3(2.6, 2.0, 4.0)
+	player._yaw = 0.0
+	player.rotation.y = 0.0
+	player.velocity = Vector3(0.0, 1.5, player.wall_run_speed + 1.0)
+
+	# Step frames — wall-run auto-detect fires when airborne + fast + wall close.
+	# Give up to 20 frames for the detection to engage.
+	var entered := false
+	for _i in 20:
+		await get_tree().physics_frame
+		if player._state == PlayerController.State.WALL_RUN:
+			entered = true
+			break
+
+	if not entered:
+		# Fallback: force wall-run state with real geometry.
+		# This keeps _is_wall_nearby() happy by placing the player flush to the wall.
+		player.global_position = Vector3(2.6, 2.0, 6.0)
+		player._yaw = 0.0
+		player.rotation.y = 0.0
+		player.velocity = Vector3(0.0, 0.5, player.wall_run_speed)
+		player._wall_normal = Vector3(-1, 0, 0)
+		player._wall_run_side = 1.0
+		player._wall_run_timer = player.wall_run_max_time
+		player._transition(PlayerController.State.WALL_RUN)
+		await get_tree().physics_frame
+		entered = (player._state == PlayerController.State.WALL_RUN)
+
+	var in_wall_run := (player._state == PlayerController.State.WALL_RUN)
+
+	# Measure speed along the wall tangent (pointing in +Z when wall normal is -X).
+	var along_wall := player._wall_normal.cross(Vector3.UP).normalized()
+	if along_wall.dot(Vector3(0, 0, 1)) < 0.0:
+		along_wall = -along_wall
+	var speed_before := Vector3(player.velocity.x, 0.0, player.velocity.z).dot(along_wall)
+
+	# Inject backward (S) and hold for several frames.
+	_send_key(KEY_S, true)
+	await _step_physics(player, 10)
+	var speed_after := Vector3(player.velocity.x, 0.0, player.velocity.z).dot(along_wall)
+	_send_key(KEY_S, false)
+
+	# Backward input must NOT cause the forward-along-wall speed to increase.
+	var backward_caused_forward_accel := speed_after > speed_before + 0.5
+
+	_assert(
+		"wall-run backward input does not accelerate the player forward",
+		in_wall_run and not backward_caused_forward_accel,
+		"in_wall_run=%s, speed_before=%.2f, speed_after=%.2f (accel=%s)" % [
+			str(in_wall_run), speed_before, speed_after, str(backward_caused_forward_accel)]
 	)
 	ctx["level"].queue_free()
 	await get_tree().process_frame

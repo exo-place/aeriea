@@ -117,6 +117,9 @@ extends CharacterBody3D
 @export var slide_steer_exit_time: float = 0.18
 ## Speed multiplier gained per unit of downward slope angle during slide
 @export var slope_acceleration: float = 18.0
+## Hard cap on horizontal speed while sliding (m/s).
+## Prevents slope-accel and re-entry boost from compounding unboundedly.
+@export var max_slide_speed: float = 22.0
 ## Top speed while crouch-walking (m/s) — reduced from walk_speed.
 @export var crouch_walk_speed: float = 2.8
 ## Collision capsule half-height when crouched
@@ -534,21 +537,26 @@ func _process_slide(delta: float) -> void:
 
 	# Slope acceleration — sliding downhill speeds up, but this is NOT a lock:
 	# all the exit conditions below still fire, so it can never be perpetual.
+	# NOTE: gravity-driven downhill movement on slopes is intentional (user-confirmed
+	# expected behaviour). We only cap the total speed, not the direction.
 	var floor_normal := get_floor_normal()
 	var slope_angle := rad_to_deg(acos(clampf(floor_normal.dot(Vector3.UP), -1.0, 1.0)))
 	if slope_angle > 2.0:
 		var down_slope := Vector3(floor_normal.x, 0.0, floor_normal.z).normalized()
 		horiz_vel += down_slope * slope_acceleration * (slope_angle / 45.0) * delta
+	# Hard cap: slope acceleration may not push speed past max_slide_speed.
+	horiz_vel = horiz_vel.limit_length(max_slide_speed)
 
 	# STEERABLE: wish-direction carves the slide. We steer the velocity vector
 	# toward the wish direction at slide_steer_accel without forcing a target
 	# speed, so momentum leads but the player clearly redirects the slide.
+	# The re-normalise to speed_now preserves magnitude (carve, don't accelerate).
 	var wish_dir := _get_wish_dir()
 	var has_input := wish_dir.length_squared() > 0.001
 	if has_input:
 		var speed_now := horiz_vel.length()
 		var steered := horiz_vel + wish_dir * slide_steer_accel * delta
-		# Preserve magnitude (carve, don't accelerate) — re-normalise to prior speed.
+		# Carve: redirect without inflating speed.
 		if steered.length() > 0.001:
 			horiz_vel = steered.normalized() * speed_now
 
@@ -671,14 +679,44 @@ func _process_wall_run(delta: float) -> void:
 	velocity.y -= _gravity * effective_grav_scale * delta
 	velocity.y = max(velocity.y, -_gravity)  # clamp fall speed on wall
 
-	# Move along wall surface
+	# Move along wall surface.
+	# The wall-tangent vector is derived from the wall normal × UP, then oriented
+	# so that positive = the direction the camera is mostly facing.
+	# Intended behaviour: forward input runs along the wall (full speed), backward
+	# input decelerates/reverses (so pressing S does NOT push you forward along
+	# the wall), and lateral input is ignored (player is locked to the wall plane).
+	# No input: maintain speed (wall-run is not purely self-propelled — momentum
+	# carries you, and the exit condition above already handles "no input" bail).
 	var along_wall := _wall_normal.cross(Vector3.UP).normalized()
-	# Orient along-wall direction to match player facing
 	if along_wall.dot(-transform.basis.z) < 0.0:
 		along_wall = -along_wall
 
-	velocity.x = along_wall.x * wall_run_speed
-	velocity.z = along_wall.z * wall_run_speed
+	# Read longitudinal (forward/back) input along the wall tangent.
+	# Lateral keys (A/D) are intentionally ignored: sideways input on a wall is
+	# ambiguous and the exit-on-no-input guard above already handles stepping off.
+	var fwd_input := 0.0
+	if Input.is_action_pressed("move_forward"):
+		fwd_input += 1.0
+	if Input.is_action_pressed("move_backward"):
+		fwd_input -= 1.0
+
+	# Project current wall-tangent speed, then apply input as a target.
+	# Forward → run at wall_run_speed; backward → decelerate (target = 0 or negative);
+	# no longitudinal input → hold current speed (momentum-preserving).
+	var current_along := Vector3(velocity.x, 0.0, velocity.z).dot(along_wall)
+	var target_along: float
+	if fwd_input > 0.0:
+		target_along = wall_run_speed
+	elif fwd_input < 0.0:
+		# Backward decelerates toward zero; does NOT accelerate you forward.
+		target_along = 0.0
+	else:
+		target_along = current_along  # no change — preserve momentum
+
+	# Move toward target at a responsive-but-not-instant rate.
+	var new_along := move_toward(current_along, target_along, wall_run_speed * 6.0 * delta)
+	velocity.x = along_wall.x * new_along
+	velocity.z = along_wall.z * new_along
 
 	move_and_slide()
 
@@ -739,11 +777,16 @@ func _do_wall_jump() -> void:
 # ---------------------------------------------------------------------------
 
 func _begin_slide() -> void:
-	# Boost velocity along current direction
+	# Entry boost: applied only when not already in SLIDE state, so re-entering
+	# from CROUCH (or any other state that calls _begin_slide while already sliding)
+	# does not stack the boost on top of existing slide speed.
 	var horiz := Vector3(velocity.x, 0.0, velocity.z)
-	if horiz.length_squared() > 0.001:
-		velocity.x = horiz.normalized().x * (horiz.length() + slide_boost)
-		velocity.z = horiz.normalized().z * (horiz.length() + slide_boost)
+	if horiz.length_squared() > 0.001 and _state != State.SLIDE:
+		var boosted := horiz.length() + slide_boost
+		# Clamp the boosted entry speed so we never launch above max_slide_speed.
+		boosted = minf(boosted, max_slide_speed)
+		velocity.x = horiz.normalized().x * boosted
+		velocity.z = horiz.normalized().z * boosted
 	_slide_timer = slide_max_time
 	_slide_steer_timer = 0.0
 	_set_crouch_shape(true)

@@ -1,0 +1,8 @@
+{
+  "$manifest": "aeriea-movement-manifest/1",
+  "comment": "The playable movement kit: the base state machine ⊕ enabled verb overlays. A designer assembles a kit by editing this file (which base, which verbs). Composition is kit overlay (docs/decisions/movement-substrate.md §2, §5); both the interpreter (live) and the compiler (regen) consume the SAME composed kit. Adding a verb here is the entire wiring — no engine code change. The remaining backlog verbs (air burst, charge, wormhole, teleport, aim, wall-cling) are authorable the same way: drop a movement/verbs/<verb>.kit.json and add it to this list.",
+  "base": "res://movement/base.kit.json",
+  "verbs": [
+    "res://movement/verbs/bullet_jump.kit.json"
+  ]
+}

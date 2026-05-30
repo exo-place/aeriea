@@ -68,7 +68,7 @@ func _run() -> void:
 		# Clear residual physics bodies from the prior target's freed levels and any
 		# lingering global input state before starting this target's suite, so each
 		# target runs in a clean world (targets share one physics space + global Input).
-		for action in ["move_forward", "move_backward", "move_left", "move_right", "sprint", "crouch", "jump"]:
+		for action in ["move_forward", "move_backward", "move_left", "move_right", "sprint", "crouch", "jump", "bullet_jump"]:
 			if InputMap.has_action(action):
 				Input.action_release(action)
 		Input.flush_buffered_events()
@@ -94,6 +94,7 @@ func _run_suite() -> void:
 	await _test_low_speed_crouch_is_crouchwalk_not_slide()
 	await _test_high_speed_crouch_is_slide()
 	await _test_slide_is_steerable_and_cancelable()
+	await _test_bullet_jump_forward_up_burst()
 	await _test_slope_holds_position_without_crouch()
 	await _test_crouchwalk_no_vertical_jitter()
 	await _test_slide_speed_does_not_compound()
@@ -554,6 +555,89 @@ func _test_slide_is_steerable_and_cancelable() -> void:
 	)
 	ctx["level"].queue_free()
 	await get_tree().process_frame
+
+
+## SLICE 4 — bullet jump as a PURE-DATA verb (movement/verbs/bullet_jump.kit.json,
+## composed via the manifest overlay; NO engine code change). Get moving fast →
+## crouch into a SLIDE → press the bullet_jump key (V): assert the forward+up burst
+## (vy positive AND forward horizontal speed increased BEYOND a plain jump from the
+## same approach). The verb lives only on the data paths (interpreter/compiled);
+## the imperative oracle has no such verb, so there it must correctly NOT fire.
+func _test_bullet_jump_forward_up_burst() -> void:
+	var is_data_path: bool = _target_label != "imperative"
+
+	# --- (1) Plain-jump baseline: same fast forward approach, then jump (Space). ---
+	var ctx1 := await _spawn_level()
+	var p1: CharacterBody3D = ctx1["player"]
+	await _settle_on_floor(p1)
+	_send_key(KEY_W, true)
+	_send_key(KEY_SHIFT, true)
+	await _step_physics(p1, 30)
+	var fwd1 := -p1.transform.basis.z
+	fwd1.y = 0.0
+	fwd1 = fwd1.normalized()
+	_send_key(KEY_SPACE, true)
+	await _step_physics(p1, 2)
+	_send_key(KEY_SPACE, false)
+	var jump_fwd_speed := Vector3(p1.velocity.x, 0.0, p1.velocity.z).dot(fwd1)
+	var jump_vy := p1.velocity.y
+	_send_key(KEY_W, false)
+	_send_key(KEY_SHIFT, false)
+	ctx1["level"].queue_free()
+	await get_tree().process_frame
+
+	# --- (2) Bullet jump: fast approach → crouch into SLIDE → press V. ---
+	var ctx2 := await _spawn_level()
+	var p2: CharacterBody3D = ctx2["player"]
+	await _settle_on_floor(p2)
+	_send_key(KEY_W, true)
+	_send_key(KEY_SHIFT, true)
+	await _step_physics(p2, 30)
+	_send_key(KEY_CTRL, true)            # crouch → SLIDE at speed
+	await _step_physics(p2, 4)
+	var in_slide_or_crouch: bool = (p2._state == S_SLIDE or p2._state == S_CROUCH)
+	var fwd2 := -p2.transform.basis.z
+	fwd2.y = 0.0
+	fwd2 = fwd2.normalized()
+	# Fire bullet jump (dedicated ability key, not Space) if the action exists.
+	var has_action: bool = InputMap.has_action("bullet_jump")
+	if has_action:
+		_send_key(KEY_V, true)
+		await _step_physics(p2, 2)
+		_send_key(KEY_V, false)
+	await _step_physics(p2, 1)
+	var bj_fwd_speed := Vector3(p2.velocity.x, 0.0, p2.velocity.z).dot(fwd2)
+	var bj_vy := p2.velocity.y
+	var bj_state: int = p2._state
+	_send_key(KEY_CTRL, false)
+	_send_key(KEY_W, false)
+	_send_key(KEY_SHIFT, false)
+	ctx2["level"].queue_free()
+	await get_tree().process_frame
+
+	if is_data_path:
+		# The payoff: airborne, rising, and faster forward than a plain jump.
+		var rising: bool = bj_vy > 0.0
+		var faster_forward: bool = bj_fwd_speed > jump_fwd_speed + 1.0
+		var went_air: bool = bj_state == S_AIR
+		_assert(
+			"bullet jump bursts forward+up beyond a plain jump (pure-data verb)",
+			in_slide_or_crouch and rising and faster_forward and went_air,
+			"bj_vy=%.3f (rising), bj_fwd=%.2f vs jump_fwd=%.2f (delta=%+.2f), bj_state=%d (AIR=%d)" % [
+				bj_vy, bj_fwd_speed, jump_fwd_speed, bj_fwd_speed - jump_fwd_speed, bj_state, S_AIR]
+		)
+	else:
+		# Imperative oracle has no bullet-jump verb: pressing V must NOT launch the
+		# player skyward out of the slide. The verb's signature is "rising AND AIR";
+		# absent the verb, the slide stays grounded (vy <= 0, not AIR). Slide momentum
+		# may still grow the forward speed on its own, so we don't assert on speed.
+		var launched: bool = bj_vy > 0.0 and bj_state == S_AIR
+		_assert(
+			"bullet jump correctly absent on imperative oracle (no data verb)",
+			not launched,
+			"bj_vy=%.3f, bj_fwd=%.2f, state=%d (no launch expected; AIR=%d)" % [
+				bj_vy, bj_fwd_speed, bj_state, S_AIR]
+		)
 
 
 ## (d) Standing on the slope with NO crouch input → horizontal position is stable

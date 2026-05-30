@@ -13,25 +13,40 @@ Parkour 2.0 movement is load-bearing per DESIGN.md (the per-second dopamine engi
 
 ## Movement abilities / extra movement (future design pass)
 
-The data-driven composable movement substrate is now designed: see
-**`docs/decisions/movement-substrate.md`** for the serializable
-state-machine-as-data schema, the interpreter + compiler dual path, the
-determinism model, and the incremental slice plan (Slice 1: schema +
-interpreter reproducing ground+jump and passing the existing behavioral
-tests; Slice 2: port slide/crouch/wall-run; Slice 3: compiler + equivalence
-golden traces; Slice 4: a new verb as pure data). Implementation not started.
+The data-driven composable movement substrate is **implemented through Slice 4**
+(all four slices done): see **`docs/decisions/movement-substrate.md`** for the
+serializable state-machine-as-data schema, the interpreter + compiler dual path,
+the determinism model, and the slice plan.
 
-The verbs below are the starting vocabulary that substrate must express as
-recomposable data units — not built yet, each needs its own loop/momentum
-interaction/NSFW–SFW parity pass:
+- [x] **Slice 1** — schema + loader + deterministic interpreter; ground+jump as data.
+- [x] **Slice 2** — slide/crouch/wall-run/vault/respawn ported to data; full behavioral parity.
+- [x] **Slice 3** — GDScript compiler + golden-trace harness; interpreter == compiled, bit-identical.
+- [x] **Slice 4** — **bullet jump as a PURE-DATA verb** (`movement/verbs/bullet_jump.kit.json`,
+  composed via `movement/default.manifest.json` overlay) with **ZERO engine code
+  change**. Proven: regen of the compiled GDScript now emits bullet jump; golden
+  trace shows interpreter == compiled == repeat (max_delta 0.0); behavioral burst
+  asserted (vy +4.92, forward 24.73 vs plain-jump 10.00). The composition seam
+  (`MovementKit.compose` / `load_from_manifest`) + the `add_transitions` patch +
+  the cooldown-timer guard are all data. This validated the substrate thesis: the
+  existing Condition/Effect primitive vocabulary was SUFFICIENT (no new primitive
+  needed) — bullet jump composes from `add_velocity(forward)` + `set_velocity_y` +
+  `set_collider_height` + `set_timer` + `input_buffered`/`timer` guards.
 
-- **Bullet jump** — mid-air velocity burst (cf. Warframe)
+The remaining backlog verbs are now **authorable as data exactly the same way**
+(drop a `movement/verbs/<verb>.kit.json`, enable it in the manifest — no engine
+edit), each still needing its own loop/momentum interaction / NSFW–SFW parity pass:
+
 - **Air burst** — radial upward/outward push (cf. Warframe Zephyr)
 - **Charge** — forward dash with collision knockback (cf. Warframe Rhino)
 - **Wormhole** — area-denial teleport portal (cf. Warframe Nova)
 - **Teleport** — instant directional blink (cf. Warframe Ash / Loki)
 - **Aim / ADS** — precision mode; interact with momentum (slow? steady?)
 - **Wall cling / wall latch** — momentary grip, interrupt wall-run momentum
+
+(Some of the above — teleport/wormhole/charge — may exercise primitives the
+current vocabulary does not yet have, e.g. an instantaneous position set or a
+collision-cast; per the spec, adding such a leaf is the one sanctioned engine
+change, reviewed against "collapse asymmetries to primitives.")
 
 ## Open design questions (from DESIGN.md)
 

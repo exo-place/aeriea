@@ -118,6 +118,126 @@ static func load_from_dict(data: Dictionary) -> MovementKit:
 	kit._load_from_dict(data)
 	return kit
 
+# ---------------------------------------------------------------------------
+# Composition (kit overlay) — docs/decisions/movement-substrate.md §2, §5.
+#
+# A verb is a DATA unit, not a code unit: a small patch document that declares
+# params/inputs to add, transitions to insert into existing states (at an explicit
+# priority), and whole new states. Composition = base ⊕ ordered list of enabled
+# verb patches → one flattened MovementKit. This is the seam for layering powers
+# WITHOUT touching engine code. A later player-facing loadout layer is "another
+# overlay source above the designer manifest"; the ordered-list shape already
+# leaves that seam open.
+#
+# Conflict resolution stays in the existing _load_from_dict validation: two
+# transitions at the same (state, priority) is a LOAD-TIME ERROR (no silent
+# nondeterminism), so a verb that collides with the base or another verb fails
+# loudly rather than picking one arbitrarily.
+#
+# Patch shape (movement/verbs/*.kit.json):
+#   { "$patch": "...", "params": {…}, "inputs": {…},
+#     "add_transitions": { "STATE_NAME": [ <transition>, … ], … },
+#     "states": [ <state>, … ] }
+# ---------------------------------------------------------------------------
+
+## Compose a base kit dict with an ordered list of verb-patch dicts into one
+## flattened kit dict (still raw data; typed/validated by load_from_dict). Pure
+## function over data — the overlay seam.
+static func compose(base: Dictionary, patches: Array) -> Dictionary:
+	var out: Dictionary = base.duplicate(true)
+	if typeof(out.get("params")) != TYPE_DICTIONARY:
+		out["params"] = {}
+	if typeof(out.get("inputs")) != TYPE_DICTIONARY:
+		out["inputs"] = {}
+	if typeof(out.get("states")) != TYPE_ARRAY:
+		out["states"] = []
+
+	# Index base states by name for transition insertion.
+	var state_index: Dictionary = {}
+	for st: Variant in out["states"]:
+		if typeof(st) == TYPE_DICTIONARY and st.has("name"):
+			state_index[str(st["name"])] = st
+
+	for patch: Variant in patches:
+		if typeof(patch) != TYPE_DICTIONARY:
+			continue
+		# Merge params (verb params override/add; base wins only on absence).
+		var p_params: Variant = patch.get("params", {})
+		if typeof(p_params) == TYPE_DICTIONARY:
+			for k in p_params:
+				out["params"][k] = p_params[k]
+		# Merge inputs.
+		var p_inputs: Variant = patch.get("inputs", {})
+		if typeof(p_inputs) == TYPE_DICTIONARY:
+			for a in p_inputs:
+				out["inputs"][a] = p_inputs[a]
+		# Append whole new states.
+		var p_states: Variant = patch.get("states", [])
+		if typeof(p_states) == TYPE_ARRAY:
+			for st: Variant in p_states:
+				if typeof(st) == TYPE_DICTIONARY and st.has("name"):
+					out["states"].append(st)
+					state_index[str(st["name"])] = st
+		# Insert transitions into existing (or just-added) states.
+		var p_add: Variant = patch.get("add_transitions", {})
+		if typeof(p_add) == TYPE_DICTIONARY:
+			for sname in p_add:
+				var target: Variant = state_index.get(str(sname))
+				if typeof(target) != TYPE_DICTIONARY:
+					# Surface as a load error by appending a sentinel state-less marker;
+					# simplest is to leave it for load_from_dict to catch via a missing
+					# state. Record by pointing the patch at a non-existent state name in
+					# a throwaway transition so the validator reports it.
+					out["states"].append({"name": "<overlay_error:%s>" % str(sname),
+						"transitions": p_add[sname]})
+					continue
+				if typeof(target.get("transitions")) != TYPE_ARRAY:
+					target["transitions"] = []
+				var trs: Variant = p_add[sname]
+				if typeof(trs) == TYPE_ARRAY:
+					for tr: Variant in trs:
+						target["transitions"].append(tr)
+	return out
+
+## Load a composed kit from a manifest file (movement/<name>.manifest.json):
+##   { "$manifest": "...", "base": "res://…/base.kit.json",
+##     "verbs": [ "res://…/verbs/foo.kit.json", … ] }
+## Returns a MovementKit; check is_valid()/load_errors.
+static func load_from_manifest(path: String) -> MovementKit:
+	var kit := MovementKit.new()
+	var manifest: Variant = _read_json_object(path)
+	if typeof(manifest) != TYPE_DICTIONARY:
+		kit.load_errors.append("manifest did not parse to an object: %s" % path)
+		return kit
+	var base_path: String = str(manifest.get("base", ""))
+	if base_path == "":
+		kit.load_errors.append("manifest '%s' has no 'base'" % path)
+		return kit
+	var base: Variant = _read_json_object(base_path)
+	if typeof(base) != TYPE_DICTIONARY:
+		kit.load_errors.append("manifest base did not parse: %s" % base_path)
+		return kit
+	var patches: Array = []
+	var verbs: Variant = manifest.get("verbs", [])
+	if typeof(verbs) == TYPE_ARRAY:
+		for vpath: Variant in verbs:
+			var vp: Variant = _read_json_object(str(vpath))
+			if typeof(vp) != TYPE_DICTIONARY:
+				kit.load_errors.append("verb patch did not parse: %s" % str(vpath))
+				continue
+			patches.append(vp)
+	if not kit.load_errors.is_empty():
+		return kit
+	var composed: Dictionary = compose(base, patches)
+	kit._load_from_dict(composed)
+	return kit
+
+static func _read_json_object(path: String) -> Variant:
+	if not FileAccess.file_exists(path):
+		return null
+	var text := FileAccess.get_file_as_string(path)
+	return JSON.parse_string(text)
+
 func _err(msg: String) -> void:
 	load_errors.append(msg)
 

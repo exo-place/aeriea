@@ -1,4 +1,4 @@
-## GENERATED from res://movement/base.kit.json — do not edit by hand.
+## GENERATED from res://movement/default.manifest.json — do not edit by hand.
 ## Regenerate with:
 ##   nix develop --command bash -lc 'xvfb-run -a godot4 --path . res://tools/regen_compiled_movement.tscn --quit-after 120'
 ##
@@ -33,6 +33,10 @@ var yaw: float = 0.0
 # --- Params lowered to consts (referenced by name in the kit) ---
 const P_air_acceleration := 20.0
 const P_air_speed_cap := 12.0
+const P_bullet_jump_buffer_time := 0.15
+const P_bullet_jump_cooldown := 0.6
+const P_bullet_jump_forward_boost := 12.0
+const P_bullet_jump_up := 6.0
 const P_camera_height_crouch := 0.85
 const P_camera_height_lerp_speed := 12.0
 const P_camera_height_stand := 1.65
@@ -211,7 +215,16 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			return true
 		return false
 	elif active_state == "SLIDE":
-		if (float(timers.get("jump", 0.0)) > 0.0):
+		if ((float(timers.get("bullet_jump", 0.0)) > 0.0) and (float(timers.get("bullet_jump_cd", 0.0)) <= 0.0)):
+			body.host_set_collider_height(P_stand_height, true)
+			body.velocity.y = P_bullet_jump_up
+			_k_add_velocity(frame, P_bullet_jump_forward_boost, "forward", "", false)
+			timers["bullet_jump_cd"] = P_bullet_jump_cooldown
+			timers["bullet_jump"] = 0.0
+			timers["slide_steer"] = 0.0
+			active_state = "AIR"
+			return false
+		elif (float(timers.get("jump", 0.0)) > 0.0):
 			body.host_set_collider_height(P_stand_height, true)
 			body.velocity.y = P_jump_velocity
 			_k_add_velocity(frame, P_slide_jump_forward_boost, "forward", "", false)
@@ -235,7 +248,15 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			return false
 		return false
 	elif active_state == "CROUCH":
-		if ((float(timers.get("jump", 0.0)) > 0.0) and body.host_can_stand()):
+		if ((float(timers.get("bullet_jump", 0.0)) > 0.0) and (float(timers.get("bullet_jump_cd", 0.0)) <= 0.0)):
+			body.host_set_collider_height(P_stand_height, true)
+			body.velocity.y = P_bullet_jump_up
+			_k_add_velocity(frame, P_bullet_jump_forward_boost, "forward", "", false)
+			timers["bullet_jump_cd"] = P_bullet_jump_cooldown
+			timers["bullet_jump"] = 0.0
+			active_state = "AIR"
+			return false
+		elif ((float(timers.get("jump", 0.0)) > 0.0) and body.host_can_stand()):
 			body.host_set_collider_height(P_stand_height, true)
 			body.velocity.y = P_jump_velocity
 			timers["jump_buffer"] = 0.0

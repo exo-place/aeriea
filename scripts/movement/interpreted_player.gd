@@ -30,7 +30,10 @@ const _STATE_NAME_TO_ENUM := {
 	"CROUCH": State.CROUCH, "WALL_RUN": State.WALL_RUN, "VAULT": State.VAULT,
 }
 
-@export var kit_path: String = "res://movement/base.kit.json"
+## The movement kit source. A `.manifest.json` is composed (base ⊕ verb overlays,
+## docs/decisions/movement-substrate.md §2); a plain `.kit.json` loads directly.
+## Default is the composed playable kit (base + bullet_jump and any future verbs).
+@export var kit_path: String = "res://movement/default.manifest.json"
 @export var kill_y: float = -25.0
 @export var spawn_path: NodePath
 
@@ -164,7 +167,10 @@ func _ready() -> void:
 	floor_max_angle = deg_to_rad(max_slope_angle)
 	floor_snap_length = 0.5
 
-	kit = MovementKit.load_from_file(kit_path)
+	if kit_path.ends_with(".manifest.json"):
+		kit = MovementKit.load_from_manifest(kit_path)
+	else:
+		kit = MovementKit.load_from_file(kit_path)
 	if not kit.is_valid():
 		push_error("InterpretedPlayer: invalid kit at %s: %s" % [kit_path, str(kit.load_errors)])
 		return

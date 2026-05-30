@@ -11,12 +11,15 @@
 ## generated code is behaviorally identical to the interpreter.
 extends Node
 
-const KIT_PATH := "res://movement/base.kit.json"
+## The COMPOSED playable kit (base ⊕ verb overlays) is the source of truth the
+## compiled projection must mirror — so the compiled path gains new verbs (e.g.
+## bullet jump) the instant the manifest enables them, with NO compiler edit.
+const KIT_PATH := "res://movement/default.manifest.json"
 const OUT_PATH := "res://scripts/movement/generated/compiled_base_movement.gd"
 const OUT_CLASS := "CompiledBaseMovement"
 
 func _ready() -> void:
-	var kit := MovementKit.load_from_file(KIT_PATH)
+	var kit := MovementKit.load_from_manifest(KIT_PATH) if KIT_PATH.ends_with(".manifest.json") else MovementKit.load_from_file(KIT_PATH)
 	if not kit.is_valid():
 		push_error("regen: invalid kit: %s" % str(kit.load_errors))
 		get_tree().quit(1)

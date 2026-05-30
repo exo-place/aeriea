@@ -32,8 +32,6 @@
     "crouch_walk_speed": 2.8,
     "crouch_height": 0.6,
     "stand_height": 0.9,
-    "slide_jump_forward_boost": 2.5,
-
     "wall_run_min_speed": 5.0,
     "wall_run_max_time": 1.4,
     "wall_run_gravity_scale": 0.15,
@@ -239,21 +237,7 @@
       "on_enter": [],
       "transitions": [
         {
-          "comment": "Slide-jump — highest-priority exit; preserves momentum + forward boost, stands up.",
-          "when": { "op": "input_buffered", "action": "jump" },
-          "to": "AIR",
-          "priority": 90,
-          "do": [
-            { "do": "set_collider_height", "value": "stand_height", "require_headroom": true },
-            { "do": "set_velocity_y", "value": "jump_velocity" },
-            { "do": "add_velocity", "space": "forward", "vector": "slide_jump_forward_boost" },
-            { "do": "set_timer", "name": "jump_buffer", "value": 0 },
-            { "do": "set_timer", "name": "jump_hold", "value": 0 },
-            { "do": "set_timer", "name": "slide_steer", "value": 0 }
-          ]
-        },
-        {
-          "comment": "Airborne mid-slide → AIR, stay crouched (don't pop up).",
+          "comment": "Airborne mid-slide → AIR, stay crouched (don't pop up). NOTE: jump-from-slide is intentionally absent from the base kit — it is owned by the bullet_jump verb patch (priority 95, triggered by the `jump` input). This keeps the base honest: a slide without any verb overlay has no jump-out path, only the airborne/decay/release exits below. The verb adds the one and only jump transition, with no unreachable duplicate at a lower priority.",
           "when": { "op": "airborne" },
           "to": "AIR",
           "priority": 70,
@@ -322,23 +306,7 @@
       "on_enter": [],
       "transitions": [
         {
-          "comment": "Crouch-jump: stand (if headroom) and jump.",
-          "when": { "op": "all", "of": [
-            { "op": "input_buffered", "action": "jump" },
-            { "op": "headroom" }
-          ] },
-          "to": "AIR",
-          "priority": 90,
-          "reenter": true,
-          "do": [
-            { "do": "set_collider_height", "value": "stand_height", "require_headroom": true },
-            { "do": "set_velocity_y", "value": "jump_velocity" },
-            { "do": "set_timer", "name": "jump_buffer", "value": 0 },
-            { "do": "set_timer", "name": "jump_hold", "value": 0 }
-          ]
-        },
-        {
-          "comment": "Left the floor while crouching → AIR (arm coyote).",
+          "comment": "Left the floor while crouching → AIR (arm coyote). NOTE: jump-from-crouch is intentionally absent from the base kit — it is owned by the bullet_jump verb patch (priority 95, triggered by the `jump` input). The base-without-verb has no jump-out path from CROUCH; the verb is the sole provider, with no unreachable duplicate.",
           "when": { "op": "airborne" },
           "to": "AIR",
           "priority": 80,

@@ -57,7 +57,6 @@ const P_slide_boost := 3.0
 const P_slide_entry_speed := 8.0
 const P_slide_exit_speed := 3.0
 const P_slide_friction := 4.0
-const P_slide_jump_forward_boost := 2.5
 const P_slide_max_time := 1.8
 const P_slide_steer_accel := 16.0
 const P_slide_steer_exit_time := 0.18
@@ -215,19 +214,11 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			return true
 		return false
 	elif active_state == "SLIDE":
-		if ((float(timers.get("bullet_jump", 0.0)) > 0.0) and (float(timers.get("bullet_jump_cd", 0.0)) <= 0.0)):
+		if ((float(timers.get("jump", 0.0)) > 0.0) and (float(timers.get("bullet_jump_cd", 0.0)) <= 0.0)):
 			body.host_set_collider_height(P_stand_height, true)
 			body.velocity.y = P_bullet_jump_up
 			_k_add_velocity(frame, P_bullet_jump_forward_boost, "forward", "", false)
 			timers["bullet_jump_cd"] = P_bullet_jump_cooldown
-			timers["bullet_jump"] = 0.0
-			timers["slide_steer"] = 0.0
-			active_state = "AIR"
-			return false
-		elif (float(timers.get("jump", 0.0)) > 0.0):
-			body.host_set_collider_height(P_stand_height, true)
-			body.velocity.y = P_jump_velocity
-			_k_add_velocity(frame, P_slide_jump_forward_boost, "forward", "", false)
 			timers["jump_buffer"] = 0.0
 			timers["jump_hold"] = 0.0
 			timers["slide_steer"] = 0.0
@@ -248,21 +239,15 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			return false
 		return false
 	elif active_state == "CROUCH":
-		if ((float(timers.get("bullet_jump", 0.0)) > 0.0) and (float(timers.get("bullet_jump_cd", 0.0)) <= 0.0)):
+		if ((float(timers.get("jump", 0.0)) > 0.0) and (float(timers.get("bullet_jump_cd", 0.0)) <= 0.0)):
 			body.host_set_collider_height(P_stand_height, true)
 			body.velocity.y = P_bullet_jump_up
 			_k_add_velocity(frame, P_bullet_jump_forward_boost, "forward", "", false)
 			timers["bullet_jump_cd"] = P_bullet_jump_cooldown
-			timers["bullet_jump"] = 0.0
-			active_state = "AIR"
-			return false
-		elif ((float(timers.get("jump", 0.0)) > 0.0) and body.host_can_stand()):
-			body.host_set_collider_height(P_stand_height, true)
-			body.velocity.y = P_jump_velocity
 			timers["jump_buffer"] = 0.0
 			timers["jump_hold"] = 0.0
 			active_state = "AIR"
-			return true
+			return false
 		elif (not body.is_on_floor()):
 			timers["coyote"] = P_coyote_time
 			active_state = "AIR"

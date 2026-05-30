@@ -77,10 +77,10 @@ func _input_logs() -> Array:
 				+ _hold_v([], 25, 0.0)},
 		{"name": "respawn below kill_y then recover", "spawn": Vector3(0, 1.2, 0), "with_walls": false,
 			"log": _hold([], 5) + _hold(["move_forward"], 25)},
-		{"name": "bullet jump from slide (SLICE 4 pure-data verb)", "spawn": Vector3(0, 1.2, 0), "with_walls": false,
+		{"name": "bullet jump from slide (SLICE 4 pure-data verb, triggered by jump from slide)", "spawn": Vector3(0, 1.2, 0), "with_walls": false,
 			"log": _hold(["move_forward", "sprint"], 35)
 				+ _hold(["move_forward", "sprint", "crouch"], 4)
-				+ _hold(["move_forward", "crouch", "bullet_jump"], 3)
+				+ _hold(["move_forward", "crouch", "jump"], 3)
 				+ _hold(["move_forward"], 30)},
 	]
 
@@ -206,7 +206,7 @@ func _max_delta(a: Dictionary, b: Dictionary) -> float:
 # ---------------------------------------------------------------------------
 
 func _all_actions() -> Array:
-	return ["move_forward", "move_backward", "move_left", "move_right", "sprint", "crouch", "jump", "bullet_jump"]
+	return ["move_forward", "move_backward", "move_left", "move_right", "sprint", "crouch", "jump"]
 
 
 func _apply_input(entry: Dictionary, p: InterpretedPlayer) -> void:

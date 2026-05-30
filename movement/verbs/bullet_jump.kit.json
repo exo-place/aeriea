@@ -1,6 +1,6 @@
 {
   "$patch": "aeriea-movement-verb/1",
-  "comment": "Bullet jump (cf. Warframe): from a CROUCH or SLIDE, a directional burst that launches the player forward (along aim/look = the `forward` space) AND up. Triggered by the dedicated `bullet_jump` ability input (buffered) so it never collides with the base jump verb's slide-jump / crouch-jump (which fire on `jump`). Pure DATA: composed onto base.kit.json via kit overlay; uses ONLY existing Condition/Effect primitives (input_buffered, timer, all; add_velocity(forward), set_velocity_y, set_collider_height, set_timer). A cooldown timer (bullet_jump_cd) is the guard, expressed entirely as data. NO ENGINE CODE CHANGE. See docs/decisions/movement-substrate.md §2 (composition), Slice 4.",
+  "comment": "Bullet jump (cf. Warframe): from a CROUCH or SLIDE, a directional burst that launches the player forward (along aim/look = the `forward` space) AND up. Triggered by the SAME `jump` input (buffered) while in a slide or crouch — exactly the Warframe idiom. Priority 95 supersedes the base kit's plain slide-jump / crouch-jump (which fired on `jump` at priority 90 and 90 respectively); those base transitions have been removed so there is no unreachable duplicate and no (state, priority) collision. Pure DATA: composed onto base.kit.json via kit overlay; uses ONLY existing Condition/Effect primitives (input_buffered, timer, all; add_velocity(forward), set_velocity_y, set_collider_height, set_timer). A cooldown timer (bullet_jump_cd) is the guard, expressed entirely as data. NO ENGINE CODE CHANGE. See docs/decisions/movement-substrate.md §2 (composition), Slice 4.",
 
   "params": {
     "bullet_jump_forward_boost": 12.0,
@@ -9,16 +9,12 @@
     "bullet_jump_buffer_time": 0.15
   },
 
-  "inputs": {
-    "bullet_jump": { "buffer": "bullet_jump_buffer_time" }
-  },
-
   "add_transitions": {
     "SLIDE": [
       {
-        "comment": "Bullet jump out of a slide. Priority 95 — above the slide-jump (90) and all slide exits — so the ability fires the instant it is buffered and the cooldown is ready. Distinct input from `jump`, so no ambiguity. Stands up (with headroom), bursts forward+up, arms the cooldown.",
+        "comment": "Bullet jump out of a slide: jump input while in SLIDE. Priority 95 — the base kit's plain slide-jump (priority 90) has been removed so this is the sole jump-from-slide handler, with no race or unreachable duplicate. Stands up (with headroom), bursts forward+up along aim, arms the cooldown.",
         "when": { "op": "all", "of": [
-          { "op": "input_buffered", "action": "bullet_jump" },
+          { "op": "input_buffered", "action": "jump" },
           { "op": "timer", "name": "bullet_jump_cd", "cmp": "le", "value": 0 }
         ] },
         "to": "AIR",
@@ -28,16 +24,17 @@
           { "do": "set_velocity_y", "value": "bullet_jump_up" },
           { "do": "add_velocity", "space": "forward", "vector": "bullet_jump_forward_boost" },
           { "do": "set_timer", "name": "bullet_jump_cd", "value": "bullet_jump_cooldown" },
-          { "do": "set_timer", "name": "bullet_jump", "value": 0 },
+          { "do": "set_timer", "name": "jump_buffer", "value": 0 },
+          { "do": "set_timer", "name": "jump_hold", "value": 0 },
           { "do": "set_timer", "name": "slide_steer", "value": 0 }
         ]
       }
     ],
     "CROUCH": [
       {
-        "comment": "Bullet jump out of a crouch. Same band (95) as the slide variant; CROUCH and SLIDE are different states, so there is no collision. Stands up, bursts forward+up, arms the cooldown.",
+        "comment": "Bullet jump out of a crouch: jump input while in CROUCH. Priority 95 — the base kit's plain crouch-jump (priority 90) has been removed so this is the sole jump-from-crouch handler, with no race or unreachable duplicate. Stands up, bursts forward+up along aim, arms the cooldown.",
         "when": { "op": "all", "of": [
-          { "op": "input_buffered", "action": "bullet_jump" },
+          { "op": "input_buffered", "action": "jump" },
           { "op": "timer", "name": "bullet_jump_cd", "cmp": "le", "value": 0 }
         ] },
         "to": "AIR",
@@ -47,7 +44,8 @@
           { "do": "set_velocity_y", "value": "bullet_jump_up" },
           { "do": "add_velocity", "space": "forward", "vector": "bullet_jump_forward_boost" },
           { "do": "set_timer", "name": "bullet_jump_cd", "value": "bullet_jump_cooldown" },
-          { "do": "set_timer", "name": "bullet_jump", "value": 0 }
+          { "do": "set_timer", "name": "jump_buffer", "value": 0 },
+          { "do": "set_timer", "name": "jump_hold", "value": 0 }
         ]
       }
     ]

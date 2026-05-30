@@ -13,7 +13,17 @@ Parkour 2.0 movement is load-bearing per DESIGN.md (the per-second dopamine engi
 
 ## Movement abilities / extra movement (future design pass)
 
-Placeholder for additional movement verbs to compose with the existing slide/crouch/wall-run/vault set. The following verbs are earmarked for a future data-driven / composable movement system design pass — not built yet, each needs its own loop/momentum interaction/NSFW–SFW parity pass:
+The data-driven composable movement substrate is now designed: see
+**`docs/decisions/movement-substrate.md`** for the serializable
+state-machine-as-data schema, the interpreter + compiler dual path, the
+determinism model, and the incremental slice plan (Slice 1: schema +
+interpreter reproducing ground+jump and passing the existing behavioral
+tests; Slice 2: port slide/crouch/wall-run; Slice 3: compiler + equivalence
+golden traces; Slice 4: a new verb as pure data). Implementation not started.
+
+The verbs below are the starting vocabulary that substrate must express as
+recomposable data units — not built yet, each needs its own loop/momentum
+interaction/NSFW–SFW parity pass:
 
 - **Bullet jump** — mid-air velocity burst (cf. Warframe)
 - **Air burst** — radial upward/outward push (cf. Warframe Zephyr)

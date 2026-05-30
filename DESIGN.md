@@ -776,6 +776,33 @@ aggressively, only send what changed.
   perf-critical systems) when needed. Revisit engine choice if/when
   Godot's limitations dominate.
 
+### Movement as a data-driven substrate
+
+The movement kit is **fully composable and configurable as data**, not a
+hand-written controller. The state machine, its transitions (with guards),
+and its effects are a single serializable definition over a small closed
+vocabulary of *primitive* conditions (`on_ground`, `speed_h >= X`,
+`input_buffered`, `wall_detected`, …) and *primitive* effects
+(`set_velocity_y`, `add_velocity`, `carve`, `apply_gravity`,
+`set_collider_height`, …) — never embedded closures or source text. The
+backlog verbs (bullet jump, air burst, charge, wormhole, teleport, aim,
+wall-cling) are a *starting vocabulary*; the novel substrate is that they
+are recomposable data units a designer layers on without touching engine
+code — the thing that makes this **not** a Warframe ripoff.
+
+One definition projects two ways (library-first,
+projection-from-one-definition): an **interpreter** loads the JSON at
+runtime for live designer preview / hot-reload, and a **compiler** lowers
+the *same* definition to branching code (GDScript first, Rust/gdext later)
+for the perf edge. Interpreter and compiled output must produce identical
+trajectories from one definition — proved by golden traces (same seed +
+input log → identical state trajectory). The interpreter is a pure
+fixed-tick, single-sample-per-tick stepper, fitting the deterministic
+seeded-sim commitment above.
+
+Full spec, schema, worked examples (jump/slide/wall-run), and the
+incremental slice plan: **`docs/decisions/movement-substrate.md`**.
+
 ## Reference set
 
 What each reference contributes.

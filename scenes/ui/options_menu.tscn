@@ -23,7 +23,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 
 [node name="Panel" type="PanelContainer" parent="CenterContainer"]
-custom_minimum_size = Vector2(520, 440)
+custom_minimum_size = Vector2(520, 320)
 
 [node name="VBox" type="VBoxContainer" parent="CenterContainer/Panel"]
 layout_mode = 2
@@ -71,52 +71,6 @@ size_flags_stretch_ratio = 3.0
 custom_minimum_size = Vector2(160, 0)
 
 [node name="MouseSensLabel" type="Label" parent="CenterContainer/Panel/VBox/SensRow"]
-unique_name_in_owner = true
-layout_mode = 2
-custom_minimum_size = Vector2(60, 0)
-horizontal_alignment = 2
-
-[node name="CoyoteRow" type="HBoxContainer" parent="CenterContainer/Panel/VBox"]
-layout_mode = 2
-theme_override_constants/separation = 12
-
-[node name="CoyoteLabelFixed" type="Label" parent="CenterContainer/Panel/VBox/CoyoteRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_stretch_ratio = 2.0
-text = "Coyote Time"
-
-[node name="CoyoteSlider" type="HSlider" parent="CenterContainer/Panel/VBox/CoyoteRow"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_stretch_ratio = 3.0
-custom_minimum_size = Vector2(160, 0)
-
-[node name="CoyoteLabel" type="Label" parent="CenterContainer/Panel/VBox/CoyoteRow"]
-unique_name_in_owner = true
-layout_mode = 2
-custom_minimum_size = Vector2(60, 0)
-horizontal_alignment = 2
-
-[node name="JumpBufRow" type="HBoxContainer" parent="CenterContainer/Panel/VBox"]
-layout_mode = 2
-theme_override_constants/separation = 12
-
-[node name="JumpBufLabelFixed" type="Label" parent="CenterContainer/Panel/VBox/JumpBufRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_stretch_ratio = 2.0
-text = "Jump Buffer"
-
-[node name="JumpBufSlider" type="HSlider" parent="CenterContainer/Panel/VBox/JumpBufRow"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_stretch_ratio = 3.0
-custom_minimum_size = Vector2(160, 0)
-
-[node name="JumpBufLabel" type="Label" parent="CenterContainer/Panel/VBox/JumpBufRow"]
 unique_name_in_owner = true
 layout_mode = 2
 custom_minimum_size = Vector2(60, 0)

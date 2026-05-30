@@ -3,24 +3,24 @@
 ## Single source of truth for non-input runtime settings:
 ##   - dynamic_fov_enabled  : bool   (default true)
 ##   - mouse_sensitivity    : float  (default 0.002)
-##   - coyote_time          : float  (default 0.12 s)
-##   - jump_buffer_time     : float  (default 0.15 s)
 ##
 ## Persisted to user://game_settings.cfg via ConfigFile.
 ## UI reads/writes through this autoload; PlayerController reads from it.
+##
+## Note: coyote_time and jump_buffer_time are designer-tuning values that live
+## as @export vars on PlayerController (editor-tunable) and are NOT persisted
+## here or exposed to players.
 
 extends Node
 
 const SAVE_PATH := "user://game_settings.cfg"
 
 # ---------------------------------------------------------------------------
-# Defaults (must match @export defaults in PlayerController)
+# Defaults
 # ---------------------------------------------------------------------------
 
-const DEFAULT_DYNAMIC_FOV    := true
-const DEFAULT_MOUSE_SENS     := 0.002
-const DEFAULT_COYOTE_TIME    := 0.12
-const DEFAULT_JUMP_BUFFER    := 0.15
+const DEFAULT_DYNAMIC_FOV := true
+const DEFAULT_MOUSE_SENS  := 0.002
 
 ## Usable mouse-sensitivity bounds (radians per pixel of mouse motion).
 ## MIN is the lowest value the slider may reach AND the floor below which a
@@ -35,8 +35,6 @@ const MOUSE_SENS_MAX := 0.02
 
 var dynamic_fov_enabled: bool  = DEFAULT_DYNAMIC_FOV
 var mouse_sensitivity:   float = DEFAULT_MOUSE_SENS
-var coyote_time:         float = DEFAULT_COYOTE_TIME
-var jump_buffer_time:    float = DEFAULT_JUMP_BUFFER
 
 ## Emitted after any setting changes so UI can refresh.
 signal settings_changed
@@ -62,23 +60,9 @@ func set_mouse_sensitivity(value: float) -> void:
 	settings_changed.emit()
 
 
-func set_coyote_time(value: float) -> void:
-	coyote_time = clampf(value, 0.0, 0.5)
-	_save()
-	settings_changed.emit()
-
-
-func set_jump_buffer_time(value: float) -> void:
-	jump_buffer_time = clampf(value, 0.0, 0.5)
-	_save()
-	settings_changed.emit()
-
-
 func reset_all() -> void:
 	dynamic_fov_enabled = DEFAULT_DYNAMIC_FOV
 	mouse_sensitivity   = DEFAULT_MOUSE_SENS
-	coyote_time         = DEFAULT_COYOTE_TIME
-	jump_buffer_time    = DEFAULT_JUMP_BUFFER
 	_save()
 	settings_changed.emit()
 
@@ -93,8 +77,6 @@ func _load() -> void:
 		return
 	dynamic_fov_enabled = cfg.get_value("gameplay", "dynamic_fov_enabled", DEFAULT_DYNAMIC_FOV)
 	mouse_sensitivity   = cfg.get_value("gameplay", "mouse_sensitivity",   DEFAULT_MOUSE_SENS)
-	coyote_time         = cfg.get_value("gameplay", "coyote_time",         DEFAULT_COYOTE_TIME)
-	jump_buffer_time    = cfg.get_value("gameplay", "jump_buffer_time",    DEFAULT_JUMP_BUFFER)
 
 	# Heal corrupt/unusable persisted values. A previous bug could persist a
 	# near-zero mouse sensitivity (looking around became impossible); any value
@@ -107,6 +89,4 @@ func _save() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("gameplay", "dynamic_fov_enabled", dynamic_fov_enabled)
 	cfg.set_value("gameplay", "mouse_sensitivity",   mouse_sensitivity)
-	cfg.set_value("gameplay", "coyote_time",         coyote_time)
-	cfg.set_value("gameplay", "jump_buffer_time",    jump_buffer_time)
 	cfg.save(SAVE_PATH)

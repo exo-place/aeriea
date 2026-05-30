@@ -9,8 +9,10 @@
 ## State machine verbs: GROUND, AIR, SLIDE, WALL_RUN, WALL_JUMP_GRACE, CLIMB
 ##
 ## All @export constants are tunable in the editor without touching this file.
-## Runtime overrides (mouse_sensitivity, coyote_time, jump_buffer_time, dynamic FOV)
-## are read from the GameSettings autoload so they survive restart.
+## Runtime overrides (mouse_sensitivity, dynamic FOV) are read from the
+## GameSettings autoload so they survive restart.
+## coyote_time and jump_buffer_time are designer-tuning @export vars only —
+## they are not player-facing and are not read from GameSettings.
 
 class_name PlayerController
 extends CharacterBody3D
@@ -83,10 +85,10 @@ extends CharacterBody3D
 ## Jump impulse velocity (m/s)
 @export var jump_velocity: float = 7.5
 ## Coyote time window (seconds) — allows jumping slightly after leaving ground.
-## Overridden at runtime by GameSettings.coyote_time.
+## Designer-tunable in the editor; not exposed to players.
 @export var coyote_time: float = 0.12
 ## Jump buffer window (seconds) — allows pre-pressing jump before landing.
-## Overridden at runtime by GameSettings.jump_buffer_time.
+## Designer-tunable in the editor; not exposed to players.
 @export var jump_buffer_time: float = 0.15
 
 # ---------------------------------------------------------------------------
@@ -284,8 +286,6 @@ func _apply_look(relative: Vector2) -> void:
 
 func _apply_game_settings() -> void:
 	mouse_sensitivity = GameSettings.mouse_sensitivity
-	coyote_time       = GameSettings.coyote_time
-	jump_buffer_time  = GameSettings.jump_buffer_time
 
 
 # ---------------------------------------------------------------------------

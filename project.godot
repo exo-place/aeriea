@@ -25,6 +25,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 InputSettings="*res://scripts/input_settings.gd"
+GameSettings="*res://scripts/game_settings.gd"
 
 [display]
 

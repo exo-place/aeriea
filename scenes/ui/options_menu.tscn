@@ -1,0 +1,143 @@
+[gd_scene load_steps=2 format=3 uid="uid://options_menu_v1"]
+
+[ext_resource type="Script" path="res://scripts/ui/options_menu.gd" id="1_script"]
+
+[node name="OptionsMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_script")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.75)
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Panel" type="PanelContainer" parent="CenterContainer"]
+custom_minimum_size = Vector2(520, 440)
+
+[node name="VBox" type="VBoxContainer" parent="CenterContainer/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="CenterContainer/Panel/VBox"]
+layout_mode = 2
+text = "Options / Accessibility"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 24
+
+[node name="Separator" type="HSeparator" parent="CenterContainer/Panel/VBox"]
+layout_mode = 2
+
+[node name="FovRow" type="HBoxContainer" parent="CenterContainer/Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="FovLabel" type="Label" parent="CenterContainer/Panel/VBox/FovRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 3.0
+text = "Dynamic FOV (speed-based)"
+
+[node name="DynamicFovCheck" type="CheckButton" parent="CenterContainer/Panel/VBox/FovRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SensRow" type="HBoxContainer" parent="CenterContainer/Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SensLabelFixed" type="Label" parent="CenterContainer/Panel/VBox/SensRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 2.0
+text = "Mouse Sensitivity"
+
+[node name="MouseSensSlider" type="HSlider" parent="CenterContainer/Panel/VBox/SensRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 3.0
+custom_minimum_size = Vector2(160, 0)
+
+[node name="MouseSensLabel" type="Label" parent="CenterContainer/Panel/VBox/SensRow"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(60, 0)
+horizontal_alignment = 2
+
+[node name="CoyoteRow" type="HBoxContainer" parent="CenterContainer/Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="CoyoteLabelFixed" type="Label" parent="CenterContainer/Panel/VBox/CoyoteRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 2.0
+text = "Coyote Time"
+
+[node name="CoyoteSlider" type="HSlider" parent="CenterContainer/Panel/VBox/CoyoteRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 3.0
+custom_minimum_size = Vector2(160, 0)
+
+[node name="CoyoteLabel" type="Label" parent="CenterContainer/Panel/VBox/CoyoteRow"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(60, 0)
+horizontal_alignment = 2
+
+[node name="JumpBufRow" type="HBoxContainer" parent="CenterContainer/Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="JumpBufLabelFixed" type="Label" parent="CenterContainer/Panel/VBox/JumpBufRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 2.0
+text = "Jump Buffer"
+
+[node name="JumpBufSlider" type="HSlider" parent="CenterContainer/Panel/VBox/JumpBufRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 3.0
+custom_minimum_size = Vector2(160, 0)
+
+[node name="JumpBufLabel" type="Label" parent="CenterContainer/Panel/VBox/JumpBufRow"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(60, 0)
+horizontal_alignment = 2
+
+[node name="Separator2" type="HSeparator" parent="CenterContainer/Panel/VBox"]
+layout_mode = 2
+
+[node name="ButtonRow" type="HBoxContainer" parent="CenterContainer/Panel/VBox"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 12
+
+[node name="BackButton" type="Button" parent="CenterContainer/Panel/VBox/ButtonRow"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+text = "Back"
+
+[node name="ResetButton" type="Button" parent="CenterContainer/Panel/VBox/ButtonRow"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(160, 0)
+text = "Reset to Defaults"

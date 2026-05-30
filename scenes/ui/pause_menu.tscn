@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3 uid="uid://pause_menu_v1"]
+[gd_scene load_steps=4 format=3 uid="uid://pause_menu_v1"]
 
 [ext_resource type="Script" path="res://scripts/ui/pause_menu.gd" id="1_script"]
 [ext_resource type="PackedScene" path="res://scenes/ui/controls_menu.tscn" id="2_controls_menu"]
+[ext_resource type="PackedScene" path="res://scenes/ui/options_menu.tscn" id="3_options_menu"]
 
 [node name="PauseMenu" type="CanvasLayer"]
 script = ExtResource("1_script")
@@ -48,6 +49,12 @@ layout_mode = 2
 custom_minimum_size = Vector2(0, 44)
 text = "Controls / Rebind"
 
+[node name="OptionsButton" type="Button" parent="PausePanel/Panel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(0, 44)
+text = "Options / Accessibility"
+
 [node name="QuitButton" type="Button" parent="PausePanel/Panel/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -55,5 +62,9 @@ custom_minimum_size = Vector2(0, 44)
 text = "Quit to Desktop"
 
 [node name="ControlsMenuScene" parent="." instance=ExtResource("2_controls_menu")]
+unique_name_in_owner = true
+visible = false
+
+[node name="OptionsMenuScene" parent="." instance=ExtResource("3_options_menu")]
 unique_name_in_owner = true
 visible = false

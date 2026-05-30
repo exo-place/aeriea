@@ -9,6 +9,8 @@
 ## State machine verbs: GROUND, AIR, SLIDE, WALL_RUN, WALL_JUMP_GRACE, CLIMB
 ##
 ## All @export constants are tunable in the editor without touching this file.
+## Runtime overrides (mouse_sensitivity, coyote_time, jump_buffer_time, dynamic FOV)
+## are read from the GameSettings autoload so they survive restart.
 
 class_name PlayerController
 extends CharacterBody3D
@@ -80,9 +82,11 @@ extends CharacterBody3D
 @export_group("Jump")
 ## Jump impulse velocity (m/s)
 @export var jump_velocity: float = 7.5
-## Coyote time window (seconds) — allows jumping slightly after leaving ground
+## Coyote time window (seconds) — allows jumping slightly after leaving ground.
+## Overridden at runtime by GameSettings.coyote_time.
 @export var coyote_time: float = 0.12
-## Jump buffer window (seconds) — allows pre-pressing jump before landing
+## Jump buffer window (seconds) — allows pre-pressing jump before landing.
+## Overridden at runtime by GameSettings.jump_buffer_time.
 @export var jump_buffer_time: float = 0.15
 
 # ---------------------------------------------------------------------------
@@ -203,6 +207,9 @@ var _is_vaulting: bool = false
 ## Reference gravity (project setting)
 var _gravity: float = 0.0
 
+## Whether collider is currently in crouch shape (avoids redundant resize).
+var _is_crouched: bool = false
+
 # ---------------------------------------------------------------------------
 # Ready
 # ---------------------------------------------------------------------------
@@ -221,16 +228,30 @@ func _ready() -> void:
 	_camera.fov = fov_base
 	_camera_pivot.add_child(_camera)
 
-	# Collision capsule
+	# Collision capsule — centred at the body origin.
+	# CapsuleShape3D is centred, so half-height above/below origin = stand_height.
 	_capsule = CapsuleShape3D.new()
 	_capsule.radius = 0.35
 	_capsule.height = stand_height * 2.0
 	_collision_shape = CollisionShape3D.new()
 	_collision_shape.shape = _capsule
+	# Keep the CollisionShape at the body origin (y=0); we shift the body itself
+	# when crouching to keep feet planted — see _set_crouch_shape.
+	_collision_shape.position = Vector3.ZERO
 	add_child(_collision_shape)
+
+	# Pull runtime-overridable settings from GameSettings autoload.
+	_apply_game_settings()
+	GameSettings.settings_changed.connect(_apply_game_settings)
 
 	# Capture mouse on start
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _apply_game_settings() -> void:
+	mouse_sensitivity = GameSettings.mouse_sensitivity
+	coyote_time       = GameSettings.coyote_time
+	jump_buffer_time  = GameSettings.jump_buffer_time
 
 
 # ---------------------------------------------------------------------------
@@ -242,22 +263,34 @@ func _input(event: InputEvent) -> void:
 	_mouse_captured = (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED)
 
 	# Mouse look — only while captured.
-	if not _mouse_captured:
-		return
-
-	if event is InputEventMouseMotion:
+	if _mouse_captured and event is InputEventMouseMotion:
 		_yaw -= event.relative.x * mouse_sensitivity
 		_pitch -= event.relative.y * mouse_sensitivity
 		_pitch = clamp(_pitch, deg_to_rad(pitch_min), deg_to_rad(pitch_max))
 		rotation.y = _yaw
 		_camera_pivot.rotation.x = _pitch
 
-	# Jump buffer
-	if event.is_action_pressed("jump"):
-		_jump_buffer_timer = jump_buffer_time
-		_jump_held = true
-	if event.is_action_released("jump"):
-		_jump_held = false
+	# Click-to-recapture: when unpaused and mouse is freed, a left-click
+	# inside the viewport recaptures. We check get_tree().paused to avoid
+	# stealing clicks from active menu buttons.
+	if not _mouse_captured and not get_tree().paused:
+		if event is InputEventMouseButton:
+			var mev := event as InputEventMouseButton
+			if mev.pressed and mev.button_index == MOUSE_BUTTON_LEFT:
+				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+				_mouse_captured = true
+				get_viewport().set_input_as_handled()
+				return
+
+	# Jump buffer — process regardless of mouse-capture state so the
+	# buffer fires on first click-to-refocus too.
+	# Guard: only when gameplay is actually running (not paused).
+	if not get_tree().paused:
+		if event.is_action_pressed("jump"):
+			_jump_buffer_timer = jump_buffer_time
+			_jump_held = true
+		if event.is_action_released("jump"):
+			_jump_held = false
 
 
 # ---------------------------------------------------------------------------
@@ -577,10 +610,22 @@ func _end_slide() -> void:
 
 
 func _set_crouch_shape(crouching: bool) -> void:
-	var target_height := crouch_height if crouching else stand_height
-	_capsule.height = target_height * 2.0
-	# Adjust origin so feet stay at same position
-	_collision_shape.position.y = 0.0
+	if _is_crouched == crouching:
+		return  # No change — avoid redundant resize that can cause jitter.
+
+	var old_height := _capsule.height  # full capsule height before change
+	var new_half := crouch_height if crouching else stand_height
+	var new_height := new_half * 2.0
+
+	# Height delta: positive means we got shorter (crouching down).
+	# We compensate by shifting the body UP by half the delta so the feet
+	# stay planted at the same world position.
+	var delta_height := old_height - new_height
+	_capsule.height = new_height
+	# CollisionShape stays centred at body origin; shift body so feet don't move.
+	global_position.y += delta_height * 0.5
+
+	_is_crouched = crouching
 
 
 func _can_stand() -> bool:
@@ -743,12 +788,14 @@ func _update_camera(delta: float) -> void:
 	var target_height := camera_height_crouch if _state == State.SLIDE else camera_height_stand
 	_camera_pivot.position.y = lerp(_camera_pivot.position.y, target_height, camera_height_lerp_speed * delta)
 
-	# FOV
+	# FOV — dynamic (speed-based) unless disabled in GameSettings
 	var horiz_speed: float = Vector3(velocity.x, 0.0, velocity.z).length()
-	var sprint_fraction: float = clampf((horiz_speed - walk_speed) / (sprint_speed - walk_speed), 0.0, 1.0)
-	var target_fov: float = fov_base + sprint_fraction * fov_sprint_bonus
-	if _state == State.WALL_RUN:
-		target_fov += fov_wall_run_bonus
+	var target_fov: float = fov_base
+	if GameSettings.dynamic_fov_enabled:
+		var sprint_fraction: float = clampf((horiz_speed - walk_speed) / (sprint_speed - walk_speed), 0.0, 1.0)
+		target_fov += sprint_fraction * fov_sprint_bonus
+		if _state == State.WALL_RUN:
+			target_fov += fov_wall_run_bonus
 	_camera.fov = lerp(_camera.fov, target_fov, fov_lerp_speed * delta)
 
 	# Camera tilt for wall-run

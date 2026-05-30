@@ -1,4 +1,4 @@
-## PauseMenu — pause overlay with resume, controls, and quit buttons.
+## PauseMenu — pause overlay with resume, controls, options, and quit buttons.
 ##
 ## The pause menu is a CanvasLayer (layer=10) that becomes visible on ui_pause.
 ## While open the mouse is freed and gameplay is paused via get_tree().paused.
@@ -10,11 +10,13 @@
 
 extends CanvasLayer
 
-@onready var _pause_panel: Control = %PausePanel
-@onready var _controls_menu_scene: Control = %ControlsMenuScene
-@onready var _resume_button: Button = %ResumeButton
-@onready var _controls_button: Button = %ControlsButton
-@onready var _quit_button: Button = %QuitButton
+@onready var _pause_panel: Control          = %PausePanel
+@onready var _controls_menu_scene: Control  = %ControlsMenuScene
+@onready var _options_menu_scene: Control   = %OptionsMenuScene
+@onready var _resume_button: Button         = %ResumeButton
+@onready var _controls_button: Button       = %ControlsButton
+@onready var _options_button: Button        = %OptionsButton
+@onready var _quit_button: Button           = %QuitButton
 
 var _is_paused: bool = false
 
@@ -26,19 +28,22 @@ func _ready() -> void:
 
 	_pause_panel.visible = true
 	_controls_menu_scene.visible = false
+	_options_menu_scene.visible = false
 
 	_resume_button.pressed.connect(_on_resume)
 	_controls_button.pressed.connect(_on_open_controls)
+	_options_button.pressed.connect(_on_open_options)
 	_quit_button.pressed.connect(_on_quit)
 
-	_controls_menu_scene.close_requested.connect(_on_controls_closed)
+	_controls_menu_scene.close_requested.connect(_on_submenu_closed)
+	_options_menu_scene.close_requested.connect(_on_submenu_closed)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_pause"):
 		if _is_paused:
-			if _controls_menu_scene.visible:
-				_on_controls_closed()
+			if _controls_menu_scene.visible or _options_menu_scene.visible:
+				_on_submenu_closed()
 			else:
 				_unpause()
 		else:
@@ -51,6 +56,7 @@ func _pause() -> void:
 	visible = true
 	_pause_panel.visible = true
 	_controls_menu_scene.visible = false
+	_options_menu_scene.visible = false
 	get_tree().paused = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
@@ -60,6 +66,9 @@ func _unpause() -> void:
 	visible = false
 	get_tree().paused = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# Release UI focus so no button holds Space (ui_accept) after resuming,
+	# which would otherwise intercept the first jump press.
+	get_viewport().gui_release_focus()
 
 
 func _on_resume() -> void:
@@ -68,11 +77,19 @@ func _on_resume() -> void:
 
 func _on_open_controls() -> void:
 	_pause_panel.visible = false
+	_options_menu_scene.visible = false
 	_controls_menu_scene.visible = true
 
 
-func _on_controls_closed() -> void:
+func _on_open_options() -> void:
+	_pause_panel.visible = false
 	_controls_menu_scene.visible = false
+	_options_menu_scene.visible = true
+
+
+func _on_submenu_closed() -> void:
+	_controls_menu_scene.visible = false
+	_options_menu_scene.visible = false
 	_pause_panel.visible = true
 
 

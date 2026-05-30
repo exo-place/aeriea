@@ -51,8 +51,8 @@ const _STATE_NAME_TO_ENUM := {
 @export var mouse_sensitivity: float = 0.002
 @export var pitch_min: float = -89.0
 @export var pitch_max: float = 89.0
-@export var camera_height_stand: float = 1.65
-@export var camera_height_crouch: float = 0.85
+@export var camera_height_stand: float = 0.85
+@export var camera_height_crouch: float = 0.55
 @export var fov_base: float = 90.0
 
 # --- Collider / slope --------------------------------------------------------

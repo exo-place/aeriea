@@ -26,8 +26,8 @@ extends CharacterBody3D
 ## Degrees clamped for pitch
 @export var pitch_min: float = -89.0
 @export var pitch_max: float = 89.0
-@export var camera_height_stand: float = 1.65
-@export var camera_height_crouch: float = 0.85
+@export var camera_height_stand: float = 0.85
+@export var camera_height_crouch: float = 0.55
 ## How fast camera lerps to target height
 @export var camera_height_lerp_speed: float = 12.0
 ## FOV during normal movement

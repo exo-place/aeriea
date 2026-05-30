@@ -47,8 +47,8 @@
     "vault_min_speed": 2.5,
     "vault_duration": 0.28,
 
-    "camera_height_stand": 1.65,
-    "camera_height_crouch": 0.85,
+    "camera_height_stand": 0.85,
+    "camera_height_crouch": 0.55,
     "camera_height_lerp_speed": 12.0,
     "wall_run_camera_tilt": 8.0,
     "camera_roll_lerp_speed": 10.0,

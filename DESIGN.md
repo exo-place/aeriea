@@ -1,11 +1,18 @@
-# DESIGN (draft)
+# DESIGN
 
-Working design doc for an unnamed project. Captures what's been
-decided so far, what's still open, and what is explicitly *not* in
-scope.
+Working design doc for **aeriea** (pronounced "area"; name tentative —
+see Naming). Captures what's been decided so far, what's still open,
+and what is explicitly *not* in scope. Comprehensive synthesis from
+the co-design conversation that produced the project — it is intended
+to capture every meaningful decision, refusal, value, architectural
+commitment, system, activity, trade-off, nuance, persona-research
+finding, and open question raised across that conversation, including
+the subtler points and the things ruled *out* on the way to what was
+ruled *in*.
 
-Status: pre-scaffolding. Engine likely Godot or Bevy via
-[godogen](https://github.com/htdt/godogen).
+Status: pre-prototype. Engine decided (provisional): Godot via
+[godogen](https://github.com/htdt/godogen). Repo scaffolded. Name
+decided (tentative): **aeriea**.
 
 ## What this is
 
@@ -16,11 +23,27 @@ Status: pre-scaffolding. Engine likely Godot or Bevy via
 Every design decision is evaluated against one test: does this preserve,
 or break, the player's immersion? Any break — animation snapping, audio
 mis-spatializing, NPC dialogue feeling robotic, UI overlay breaking the
-spell, a clipping garment, a mistimed viseme, a glitched hand grasp —
-fails the test. The "extra" framing (sometimes phrased "110%
-commitment") is rhetorical emphasis on uncompromising posture: we don't
-ship at 95% if 100% is what the design requires. Reality-grade
-immersion in the moments that matter, with zero copouts.
+spell, a clipping garment, a mistimed viseme, a glitched hand grasp,
+a mirror with the wrong reflection — fails the test. The "extra"
+framing (sometimes phrased "110% commitment") is rhetorical emphasis on
+uncompromising posture: we don't ship at 95% if 100% is what the design
+requires. Reality-grade immersion in the moments that matter, with zero
+copouts. The extra 10 is *not* "exceeds reality" — reality-equivalent
+is the bar.
+
+The user-explicit derivation chain: no copouts on animation traces to
+"any flaw breaks immersion"; stylization is not acceptable because
+it's less than full immersion; mocap edge cases are unacceptable
+because any glitch breaks immersion; no combat / no grind because they
+force out-of-character modes; deep customization because it lets you
+be immersed in being *yourself*; mirrors are foundational because you
+experience your own immersion; VR is first-class because it's the most
+immersive medium; face tracking / visemes / breathing / saccades
+because every channel of immersion matters; physical sim quality
+because the body has to read as real; NSFW-first because intimate
+moments are the test of immersion; density-of-content not
+forced-cadence because immersion = your own pace; deep NPCs + world
+agency because a place that's alive populates immersion.
 
 Every other design decision in this doc — no combat, no grind, no quest
 markers, deep customization, mirrors, parkour 2.0, KIM-grade NPCs,
@@ -34,14 +57,33 @@ where you spend time, where you exist. The mechanics serve the place;
 they're not the point.
 
 The lineage of "place, not game" includes the best moments of every
-great MMO (old WoW, FFXIV housing, Warframe relays, Second Life,
-ChatMUD) and the best moments of contemplative-experiential games
-(AER, Sable, Sky). What those references *lack* — and what this
-project provides — is full synthesis: the depth and variety of a
-Warframe-grade sandbox, the customization and identity-fluidity of a
-TiTS/FS-grade character system, the embodied movement of a parkour 2.0
-game, the cosmetic investment of fashion-frame culture, all in
-service of *being-in-a-place*.
+great MMO and the best moments of contemplative-experiential games:
+
+- Old WoW
+- FFXIV housing wards
+- Warframe relays (Dormizone / Cetus / 1999 Höllvania)
+- Second Life
+- ChatMUD
+- AER, Sable, Sky (the contemplative-experiential side)
+
+What those references *lack* — and what aeriea provides — is full
+synthesis: the depth and variety of a Warframe-grade sandbox, the
+customization and identity-fluidity of a TiTS/FS-grade character
+system, the embodied movement of a parkour 2.0 game, the cosmetic
+investment of fashion-frame culture, all in service of
+*being-in-a-place*.
+
+### The shape stated three ways
+
+- **TiTS/FS-grade identity/transformation/content depth, in 3D, with
+  parkour 2.0 movement and Warframe-grade visual cosmetics.** (The
+  gap TiTS/FS leave is embodiment; that's exactly what aeriea adds.)
+- **Palia's content axis wedded to Hollow-Knight-composable verbs
+  and Redout/Ultrakill/Sable-grade movement.** Palia's content,
+  parkour-2.0 traversal: the commute *becomes* part of the pleasure.
+- **Warframe-shaped sampler of power fantasies, each fantasy
+  non-combat.** Swap between flavors of being-in-the-world by mood,
+  like swapping frames.
 
 ## What makes a place worth being in
 
@@ -77,21 +119,105 @@ Non-negotiable refusals. Listed to keep future scope creep honest.
 
 - **Not a combat game.** Combat is structurally absent. The player's
   vocabulary does not include violence. No combat-as-spine; no
-  combat-as-side-content either.
+  combat-as-side-content either. Rationale: combat is a
+  "conflict-resolution monoculture" — every encounter collapses to
+  the same verb of "reduce HP to 0", flattening design space and
+  forcing the world to be populated with things-that-must-die. The
+  aesthetic is **co-presence over opposition**: "what is this thing,
+  and what's it like to be near it," not "how do I remove it."
 - **Not a quest-driven game.** No quest markers, no fetch chains, no
   scripted objective sequences as the primary content.
 - **Not a quantity-gated grinder.** No "mine 1000 of X to unlock Y."
-  No tradeskill XP bars. Quantity-of-identical-actions as a
-  progression mechanism is the failure mode being refused.
+  No tradeskill XP bars. The failure-mode framing is precise:
+  "quantity-gated repetition of identical actions" *regardless of how
+  nice the action is individually*. Tony Hawk runs aren't grindy
+  because each run is a *fresh creative act with variance*;
+  mining-in-batches-of-6 has no variance — it's the same input loop
+  until the meter fills. Reducing the quantity doesn't remove the
+  pattern; it shortens the labor.
 - **Not a metroidvania.** Verbs are not gated to re-open the world.
 - **Not a designed-answers platformer.** Geometry doesn't have one
-  correct line; many lines are valid.
+  correct line; many lines are valid. The world is *permissive* the
+  way Warframe's geometry is — wide corridors, big rooms, gaps you
+  can fudge, surfaces that behave the same. You can't really "miss" a
+  jump in a way that matters. Expression is *into a sandbox*, not
+  *into a designed question*.
 - **Not a finite narrative experience.** AER / Feather / Sable run
   out. The substrate must carry replay; developer-authored content
   treadmills will not.
 - **Not a passive / contemplative experience.** The experiential
   posture does *not* mean walking-sim engagement. The player is active
-  — moving fluently, expressing themselves, interacting richly.
+  — moving fluently, expressing themselves, interacting richly. (The
+  reference set's contemplative games are referenced for posture/tone,
+  *not* for pacing/scope.)
+
+### Things considered, clarified, or rejected along the way
+
+These were on the table at some point in the conversation and were
+ultimately ruled out, reframed, or downgraded. Capturing them so the
+reasons don't have to be re-derived later.
+
+- **"Movement is the whole game"** — wrong framing. Movement is a
+  pillar (the canvas you display your look on, the per-second dopamine
+  engine) but not the whole. Early framing tunnel-visioned on it from
+  the parkour-2.0 references and was corrected.
+- **"Fashion is the spine"** — wrong, because "fashion is not
+  something you can do all day every day." Cosmetics are a major
+  value but not *the* central thing.
+- **"Scenes as the core content unit"** — too shallow.
+- **"Ongoing relationships and arcs as the entire game"** — alone,
+  insufficient. Naming any singular 'content unit' is reductive,
+  a copout, and misleading. aeriea is a sampler; it does not have a
+  single spine. "Spine" itself is a sloppy framing the project should
+  not reach for; aeriea doesn't have one.
+- **Activity-frequency-management as the design axis** — wrong axis.
+  Frequency is the wrong lens; all that matters is that things
+  *exist* at all. Forcing high frequency is, objectively, annoying.
+  Push-cadence is anti-pattern; pull-availability is the goal. (See
+  Density-not-Cadence.)
+- **WarioWare / Dumb-Ways-to-Die tempo as a design framework** —
+  discussed as a pattern-of-short-novel-hits but explicitly rejected
+  as a tempo for this game. Animal Crossing tempo even is the *wrong
+  axis*; the actual axis is *existence not frequency*.
+- **Resonite/NeosVR-style in-world programmability as a major
+  feature** — Resonite already occupies that niche, and its perf is
+  garbage and it lacks a real cosmetic-shopping economy. aeriea
+  includes player-authored content / decoration as a low-priority
+  nice-to-have at the Warframe-decoration tier, no more.
+- **VRChat's custom-avatar workflow** — requires Unity, which is
+  insane. aeriea will not make players open Unity to bring an avatar
+  in. Resonite/NeosVR-style in-engine creation is the better
+  reference.
+- **Mocap as the animation strategy** — technically feasible but
+  rejected on its merits. Mocap is limited and you will be hunting
+  edge cases forever. It is the most feasible path; it is not a good
+  solution, even if the alternative is beyond SOTA. Mocap scales
+  linearly with content, doesn't compound, and breaks at edge cases —
+  and edge cases *multiply* with body sliders, item sliders,
+  situation variance.
+- **Stylized aesthetic as the way out of the animation problem** —
+  considered as a copout for missing realism, then ruled inadmissible.
+  Stylized art is fine if chosen affirmatively for its own reasons,
+  but cannot be the answer to "we can't hit perceptual realism."
+- **Pre-baked simulation results as the animation strategy** — leads
+  to the 500GB-of-simulated-animations problem under combinatoric
+  body variation. Doesn't scale.
+- **Per-client mix-and-match netcode** — rejected as too complex.
+  Mix-by-responsibility yes; mix-by-connection no.
+- **Replay-the-missed-log to catch up on reconnect** — unnecessary.
+  Reconnect via snapshot; action log is for sharing/leaderboards,
+  not for live reconnect.
+- **Shipping a smaller place / scope reduction** — explicitly
+  unacceptable per design intent. "Half the place is not a smaller
+  place, it's a tech demo." Dropping target hardware support is
+  unacceptable; Quest standalone stays in scope.
+- **"Movement game in 2D"** — no; parkour 2.0 is 3D. Hollow Knight is
+  referenced for *what movement means* (compositional verb
+  vocabulary), not for being 2D.
+- **Pursuit / dating as a "missed" pattern in games** — early framing
+  claimed games skip pursuit; this is not true. Persona, BG3,
+  Stardew, every dating sim covers it. Not a missing pattern, just a
+  particular surface aeriea will support.
 
 ## Core values
 
@@ -138,23 +264,29 @@ Currently committed (in priority order):
    continuous line. Rare and distinct — most games only give you
    one save-slot's worth of "you."
 
-The list will grow as more concrete fantasies are committed, but
-these five are the foundation.
+**The list grows.** Five is the current foundation, not the cap.
+Further power fantasies will be committed as concrete ones are
+identified. The doc's job is to record them as they land, not to
+freeze the catalogue.
 
 ### Cosmetic depth / fanservice
 
-Not the spine, but a major value. The project invests in cosmetics at
-Warframe scale — Tennogen-grade visual depth, not "pick a colour
-swatch." Combined with the TiTS/FS lineage, "cosmetic" extends past
-outfits to **the body itself** — forms, transformations, species,
-presentation all on the customization surface.
+Not the spine (there is no spine), but a major value. The project
+invests in cosmetics at Warframe scale — Tennogen-grade visual depth,
+not "pick a colour swatch." Combined with the TiTS/FS lineage,
+"cosmetic" extends past outfits to **the body itself** — forms,
+transformations, species, presentation all on the customization
+surface.
 
 The cosmetic *economy* (browsing, shopping, acquiring, curating drip)
 is itself a real activity, not an afterthought. Resonite/NeosVR
 notably lack this even though they have user-imported assets.
 
-**Live expressive system, not static loadouts.** VRChat-style
-toggles, sliders, and items are core, not nice-to-have:
+#### Live expressive system (VRChat-shape)
+
+VRChat-style toggles, sliders, and items are **core, not
+nice-to-have**, and are distinct from session-level loadout swaps.
+They are a *live moment-to-moment expression surface*:
 
 - **Toggles** — avatar components you switch on/off live during play
   (show/hide hat, wings, particle effects, accessories, glow).
@@ -165,31 +297,64 @@ toggles, sliders, and items are core, not nice-to-have:
   plushies, instruments, signs, flowers, toys), often interactive
   with other players (give a flower, share a smoke, hand someone a
   sign). Each item is a tiny social-interaction primitive and a
-  small individually-authorable piece of content.
+  small individually-authorable piece of content (community-multiplier
+  on density-of-available-content).
 
 This is distinct from Warframe-style appearance slots (which are
-session-level loadout swaps) and from static cosmetic curation. It's
-a *live moment-to-moment expression surface*. Items also become a
-content type the community can author at scale (huge content
-multiplier for density-of-available-content).
+session-level loadout swaps) and from static cosmetic curation.
 
-**Positioning vs VRChat and Warframe**: Warframe is *gamey but less
-personal* — high curation, low personal-expression depth. VRChat is
-*personal but uncurated* — high personal-expression, wild-west
-quality. The project aims for **more structured and curated than
-VRChat, more personal than Warframe** — curated authorship surface
-(quality bar, moderation) with deep personal expression within it.
-Community items/avatars exist but pass through a quality gate; the
-default-shipped experience feels intentional, not chaotic.
+#### Mid-session form swapping
 
-**Mirrors are foundational, not a nice-to-have.** In first-person /
-VR with heavy avatar/body investment, the player literally cannot see
-themselves otherwise. Mirrors are the entire feedback loop for
-cosmetic curation, body expression, embodiment-checking, and
-self-appreciation. Without good mirrors, all the cosmetic / body
-investment is invisible to the player themselves — they spent hours
-making the avatar but only see other people / can't appreciate their
-own work. That's the failure mode mirrors prevent.
+A specifically-VRChat thing distinct from session-level appearance:
+*change shape on the fly, as a verb*. Mid-conversation transformation.
+Embodiment in non-human / unusual forms — giant, tiny, monstrous,
+anthropomorphic, abstract. Scale and proportions change, not just
+look. Body-form play.
+
+#### Items as mechanically meaningful, not just visual
+
+A *game game* needs customization that's mechanically meaningful, not
+purely display. Items / toggles / sliders are first-class gameplay
+surfaces:
+
+- **Items** do things (instrument actually plays, drink actually
+  intoxicates, sign actually communicates).
+- **Sliders** can affect what scenes are accessible / how NPCs react /
+  what clothes fit / what activities you can do, not just aesthetics.
+- **Toggles** change contextual state (clothed/unclothed affects scene
+  availability; active accessory toggle changes social context).
+
+UX caveat noted explicitly: mixed-purpose surface (some toggles are
+cosmetic, some are mechanical, some context-gating) creates a UX
+minefield, plus all the failure modes of parameterized bodies
+(clipping, animation breaking, items used at wrong moments, perf
+tanking with many things active). Needs careful design.
+
+#### Positioning vs VRChat and Warframe
+
+- **Warframe** is *gamey but less personal* — high curation, low
+  personal-expression depth.
+- **VRChat** is *personal but uncurated* — high personal-expression,
+  wild-west quality, requires Unity to author avatars.
+- **aeriea** aims for **more structured and curated than VRChat, more
+  personal than Warframe** — curated authorship surface (quality bar,
+  moderation) with deep personal expression within it. Community
+  items/avatars exist but pass through a quality gate; the
+  default-shipped experience feels intentional, not chaotic. In-engine
+  creation tools (Resonite-shape), not "open Unity."
+
+#### Mirrors are foundational
+
+In first-person / VR with heavy avatar/body investment, the player
+literally cannot see themselves otherwise. Mirrors are the entire
+feedback loop for cosmetic curation, body expression,
+embodiment-checking, and self-appreciation. Without good mirrors, all
+the cosmetic / body investment is invisible to the player themselves —
+they spent hours making the avatar but only see other people / can't
+appreciate their own work. That's the failure mode mirrors prevent.
+
+Surfaced explicitly as "the most important part (of VRChat at least)"
+that earlier framings had missed.
 
 Practically:
 - **Mirrors throughout the world** — bathrooms, bedrooms, hallways,
@@ -206,6 +371,22 @@ Practically:
   standalone budget is tight but feasible at lower res / selective
   quality.
 
+#### NSFW-first with SFW toggle
+
+All systems (body, transformation, relationships, intimacy, identity)
+are designed assuming NSFW is the default. NPCs are written as full
+sexual/intimate beings. The SFW toggle is a *rendering* layer (clothes
+the NPCs, censors prose, removes scenes), **not** a content rewrite —
+the underlying systems remain NSFW-shaped. Depth and care goes into
+the adult content; SFW is the abridged version.
+
+Reference posture: TiTS / Lilith's Throne / Accidental Woman.
+Failure-mode posture (rejected): modded Skyrim NSFW, which is
+SFW-first with NSFW bolted on.
+
+Distribution constrained accordingly: Itch.io, direct download, the
+adult section on Steam if eligible.
+
 ### Movement that doesn't waste your time
 
 Palia's failure: cozy life-sim activities are fine, but the player is
@@ -213,14 +394,25 @@ slow and the world is huge, so 90% of the session is commute.
 Refusal: the player must move *fluently* so traversal is a pleasure,
 not a tax.
 
+The aesthetic upside: if movement is Redout-grade and expressive, the
+"commute" between activities *becomes* the pleasure. The walk to the
+fishing spot is the *other* good thing about the fishing trip.
+
 - **Parkour 2.0** is the love. Mirror's Edge / Dying Light /
   Ghostrunner — negotiation with real geometry, embodied weight,
   momentum that matters.
 - **Carving / momentum feel** (Redout 2). Control surface composes;
   every input modifies every other input; velocity preserved across
-  inputs.
+  inputs. Redout 2 was the stated *trigger* for the whole desire — the
+  thing that started the project — but the desire is for the carving
+  feel *unbolted from the track*, applied to a Sable-shaped world.
 - **Compositional verb vocabulary** (Hollow Knight). Small clean
   primitives; the depth is in chains; mastery is real and felt.
+  (Referenced for *what movement means*, not for being 2D.)
+- **Brain-on, not brain-off** — parkour 2.0 is the brain-on mode
+  (bullet jump + aim glide are muscle memory; the *line through the
+  level* is the creative act). Distinct from Warframe-style
+  movement-as-traversal-tool.
 
 ### Character investment that lasts
 
@@ -270,6 +462,44 @@ they make the place feel inhabited and worth exploring.
 Higher-level genre. Open-ended, no win state, the game doesn't push
 you down a track. You log in and decide what to do today.
 
+### Comfort over novelty for routine play
+
+(From the persona research — see *Persona research*.) The game should
+not push novelty constantly. Most sessions are people seeking
+familiar/warm, not new-thing-please. The design must support
+comfort-mode play alongside novelty-mode play. Comfort rewatches,
+your spot, your routine, the people you already know — these need to
+*work* in aeriea, not be subordinated to "what's new this week."
+
+### One sacred thing per player-type
+
+(From the persona research.) Each persona has ONE thing they reach
+for that genuinely refills them. Casey's trail run with the dog;
+Alex's painting minis; Maria's Saturday nap; Sam's coffee-shop read;
+Riley's fic writing. Not the same thing for each. This *validates*
+the variety-of-power-fantasies value: different players have
+different anchors, and aeriea must provide enough breadth that each
+player can find their sacred thing in here.
+
+### Parallel play as a design property
+
+Threads through almost every activity. Most are nicer with someone in
+the room/voice even if you're each doing your own thing.
+NPC-presence-as-co-presence is a design property the activity surface
+should preserve everywhere. From the persona research: *everyone*
+does parallel play (partner watching a show while you craft, roommate
+playing their game while you play yours, voice-chat-while-doing-own-
+thing).
+
+### The fragmented modern evening
+
+(From the persona research.) Evenings are 5-7 small activities
+switching, not deep focus on one. Design for this. A session is not
+"one deep activity"; it's a short opener, a wander, an encounter, a
+cosmetic snack, a parallel-play stint, and a wind-down. The pacing
+and the structural commitments (pull-availability, density,
+parallel-play) all serve this.
+
 ### Platform for depth
 
 "Rich worldbuilding / NPCs" only materializes if the structure
@@ -295,13 +525,27 @@ real prior art:
 - **Procedural recombination** — pattern from HHS+, Accidental
   Woman, Lilith's Throne. Authored fragments + simulation state +
   generative composition = many more rendered scenes/encounters
-  than any one author could write.
+  than any one author could write. Proven pattern delivering hundreds
+  of hours of content per game *without* LLMs.
 - **LLM-compatible but not LLM-required** — local LLM viability and
   the controversy around LLMs are both unsettled. Build the depth
   substrate to stand on its own using proven patterns (simulation +
   authoring + procedural), but design interfaces so LLM-driven
   characters or LLM-augmented systems can slot in later. Don't
   foreclose; don't depend on what isn't viable yet.
+
+Existing prior art in the user's ecosystem that informs this layer:
+`hologram` (Discord RP bot with knowledge graph + RAG — persistent
+characters with structured memory), `ashwren` (autonomous AI presence,
+contemplative, reads and thinks across sessions — a character with an
+inner life that continues when you're not there), `fuwafuwa`
+(autonomous presence with emotional-state tracking and probabilistic
+freetime scheduling — moods and own schedule), `aspect` (card-based
+identity exploration), `noncanon` (local-first collaborative
+worldbuilding), `defocus` (world substrate for stateful simulation),
+`chub-stage-factory` (Chub-stage design workspace), `playmate` (most
+directly relevant; designing aeriea from scratch and bringing
+`playmate` back in as cross-reference once the scaffolding stabilizes).
 
 General principle: **don't commit to architectures that preclude
 future approaches, don't depend on tech that isn't viable yet.**
@@ -328,6 +572,26 @@ ongoing evolution of player, world, content, community, or all.
 
 Open: which sources the project leans on hardest.
 
+## Setting / fiction
+
+**Decided: modern (elastic).** Recognizably modern-life-coded
+textures: apartments, street markets, phones, real-feeling people in
+real-feeling places. The elastic part: "modern" includes
+nostalgia-coded periods (1990s, 2000s) and slightly-near-future, but
+the texture is always lived-in modern, not sci-fi-exotic or
+fantasy-worldbuilt.
+
+The observation behind this: the Warframe places that work best as
+*places* (Dormizone, Cetus, 1999/Höllvania, KIM) are exactly the ones
+that lean into modern intimacy rather than sci-fi spectacle.
+Dormizone is an apartment with a TV and personal stuff. Cetus is a
+street market with vendors. 1999 is literally a 1990s aesthetic with
+apartments and a band. KIM is a phone. The sci-fi trappings exist but
+the *places* feel like real life — recognizable, lived-in, modern.
+
+Modern is the aesthetic of *inhabitance*; sci-fi/fantasy work harder
+for awe but worse for *being-there*.
+
 ## Architecture commitments
 
 ### Deterministic seeded simulation
@@ -344,13 +608,18 @@ This enables:
   alternate; git-for-game-state. Save-scumming as a first-class
   feature; lived-history as a literal tree, not a line.
 - **Speedrun / leaderboard substrate**: action logs are the proof.
-  Verification = re-run + plausibility check on inputs (Trackmania
-  precedent: server-side replay re-sim catches log forgery;
-  client-side input-attestation à la TMCP catches input forgery).
-  Communities choose their own anti-cheat posture.
+  Verification = re-run + plausibility check on inputs. **Trackmania
+  precedent**: server-side replay re-sim catches log forgery;
+  client-side input-attestation à la TMCP (donadigo.com/tmcp, the
+  third-party verifier) catches input forgery. Communities choose
+  their own anti-cheat posture. (Notable: action logs *are* forgeable
+  in principle; Trackmania has "solved" this with the TMCP approach;
+  public info on TMCP's internals is limited.)
 - **Reconnect via snapshot** (not replay): rejoining clients just
   pull the current world state from the server. Action log is for
   sharing and leaderboards, not for live reconnect.
+  Replay-the-missed-log was explicitly considered and ruled
+  unnecessary.
 
 Constraints this imposes:
 - No client-side gameplay state that affects outcomes.
@@ -359,6 +628,9 @@ Constraints this imposes:
   runtime (Trackmania accepts the latter — fine for our case).
 - All sources of variability (NPCs, weather, time-of-day, events)
   derive from the seeded timeline.
+
+Open concern: single seed + action log format in *multiplayer*
+without hurting multiplayer. Not blocker, not solved — flagged.
 
 ### Platforms and presentation
 
@@ -371,6 +643,9 @@ self-expression, social being-with) is exactly what VR is *for*.
 VRChat shows the upside; the gap is in the structured/curated/game
 parts that VRChat doesn't deliver, which is what we're filling.
 
+Dropping target hardware support is unacceptable; Quest standalone
+stays in scope through every phase.
+
 **Diegetic UI** — menus live on the body or in the world, not as
 screen overlays. Wrist menus, palm panels, in-world objects. Works
 for both VR (proprioceptive — your hands know where your wrists are)
@@ -380,7 +655,9 @@ abstract HUD layer.
 **Multiple radial menus** (Warframe gear-wheel / emote-wheel
 pattern): one wheel doesn't scale; many specialized wheels do. Maps
 naturally to per-controller buttons in VR, modifier-keys + wheel on
-flat.
+flat. Warframe has multiple Q-menus already as precedent;
+proprioceptive controls like relative-to-wrist (or even on-wrist) are
+very hype.
 
 **Items physically held in hand** (VR), or carried diegetically
 (flat). Pulling out an instrument is a physical gesture, not a menu
@@ -415,6 +692,18 @@ gracefully-translated equivalents for flat.
 
 ### Netcode (self-hosted multiplayer)
 
+**Self-hosted multiplayer model.** Minecraft / Valheim / Project
+Zomboid shape. Online multiplayer *without* live-service obligations:
+ship the binary, communities run their own servers, no back-compat
+burden, no live-ops, no centrally-operated anything. Communities
+self-segregate (including on NSFW content).
+
+Trade-off (acknowledged): discovery is harder, no single shared
+world, no centrally-operated cosmetic store unless explicitly built
+out. The trade-off is accepted explicitly — the cost of maintaining
+an audience and preserving back-compat is greater than the cost of
+decentralized discovery.
+
 **Mix by responsibility** — different parts of the state use different
 protocols. This is normal modern multiplayer architecture, just
 explicit:
@@ -439,16 +728,36 @@ Latency budget: with no PvP combat, 100–200ms is fine. The worst case
 frame-perfect sync. State size and bandwidth: delta-compress
 aggressively, only send what changed.
 
+### Engine and stack
+
+- **Godot** (provisional) — chosen for faster prototyping, mature
+  scene/asset pipeline, and the fact that content authoring tooling
+  matters more than raw perf at this stage. Scaffolded via
+  [godogen](https://github.com/htdt/godogen) (which despite the name
+  supports both Godot and Bevy).
+- **godogen caveat surfaced during scaffolding**: godogen is
+  actually an agent-driven generator (runs an autonomous agent inside
+  the repo to build the game from a description), not a static folder
+  template. We have a substantial design doc already, so the
+  autonomous-agent approach could conflict or duplicate. Used static
+  scaffolding instead.
+- **Drop to Rust via gdext for hot paths** (deep simulation,
+  perf-critical systems) when needed. Revisit engine choice if/when
+  Godot's limitations dominate.
+
 ## Reference set
 
 What each reference contributes.
 
 - **Warframe** — variety of power fantasies, fanservice/cosmetic
   investment, persistent character, "yes-and" sampler structure,
-  hub-as-place.
+  hub-as-place, KIM as the structural pattern for character depth,
+  Dormizone/Cetus/1999 as the "modern is the aesthetic of inhabitance"
+  evidence, multi-radial-menus (gear wheel / emote wheel).
 - **Trials in Tainted Space**, **Flexible Survival** — deep character
   customization and transformation; body as customization surface;
-  identity fluidity; rich individual-NPC content.
+  identity fluidity; rich individual-NPC content; NSFW-first posture
+  done right.
 - **HHS+**, **Accidental Woman**, **Lilith's Throne** — life-sim
   sandbox structure with deep simulation, heavy authoring, and
   procedural recombination. Proven pattern for delivering hundreds of
@@ -461,21 +770,38 @@ What each reference contributes.
 - **ChatMUD** — persistent textual world as a place; hangout-as-content;
   built on a programmable substrate (MOO-lineage).
 - **Redout 2** — compositional momentum carving; the trigger for the
-  whole desire.
+  whole desire. The carving feel unbolted from the track.
+- **Mirror's Edge / Ghostrunner / Dying Light** — parkour 2.0 movement
+  lineage.
+- **Ultrakill** — fluency vocabulary; movement-as-medium.
 - **AER, Sable, Owlboy, Feather, Sky** — open contemplative worlds
   worth being in; reference for *place* quality. Limited by being
   passive and finite — what this project takes from them is
   posture/tone, not pacing or scope.
 - **Hollow Knight** — small distinct learnable composable verbs;
-  mastery felt; chains are the depth.
-- **Mirror's Edge / Ghostrunner / Dying Light** — parkour 2.0 movement
-  lineage.
-- **Ultrakill** — fluency vocabulary; movement-as-medium.
+  mastery felt; chains are the depth. (Referenced for *what movement
+  means*, not for being 2D.)
 - **Minecraft, No Man's Sky** — sandbox structure with player-set
   goals and procedural/infinite substrate.
-- **Resonite / NeosVR** — in-world programmability reference. The
-  project doesn't compete on this axis; included only as low-priority
-  nice-to-have (see below).
+- **Animal Crossing / Stardew / Paralives** — life-sim sandbox
+  tempo reference; Paralives released into Early Access during the
+  design conversation, directly adjacent (life-sim, customization-
+  heavy, no-combat, sandbox) — worth a survey once aeriea has a
+  shape to compare against.
+- **VRChat** — live expressive system (toggles/sliders/items),
+  mid-session avatar/form swapping, embodiment in non-human forms,
+  pure-social-presence-as-activity, mirrors as foundational. The
+  *content* aeriea ships at quality; the *workflow* (Unity-required
+  custom avatars) is rejected.
+- **Resonite / NeosVR** — in-world programmability reference, in-
+  engine creation workflow (the *good* answer to VRChat's
+  Unity-required avatars). Perf and cosmetic-economy gaps are real —
+  aeriea fills those. The project doesn't compete on in-world
+  programmability; included only as low-priority nice-to-have (see
+  below).
+- **`playmate`** — most directly relevant prior art in the user's
+  ecosystem; bring back in as cross-reference once aeriea's
+  scaffolding stabilizes.
 
 ## Nice-to-haves (low priority)
 
@@ -487,14 +813,115 @@ occupy the in-world-programmability niche. Worth including at the
 Warframe-decoration tier — limited, present, better-than-nothing,
 not the spine.
 
-## Activity surfaces (working list)
+## Persona research and the activity surface
+
+Concrete activities for aeriea were derived by dispatching subagent
+personas to report how they spend free time after work/school.
+Capturing the personas' names and the findings here since this
+research informs much of the comfort/sacred-thing/parallel-play/
+fragmented-evening values and the activity surface below.
+
+### The personas (six honest reports)
+
+- **Casey** — trail run with the dog as sacred thing.
+- **Alex** — painting minis as sacred thing; co-presence with Sarah.
+- **Maria** — Saturday nap as sacred thing; parallel time with husband.
+- **Sam** — coffee-shop read as sacred thing; roommate co-watching.
+- **Riley** — fic writing as sacred thing; character.ai admission
+  generalizes to "parasocial/parallel-play with a responsive thing is
+  real, embarrassing, and important to design for."
+- **Jordan** — parallel time with roommate.
+
+### Cross-cutting patterns (universal)
+
+1. **Scrolling/phone** — every persona, 30-60 min, feels bad, does
+   it anyway. The dominant modern free-time activity.
+2. **Eating/snacking as activity** — standing at counter, on couch,
+   paired with media.
+3. **Co-presence without conversation** — partner/roommate/parallel-
+   play. *Everyone does this.*
+4. **Background media** — comfort rewatches (The Bear, Hannibal, Love
+   Island UK). Comfort/familiarity beats novelty for routine sessions.
+5. **One sacred thing** — each persona has ONE thing they reach for
+   that genuinely refills them. Different per persona.
+6. **Bed scrolling** — universal, hated, done anyway.
+7. **Substance/altered-state** — wine, beer, weed, coffee. Habitual,
+   not always enjoyed, real.
+8. **Texting bright spots** — small intermittent connection valued
+   more than admitted.
+
+### What gives real dopamine (the explicit good-feeling moments)
+
+- Hands-busy meditative activity (painting, baking, fic writing,
+  lubing keyboard switches).
+- Parallel-presence with someone (roommate co-watching,
+  voice-chat-while-doing-own-thing).
+- Going outside for its own sake (river loop, walk to library,
+  errands as activity).
+- Comfort consumption (rewatch, romance novel, familiar game).
+- Parasocial/parallel-play with a responsive thing (character.ai
+  named explicitly — embarrassing but real).
+
+### What this validates / reveals for the design
+
+- **KIM-grade NPC text-presence is a real dopamine source** — every
+  persona had a "small text from someone matters" moment.
+- **Parasocial/parallel-play is huge** — Riley's character.ai
+  admission generalizes. People want a responsive *presence* that
+  doesn't demand much.
+- **Comfort > novelty for routine play** (see *Comfort over novelty*).
+- **Fragmented texture** — evenings are 5-7 small activities
+  switching (see *Fragmented modern evening*).
+- **One sacred thing per player-type** (see *One sacred thing*) —
+  validates the variety-of-power-fantasies value.
+- **Substance/altered-state is universal** — could be a real mechanic
+  (`existence` already has NT sim).
+- **Hands-busy low-stakes activity** as a mode — painting, baking,
+  crafts. Different from achievement/grind.
+- **Going somewhere for its own sake** — movement-as-mood, not
+  movement-as-transit.
+- **Bed/wind-down content** — low-effort end-of-day stuff. KIM
+  messages, scrolling, comfort consumption.
+
+### Friendslop and adjacent dopamine
+
+**Friendslop** = casual silly multiplayer-with-friends games.
+Examples: Among Us, Lethal Company, Content Warning, Lockdown
+Protocol, Webfishing, Backseat Drivers, Guilty as Sock!, Mage Arena,
+Peak, R.E.P.O., RV There Yet?, Burglin' Gnomes, Flock Around, Gamble
+With Your Friends.
+
+Common pattern: shared experience with friends; the game is a light
+framework for that; jank and emergence are *features*; clipping and
+sharing the goofy moments is the metagame.
+
+Implication for aeriea: **embrace jank and emergence as features,
+design NPCs to be company not just content, build clipping/sharing
+in from the start.** Real mode aeriea should support — even though
+aeriea must also be just-as-fun singleplayer.
+
+**"Dumb ways to die" pattern** — Happy Wheels / Trials / QWOP /
+Getting Over It / Goat Simulator. (Initially mis-categorized as
+WarioWare-style microgame format; corrected.) Dopamine: failure-as-
+content, physical-comedy timing, the *clip* you create. Crosses into
+friendslop territory if multiplayer, stays single-player viable
+(failing alone is still funny).
+
+**Important caveat**: the WarioWare / Animal-Crossing-tempo / KIM-
+cadence discussion reached for *frequency* as a design axis. This is
+rejected. The axis is not "how often the world hits you with small
+novel things"; it's "are the novel things *available* to encounter at
+all." Forcing high frequency is annoying; existence is the design
+property, not cadence.
+
+### Activity surfaces (working list)
 
 A non-exhaustive, non-final list of concrete venues and activities
-the game should support, drawn from observed modern-life patterns
-(see persona-research notes). This is *a* list, not *the* list —
-each item needs its own design pass on how the activity actually
-plays out (loop, friction, dopamine source, content authoring), and
-the list itself will grow/shrink as design progresses.
+the game should support, drawn from observed modern-life patterns.
+This is *a* list, not *the* list — each item needs its own design
+pass on how the activity actually plays out (loop, friction, dopamine
+source, content authoring), and the list itself will grow/shrink as
+design progresses.
 
 **Venues / activity sites:**
 - Clothes shops (boutiques, thrift, vintage, fast-fashion) — browsing,
@@ -543,9 +970,38 @@ Each activity above needs its own design (still TBD): what's the
 moment-to-moment loop, what gives it dopamine, what's the content
 authoring strategy, what makes it returnable rather than one-and-done.
 
+## Naming
+
+**Decided (tentative): aeriea.**
+
+- Pronounced **"area"**.
+- Visual: aerie (lofty dwelling / nest — ties to "place" and the
+  aerial/movement vocabulary).
+- Aural: area.
+- Maps directly to "a place to be" via the audio meaning.
+
+**Aerie** (the cleaner spelling) was considered first and rejected:
+- Real trademark collision with the Aerie women's apparel/intimates
+  brand (American Eagle subsidiary). For a game heavy on cosmetics +
+  body customization + NSFW-first + fashion-frame, the worst possible
+  trademark overlap. SEO impossible; legal exposure if it ever ships
+  at scale; players searching the game would hit the apparel site.
+- Pronunciation varies (AIR-ee / AY-ree / EYE-ree).
+
+**aeriea** trades the cleanness of the real word for trademark
+clearance and SEO. Concern raised about spelling ambiguity (people
+will auto-correct to "area" in writing; the "ie" insertion is
+non-obvious). Concern downgraded citing precedent: if the
+"competition" in a sense is VRChat, super concerns with ambiguous
+spelling are misplaced — VRChat, Resonite, NeosVR all lack
+search-optimized names and the communities find them anyway.
+
+Name is **tentative**; still being considered but stable enough to
+scaffold under.
+
 ## Open questions
 
-- **Project name.**
+- **Project name** (tentative: aeriea; still under consideration).
 - ~~**Engine**~~ — **decided (provisional): Godot** via godogen.
   Chosen for faster prototyping, mature scene/asset pipeline, and the
   fact that content authoring tooling matters more than raw perf at
@@ -560,37 +1016,26 @@ authoring strategy, what makes it returnable rather than one-and-done.
   on NSFW content). Trade-off: discovery is harder, no single shared
   world, no centrally-operated cosmetic store unless explicitly built
   out.
-- ~~**Setting / fiction**~~ — **decided: modern (elastic).**
-  Recognizably modern-life-coded textures: apartments, street markets,
-  phones, real-feeling people in real-feeling places. The elastic
-  part: "modern" includes nostalgia-coded periods (1990s, 2000s) and
-  slightly-near-future, but the texture is always lived-in modern,
-  not sci-fi-exotic or fantasy-worldbuilt. The observation behind
-  this: the Warframe places that work best as *places* (Dormizone,
-  Cetus, 1999/Höllvania, KIM) are exactly the ones that lean into
-  modern intimacy rather than sci-fi spectacle. Modern is the
-  aesthetic of inhabitance; sci-fi/fantasy work harder for awe but
-  worse for *being-there*.
+- ~~**Setting / fiction**~~ — **decided: modern (elastic).** See
+  *Setting / fiction* section above.
+- ~~**Adult-content posture**~~ — **decided: NSFW-first with SFW
+  toggle.** See *NSFW-first with SFW toggle* under Cosmetic depth.
 - **Further power fantasies beyond the five committed** — the design
   expects the list to grow as more concrete fantasies are identified.
   Five is the current foundation, not the cap.
-- ~~**Adult-content posture**~~ — **decided: NSFW-first with SFW
-  toggle.** All systems (body, transformation, relationships,
-  intimacy, identity) are designed assuming NSFW is the default. NPCs
-  are written as full sexual/intimate beings. The SFW toggle is a
-  *rendering* layer (clothes the NPCs, censors prose, removes
-  scenes), not a content rewrite — the underlying systems remain
-  NSFW-shaped. Depth and care goes into the adult content; SFW is the
-  abridged version. Distribution constrained accordingly (Itch.io,
-  direct, possibly Steam adult section). TiTS / Lilith's Throne /
-  Accidental Woman as the reference for this posture, vs. modded
-  Skyrim NSFW (SFW-first) as the failure mode.
 - **Content authoring strategy** — procedural? AI-assisted?
-  Hand-authored? Community? Hybrid?
+  Hand-authored? Community? Hybrid? (Likely all four; weights TBD.)
 - **Persistence model** for character investment — what *accumulates*
   if not gear/stats/levels?
 - **Sources of change priority** — which sources the project leans on
   hardest.
+- **Single seed + action log in multiplayer** — the determinism
+  architecture needs more thought to confirm it doesn't hurt
+  multiplayer.
+- **Per-activity design** — each activity in the activity surface
+  needs its own design pass on loop, friction, dopamine source,
+  content authoring, returnability. The list itself will grow/shrink
+  as design progresses.
 
 ## Systems that compose 100% immersion
 
@@ -627,7 +1072,7 @@ moment.
 17. Spatial audio (HRTF, reverb, occlusion)
 18. Voice (acting or TTS at human quality)
 19. Environmental ambience
-20. Foley (footsteps, cloth rustle, body sounds)
+20. Foley (footsteps matching terrain, cloth rustle, body sounds)
 
 ### VR-specific
 21. Tracking (head, body, hand, face, eye)
@@ -672,7 +1117,40 @@ Each system has its own quality bar that doesn't break the spell.
 The bar is high. The "no copouts" commitment makes scope demanding —
 this is the multi-year R&D-shaped reality of the project.
 
+### Things historically missing in games
+
+Games have failed at these consistently for decades, AAA included:
+
+- **Movement** — weight transfer, momentum, follow-through; canned
+  animation can't react to physics; even AAA mostly fakes it; seams
+  show.
+- **Saccades** — eyes do micro-jitter constantly IRL; most game eyes
+  dead-stare or vacantly pan. Cheap to fake with procedural jitter but
+  few games bother. RDR2 / TLOU2 do; most don't.
+- **Lipsync** — phoneme→viseme is everywhere and looks plasticky.
+  Good lipsync needs setup per character + good performance capture.
+  Mostly bad even in AAA.
+- **Breast volume preservation and deformation** — dynamic bones
+  jiggle but don't preserve volume; arms passing through; bra
+  deforming breast properly. Needs specialized soft-body solvers with
+  two-way coupling. Western AAA mostly ignores; some Japanese games
+  (DOA, Honey Select) invest seriously.
+- **Cloth-body two-way interaction** — bra deforming breast, shirt
+  straining at flexed arm, sock indenting calf. Real research problem.
+- **Finger contact on objects** — IK rarely lands; fingers clip or
+  float.
+- **Weight shift in stance** — standing characters don't actually
+  balance / shift; they're T-pose-with-tweaks.
+- **Foot on uneven ground** — IK common, rarely perfect.
+- **Visible breathing** — chest rise rarely matches the rest of body
+  state.
+
+These are not "nice-to-haves" — they're the specific historical gaps
+the 100%-immersion commitment requires aeriea to close.
+
 ## Production reality
+
+### Scale and shape
 
 Rough scale (focused indie on licensed engine, content excluded):
 200k–800k LOC of systems code, plus a content pipeline. With AI
@@ -681,14 +1159,83 @@ not engineering throughput.
 
 The 100% immersion commitment plus the no-scope-reduction commitment
 plus the Quest-standalone target means **this is a multi-year R&D-
-shaped project, not a one-time ship**. Phased fidelity is acceptable:
-ship v1 with "decent" animation/sim/NPC quality (better than indie
-norm, worse than goal); each subsequent year invest in specific
-systems and ship improvements. The bet is that focused-small-team +
-AI codegen leverage + multi-year compounding can out-execute
-dysfunctional-AAA on specific narrow axes (Dwarf Fortress, Factorio,
-Toribash, VRChat as precedent for small-team-beats-big on a narrow
-axis).
+shaped project, not a one-time ship**.
+
+### Phased fidelity (the explicit deal)
+
+Phased fidelity is acceptable: ship v1 with "decent" animation/sim/
+NPC quality (better than indie norm, worse than goal); each subsequent
+year invest in specific systems and ship improvements. Not
+stylization-as-copout; *just better than current indie norm, en route
+to better*.
+
+The bet: focused-small-team + AI codegen leverage + multi-year
+compounding can out-execute dysfunctional-AAA on specific narrow
+axes. Precedent: Dwarf Fortress, Factorio, Toribash, VRChat. Small
+teams beat big teams on a narrow axis through deep ownership and
+time, where AAA can't compound (people leave, knowledge fragments,
+focus shifts patch-to-patch).
+
+Diagnosis of AAA dysfunction: AAA studios typically hire a lot of
+people that are not only new to the industry but also somehow
+constantly burnt out (minor hyperbole). aeriea's edge is the inverse:
+focused, retained, AI-leveraged.
+
+Shipping less than the full synthesis is unacceptable per design
+intent — half the place is not a smaller place, it's a tech demo.
+Multi-year commitment, scoped accordingly.
+
+### The animation/fidelity bet (the constraints conversation)
+
+Several wrong answers were considered before landing on the actual
+plan. Capturing the rejected paths because each one has a specific
+reason it doesn't work.
+
+- **Mocap + motion matching as the strategy** — rejected (see *Things
+  considered*). Scales linearly, doesn't compound, breaks at edge
+  cases, edge cases multiply with sliders.
+- **Generic FEM / brute-force real-time physical sim** — too
+  expensive at runtime, especially Quest.
+- **Pre-baked sim results** — 500GB-of-simulated-animations problem
+  under combinatorics.
+- **Hand-keying** — same combinatorics problem at authoring scale.
+- **Stylized aesthetic as the answer** — only acceptable if chosen
+  for its own merits, never as the answer to "we can't hit realism."
+- **Scoping down** — unacceptable per design intent.
+- **Dropping Quest standalone target** — unacceptable.
+
+What's **left** (the actual plan):
+
+- **Specialized cheap solvers per phenomenon**, not generic physics:
+  - **PBD (position-based dynamics)** for cloth — GPU-friendly,
+    scales by garment count. Used everywhere now.
+  - **Mass-spring + shape matching** for soft body / jiggle (VRChat
+    dynamic-bones is this; well-trodden; very cheap; scales
+    naturally with body type).
+  - **Specialized soft-body solvers** for specific use cases
+    (breast/glute/belly/fat/hair) — purpose-built, much cheaper
+    than generic FEM, math largely solved (industry references:
+    Cyberpunk, MGS V, certain Japanese games). Scales with body
+    sliders *for free* because parametric.
+  - **GPU compute everywhere** — mobile GPUs can do this; PBD /
+    mass-spring parallelize trivially.
+  - **Hierarchical LOD on sim** — high-res where the camera/mirror
+    is looking; downgrade off-screen / distant.
+- **Primary motion via ML-based motion synthesis that retargets
+  across body types** — bet on the tech maturing. Trained offline,
+  cheap at runtime, output respects body variation. By multi-year
+  ship date (~2028), should be production-ready.
+- **Procedural overlays** (IK, breathing, sway, footplant, look-at) —
+  cheap, ubiquitous, sell aliveness.
+- **Hand-keyed / mocap only for true signature moments**, kept small.
+- **Build internal tooling that compounds** — every animation / cloth
+  / sim improvement upgrades all existing content automatically.
+  Quest perf optimization is part of the design from day one, not
+  "we'll optimize later."
+
+The bet, stated bluntly: (a) specialized sim is cheap enough on
+Quest, and (b) ML motion synthesis is production-ready by ship date.
+If either fails, that's where the project's R&D burden lands.
 
 Mocap explicitly not the bet — scales linearly with content, breaks
 at edge cases, doesn't compound. Instead: specialized cheap runtime
@@ -696,6 +1243,57 @@ sims (PBD cloth, dynamic bones with shape matching, purpose-built
 soft body solvers for key areas, procedural overlays for life,
 learned/ML approaches as the tech matures over the timeline).
 
-Shipping less than the full synthesis is unacceptable per design
-intent — half the place is not a smaller place, it's a tech demo.
-Multi-year commitment, scoped accordingly.
+### Perceptual vs physical realism (a useful distinction)
+
+Worth keeping the distinction in mind: **physically accurate**
+simulation is currently in the film-VFX-render-farm domain (hours
+per frame). **Perceptually indistinguishable** is a different bar —
+humans can't tell once you fake well enough, and real-time has
+gotten good at faking. The goal is the latter, achieved via
+specialized cheap solvers, careful design around weak spots, and
+focal-area budgeting (pour budget into face, hands, body in mirrors;
+cheaper elsewhere).
+
+Weak spots to design *around*: static stress poses (cloth wrapping
+under load, flesh squishing under pressure), extreme body-variation
+proportions, close inspection (<30cm in VR), wet hair / fine detail,
+hand grasping that needs actual physics contact not animation.
+
+## The execution shape from here
+
+Honest take from the conversation: pin and start executing. The doc
+has decent shape; scaffolding + a first prototype slice will likely
+teach more than further speculation. Several open questions
+(per-activity design, content authoring detail, persistence
+specifics) will get clearer from *building* than from chat.
+
+**Concrete next steps:**
+
+1. **Scaffold via godogen** — done; static scaffolding used in lieu
+   of godogen's autonomous-agent flow, given the substantial design
+   doc already in hand.
+2. **First prototype slice** — choose between:
+   - **Movement prototype** (parkour 2.0 carve/momentum feel) — the
+     per-second dopamine engine the design depends on. Recommended
+     first because (a) load-bearing, (b) feel-able within days, (c)
+     informs setting/level design.
+   - **Simulation substrate** (`existence`-pattern at 3D scale) —
+     the deterministic seeded sim layer, NPC state, time/weather.
+3. Iterate from there; bring `playmate` back in as cross-reference
+   once scaffolding stabilizes.
+
+## Meta-commitments (carry-forward)
+
+- **No copouts.** Stylization-as-escape-from-realism, scope-reduction,
+  dropping target hardware, mocap-as-the-bet, single-spine framing —
+  all explicitly rejected.
+- **Shipping less than the full synthesis is unacceptable.** Half the
+  place is not a smaller place, it's a tech demo.
+- **Multi-year R&D-shaped commitment.** Phased fidelity is acceptable;
+  scope reduction is not.
+- **Don't commit to architectures that preclude future approaches;
+  don't depend on tech that isn't viable yet.** Composable, modal,
+  additive.
+- **The list grows.** Power fantasies, activities, references —
+  the doc records as commitments land. It does not freeze the
+  catalogue.

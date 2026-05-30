@@ -1,6 +1,6 @@
 {
   "$schema": "aeriea-movement-kit/1",
-  "comment": "Base movement kit — Slice 1: ground move (accel/friction/air-strafe) + jump (coyote + buffer), expressed as data. See docs/decisions/movement-substrate.md.",
+  "comment": "Base movement kit — the full verb set as data: ground move + jump (coyote/buffer), slide, crouch-walk, wall-run + wall-jump, vault/mantle, and kill-plane respawn. This is the reference semantics consumed by MovementInterpreter; it reproduces scripts/player_controller.gd exactly (parity gate: tests/movement_behavior_test.gd). See docs/decisions/movement-substrate.md.",
 
   "params": {
     "walk_speed": 5.5,
@@ -18,7 +18,42 @@
     "coyote_time": 0.12,
     "jump_buffer_time": 0.15,
 
-    "ground_snap_bias": -0.5
+    "ground_snap_bias": -0.5,
+
+    "slide_entry_speed": 8.0,
+    "slide_boost": 3.0,
+    "slide_friction": 4.0,
+    "slide_exit_speed": 3.0,
+    "slide_max_time": 1.8,
+    "slide_steer_accel": 16.0,
+    "slide_steer_exit_time": 0.18,
+    "slope_acceleration": 18.0,
+    "max_slide_speed": 22.0,
+    "crouch_walk_speed": 2.8,
+    "crouch_height": 0.6,
+    "stand_height": 0.9,
+    "slide_jump_forward_boost": 2.5,
+
+    "wall_run_min_speed": 5.0,
+    "wall_run_max_time": 1.4,
+    "wall_run_gravity_scale": 0.15,
+    "wall_run_gravity_ramp": 1.8,
+    "wall_detect_distance": 0.65,
+    "wall_run_vertical_boost": 1.5,
+    "wall_run_speed": 9.0,
+    "wall_run_speed_rate": 54.0,
+    "wall_jump_lateral": 6.5,
+    "wall_jump_up": 8.0,
+    "wall_jump_grace": 0.12,
+
+    "vault_min_speed": 2.5,
+    "vault_duration": 0.28,
+
+    "camera_height_stand": 1.65,
+    "camera_height_crouch": 0.85,
+    "camera_height_lerp_speed": 12.0,
+
+    "kill_y": -25.0
   },
 
   "inputs": {
@@ -27,11 +62,65 @@
 
   "initial": "AIR",
 
+  "pre_tick": [
+    {
+      "comment": "Kill-plane respawn: below the kill plane → teleport to spawn, zero velocity + timers. Aborts the rest of the tick.",
+      "when": { "op": "below_y", "value": "kill_y" },
+      "to": "AIR",
+      "do": [ { "do": "respawn" } ]
+    }
+  ],
+
   "states": [
     {
       "name": "GROUND",
       "on_enter": [],
       "transitions": [
+        {
+          "comment": "Buffered jump from the ground (highest priority).",
+          "when": { "op": "input_buffered", "action": "jump" },
+          "to": "AIR",
+          "priority": 90,
+          "reenter": true,
+          "do": [
+            { "do": "set_velocity_y", "value": "jump_velocity" },
+            { "do": "set_timer", "name": "jump_buffer", "value": 0 },
+            { "do": "set_timer", "name": "jump_hold", "value": 0 }
+          ]
+        },
+        {
+          "comment": "Vault: moving fast enough toward a climbable ledge (host captures start/end).",
+          "when": { "op": "all", "of": [
+            { "op": "speed_h", "cmp": "gt", "value": "vault_min_speed" },
+            { "op": "ledge_vaultable" }
+          ] },
+          "to": "VAULT",
+          "priority": 70,
+          "do": [ { "do": "set_timer", "name": "vault", "value": "vault_duration" } ]
+        },
+        {
+          "comment": "Crouch while fast → SLIDE (deliberate slide-while-running). Entry boost guarded so it can't compound; clamped to max_slide_speed.",
+          "when": { "op": "all", "of": [
+            { "op": "input_pressed", "action": "crouch" },
+            { "op": "speed_h", "cmp": "ge", "value": "slide_entry_speed" }
+          ] },
+          "to": "SLIDE",
+          "priority": 60,
+          "do": [
+            { "do": "add_velocity", "space": "velocity", "vector": "slide_boost", "guard_not_in": "SLIDE" },
+            { "do": "clamp_speed_h", "max": "max_slide_speed" },
+            { "do": "set_collider_height", "value": "crouch_height" },
+            { "do": "set_timer", "name": "slide", "value": "slide_max_time" },
+            { "do": "set_timer", "name": "slide_steer", "value": 0 }
+          ]
+        },
+        {
+          "comment": "Crouch while slow → CROUCH-WALK (lowered, slower, fully steerable).",
+          "when": { "op": "input_pressed", "action": "crouch" },
+          "to": "CROUCH",
+          "priority": 55,
+          "do": [ { "do": "set_collider_height", "value": "crouch_height" } ]
+        },
         {
           "comment": "Left the floor: arm coyote, hand off to AIR this same frame.",
           "when": { "op": "airborne" },
@@ -39,17 +128,6 @@
           "priority": 10,
           "reenter": true,
           "do": [ { "do": "set_timer", "name": "coyote", "value": "coyote_time" } ]
-        },
-        {
-          "comment": "Buffered jump from the ground.",
-          "when": { "op": "input_buffered", "action": "jump" },
-          "to": "AIR",
-          "priority": 80,
-          "do": [
-            { "do": "set_velocity_y", "value": "jump_velocity" },
-            { "do": "set_timer", "name": "jump_buffer", "value": 0 },
-            { "do": "set_timer", "name": "jump_hold", "value": 0 }
-          ]
         }
       ],
       "tick": [
@@ -60,13 +138,10 @@
           "speed": { "select": "sprint", "if_held": "sprint", "then": "sprint_speed", "else": "walk_speed" },
           "rate": "ground_acceleration"
         },
-        {
-          "do": "apply_friction",
-          "rate": "ground_friction",
-          "only_when_no_wish": true
-        },
+        { "do": "apply_friction", "rate": "ground_friction", "only_when_no_wish": true },
         { "do": "set_velocity_y", "value": "ground_snap_bias" },
-        { "do": "move_and_slide" }
+        { "do": "move_and_slide" },
+        { "do": "lerp_camera_height", "target": "camera_height_stand", "rate": "camera_height_lerp_speed" }
       ],
       "on_exit": []
     },
@@ -77,15 +152,12 @@
       "transitions": [
         {
           "comment": "Coyote jump: buffered jump while still within the coyote window.",
-          "when": {
-            "op": "all",
-            "of": [
-              { "op": "input_buffered", "action": "jump" },
-              { "op": "timer", "name": "coyote", "cmp": "gt", "value": 0 }
-            ]
-          },
+          "when": { "op": "all", "of": [
+            { "op": "input_buffered", "action": "jump" },
+            { "op": "timer", "name": "coyote", "cmp": "gt", "value": 0 }
+          ] },
           "to": "AIR",
-          "priority": 80,
+          "priority": 90,
           "reenter": true,
           "do": [
             { "do": "set_velocity_y", "value": "jump_velocity" },
@@ -95,7 +167,47 @@
           ]
         },
         {
-          "comment": "Landed: hand off to GROUND this same frame so a buffered jump fires on the landing frame.",
+          "comment": "Wall-jump within the grace window after leaving a wall.",
+          "when": { "op": "all", "of": [
+            { "op": "input_buffered", "action": "jump" },
+            { "op": "timer", "name": "wall_jump_grace", "cmp": "gt", "value": 0 }
+          ] },
+          "to": "AIR",
+          "priority": 85,
+          "reenter": true,
+          "do": [
+            { "do": "add_velocity", "space": "wall_normal", "vector": "wall_jump_lateral", "replace": true },
+            { "do": "set_velocity_y", "value": "wall_jump_up" },
+            { "do": "set_timer", "name": "wall_jump_grace", "value": 0 },
+            { "do": "set_timer", "name": "jump_buffer", "value": 0 }
+          ]
+        },
+        {
+          "comment": "Auto wall-run entry: fast enough, airborne, wall on a side.",
+          "when": { "op": "all", "of": [
+            { "op": "speed_h", "cmp": "ge", "value": "wall_run_min_speed" },
+            { "op": "airborne" },
+            { "op": "wall_detected", "side": "any" }
+          ] },
+          "to": "WALL_RUN",
+          "priority": 70,
+          "do": [
+            { "do": "set_velocity_y_max", "value": "wall_run_vertical_boost" },
+            { "do": "set_timer", "name": "wall_run", "value": "wall_run_max_time" }
+          ]
+        },
+        {
+          "comment": "Vault while approaching a ledge in the air.",
+          "when": { "op": "all", "of": [
+            { "op": "speed_h", "cmp": "gt", "value": "vault_min_speed" },
+            { "op": "ledge_vaultable" }
+          ] },
+          "to": "VAULT",
+          "priority": 60,
+          "do": [ { "do": "set_timer", "name": "vault", "value": "vault_duration" } ]
+        },
+        {
+          "comment": "Landed: hand off to GROUND this same frame so a buffered jump/slide fires on the landing frame.",
           "when": { "op": "on_ground" },
           "to": "GROUND",
           "priority": 10,
@@ -104,7 +216,7 @@
       ],
       "tick": [
         {
-          "comment": "Gravity, floaty when holding jump near apex (ramp gated by jump_hold timer + rising).",
+          "comment": "Gravity, floaty when holding jump near apex (gated by jump_hold timer + rising).",
           "do": "apply_gravity",
           "scale": {
             "select": "jump_floaty",
@@ -115,14 +227,240 @@
             "else": "gravity_scale"
           }
         },
+        { "do": "air_strafe", "space": "wish", "rate": "air_acceleration", "cap": "air_speed_cap" },
+        { "do": "move_and_slide" },
+        { "do": "lerp_camera_height", "target": "camera_height_stand", "rate": "camera_height_lerp_speed" }
+      ],
+      "on_exit": []
+    },
+
+    {
+      "name": "SLIDE",
+      "on_enter": [],
+      "transitions": [
         {
-          "comment": "Air strafe — add toward wish-dir up to air_speed_cap, never decelerating.",
-          "do": "air_strafe",
-          "space": "wish",
-          "rate": "air_acceleration",
-          "cap": "air_speed_cap"
+          "comment": "Slide-jump — highest-priority exit; preserves momentum + forward boost, stands up.",
+          "when": { "op": "input_buffered", "action": "jump" },
+          "to": "AIR",
+          "priority": 90,
+          "do": [
+            { "do": "set_collider_height", "value": "stand_height", "require_headroom": true },
+            { "do": "set_velocity_y", "value": "jump_velocity" },
+            { "do": "add_velocity", "space": "forward", "vector": "slide_jump_forward_boost" },
+            { "do": "set_timer", "name": "jump_buffer", "value": 0 },
+            { "do": "set_timer", "name": "jump_hold", "value": 0 },
+            { "do": "set_timer", "name": "slide_steer", "value": 0 }
+          ]
+        },
+        {
+          "comment": "Airborne mid-slide → AIR, stay crouched (don't pop up).",
+          "when": { "op": "airborne" },
+          "to": "AIR",
+          "priority": 70,
+          "reenter": true,
+          "do": [ { "do": "set_timer", "name": "coyote", "value": "coyote_time" } ]
+        },
+        {
+          "comment": "Exit while crouch STILL HELD → CROUCH-WALK (stay low; velocity preserved). Fires when decayed / timed-out / steered-out.",
+          "when": { "op": "all", "of": [
+            { "op": "input_pressed", "action": "crouch" },
+            { "op": "any", "of": [
+              { "op": "speed_h", "cmp": "lt", "value": "slide_exit_speed" },
+              { "op": "timer", "name": "slide", "cmp": "le", "value": 0 },
+              { "op": "timer", "name": "slide_steer", "cmp": "ge", "value": "slide_steer_exit_time" }
+            ] }
+          ] },
+          "to": "CROUCH",
+          "priority": 45,
+          "do": [ { "do": "set_timer", "name": "slide_steer", "value": 0 } ]
+        },
+        {
+          "comment": "Exit with crouch RELEASED or decayed/timed-out/steered-out → GROUND, stand up if headroom.",
+          "when": { "op": "any", "of": [
+            { "op": "not", "of": [ { "op": "input_pressed", "action": "crouch" } ] },
+            { "op": "speed_h", "cmp": "lt", "value": "slide_exit_speed" },
+            { "op": "timer", "name": "slide", "cmp": "le", "value": 0 },
+            { "op": "timer", "name": "slide_steer", "cmp": "ge", "value": "slide_steer_exit_time" }
+          ] },
+          "to": "GROUND",
+          "priority": 40,
+          "do": [
+            { "do": "set_collider_height", "value": "stand_height", "require_headroom": true },
+            { "do": "set_timer", "name": "slide_steer", "value": 0 }
+          ]
+        }
+      ],
+      "tick": [
+        {
+          "comment": "Downhill slope acceleration, then hard-cap to max_slide_speed (prevents compounding).",
+          "do": "slope_accelerate", "rate": "slope_acceleration", "ref_angle": 45
+        },
+        { "do": "clamp_speed_h", "max": "max_slide_speed" },
+        {
+          "comment": "Carve: steer velocity direction toward wish-dir at slide_steer_accel WITHOUT changing magnitude.",
+          "do": "carve", "rate": "slide_steer_accel"
+        },
+        { "do": "apply_friction", "rate": "slide_friction" },
+        {
+          "comment": "Sustained forward-aligned input accumulates slide_steer (stands you up); else decays. The steered-out exit reads this timer.",
+          "do": "add_timer", "name": "slide_steer", "by": 1.0, "else_by": 1.0,
+          "when": { "op": "all", "of": [
+            { "op": "wish_input" },
+            { "op": "speed_h", "cmp": "gt", "value": 0.001 },
+            { "op": "wish_input", "aligned_with_velocity": true, "cmp": "gt", "value": 0.5 }
+          ] }
+        },
+        { "do": "set_velocity_y", "value": "ground_snap_bias" },
+        { "do": "move_and_slide" },
+        { "do": "lerp_camera_height", "target": "camera_height_crouch", "rate": "camera_height_lerp_speed" }
+      ],
+      "on_exit": []
+    },
+
+    {
+      "name": "CROUCH",
+      "on_enter": [],
+      "transitions": [
+        {
+          "comment": "Crouch-jump: stand (if headroom) and jump.",
+          "when": { "op": "all", "of": [
+            { "op": "input_buffered", "action": "jump" },
+            { "op": "headroom" }
+          ] },
+          "to": "AIR",
+          "priority": 90,
+          "reenter": true,
+          "do": [
+            { "do": "set_collider_height", "value": "stand_height", "require_headroom": true },
+            { "do": "set_velocity_y", "value": "jump_velocity" },
+            { "do": "set_timer", "name": "jump_buffer", "value": 0 },
+            { "do": "set_timer", "name": "jump_hold", "value": 0 }
+          ]
+        },
+        {
+          "comment": "Left the floor while crouching → AIR (arm coyote).",
+          "when": { "op": "airborne" },
+          "to": "AIR",
+          "priority": 80,
+          "reenter": true,
+          "do": [ { "do": "set_timer", "name": "coyote", "value": "coyote_time" } ]
+        },
+        {
+          "comment": "Sped up enough → re-enter SLIDE (e.g. arrived from a slide and pushed back up to speed).",
+          "when": { "op": "speed_h", "cmp": "ge", "value": "slide_entry_speed" },
+          "to": "SLIDE",
+          "priority": 60,
+          "do": [
+            { "do": "set_timer", "name": "slide", "value": "slide_max_time" },
+            { "do": "set_timer", "name": "slide_steer", "value": 0 }
+          ]
+        },
+        {
+          "comment": "Crouch released → stand (if headroom) and return to GROUND, momentum preserved.",
+          "when": { "op": "not", "of": [ { "op": "input_pressed", "action": "crouch" } ] },
+          "to": "GROUND",
+          "priority": 50,
+          "reenter": true,
+          "do": [ { "do": "set_collider_height", "value": "stand_height", "require_headroom": true } ]
+        }
+      ],
+      "tick": [
+        {
+          "comment": "Fully steerable at reduced top speed; friction when no input.",
+          "do": "accelerate_toward", "space": "wish", "speed": "crouch_walk_speed", "rate": "ground_acceleration"
+        },
+        { "do": "apply_friction", "rate": "ground_friction", "only_when_no_wish": true },
+        { "do": "set_velocity_y", "value": "ground_snap_bias" },
+        { "do": "move_and_slide" },
+        { "do": "lerp_camera_height", "target": "camera_height_crouch", "rate": "camera_height_lerp_speed" }
+      ],
+      "on_exit": []
+    },
+
+    {
+      "name": "WALL_RUN",
+      "on_enter": [],
+      "transitions": [
+        {
+          "comment": "Wall-jump off the wall.",
+          "when": { "op": "input_buffered", "action": "jump" },
+          "to": "AIR",
+          "priority": 90,
+          "do": [
+            { "do": "add_velocity", "space": "wall_normal", "vector": "wall_jump_lateral", "replace": true },
+            { "do": "set_velocity_y", "value": "wall_jump_up" },
+            { "do": "set_timer", "name": "wall_jump_grace", "value": 0 },
+            { "do": "set_timer", "name": "jump_buffer", "value": 0 }
+          ]
+        },
+        {
+          "comment": "Wall ended (no longer near) → AIR, arm wall-jump grace.",
+          "when": { "op": "not", "of": [ { "op": "wall_still_near" } ] },
+          "to": "AIR",
+          "priority": 70,
+          "do": [ { "do": "set_timer", "name": "wall_jump_grace", "value": "wall_jump_grace" } ]
+        },
+        {
+          "comment": "Wall-run timed out → AIR.",
+          "when": { "op": "timer", "name": "wall_run", "cmp": "le", "value": 0 },
+          "to": "AIR",
+          "priority": 60,
+          "do": [ { "do": "set_timer", "name": "wall_jump_grace", "value": "wall_jump_grace" } ]
+        },
+        {
+          "comment": "No movement input at all → step off the wall.",
+          "when": { "op": "not", "of": [ { "op": "wish_input" } ] },
+          "to": "AIR",
+          "priority": 55,
+          "do": [ { "do": "set_timer", "name": "wall_jump_grace", "value": "wall_jump_grace" } ]
+        },
+        {
+          "comment": "Landed → GROUND.",
+          "when": { "op": "on_ground" },
+          "to": "GROUND",
+          "priority": 50
+        }
+      ],
+      "tick": [
+        {
+          "comment": "Gravity ramps from near-zero to full over the wall-run as a CURVE (data, not code), clamped fall speed. effective = wall_run_gravity_scale + (1-scale)*frac^ramp.",
+          "do": "apply_gravity",
+          "scale": {
+            "curve": "ramp",
+            "over_timer": "wall_run",
+            "max": "wall_run_max_time",
+            "from": "wall_run_gravity_scale",
+            "to": 1.0,
+            "power": "wall_run_gravity_ramp"
+          },
+          "min_vy": -9.8
+        },
+        {
+          "comment": "Run along the wall tangent: forward input → wall_run_speed, backward → 0 (decelerate, never forward), lateral ignored, no input → hold momentum.",
+          "do": "accelerate_toward", "space": "wall_tangent",
+          "speed": "wall_run_speed", "rate": "wall_run_speed_rate"
         },
         { "do": "move_and_slide" }
+      ],
+      "on_exit": []
+    },
+
+    {
+      "name": "VAULT",
+      "on_enter": [],
+      "transitions": [
+        {
+          "comment": "Vault complete (timer drained) → GROUND.",
+          "when": { "op": "timer", "name": "vault", "cmp": "le", "value": 0 },
+          "to": "GROUND",
+          "priority": 50
+        }
+      ],
+      "tick": [
+        {
+          "comment": "Scripted move from captured start to captured end over the vault timer.",
+          "do": "tween_position", "duration_timer": "vault", "duration": "vault_duration"
+        }
       ],
       "on_exit": []
     }

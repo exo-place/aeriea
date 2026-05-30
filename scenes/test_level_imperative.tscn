@@ -1,6 +1,6 @@
-[gd_scene load_steps=30 format=3 uid="uid://test_level_v1"]
+[gd_scene load_steps=30 format=3 uid="uid://test_level_imperative_v1"]
 
-[ext_resource type="Script" path="res://scripts/movement/interpreted_player.gd" id="1_script"]
+[ext_resource type="Script" path="res://scripts/player_controller.gd" id="1_script"]
 [ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="2_pause_menu"]
 [ext_resource type="PackedScene" path="res://scenes/ui/controls_overlay.tscn" id="3_controls_overlay"]
 [ext_resource type="PackedScene" path="res://scenes/ui/crosshair.tscn" id="4_crosshair"]

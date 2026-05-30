@@ -19,10 +19,30 @@
 
 extends Node
 
-const TEST_LEVEL := "res://scenes/test_level.tscn"
+## The suite runs against BOTH movement implementations: the interpreter-driven
+## InterpretedPlayer (the data-driven substrate, now the live player) and the
+## imperative PlayerController (the parity oracle). Same assertions, same real-
+## input harness; every assertion that passes against the imperative reference
+## must pass against the interpreter. State-enum ordinals are identical across the
+## two player scripts, so `== S_SLIDE` holds for both.
+const TEST_LEVEL_INTERPRETED := "res://scenes/test_level.tscn"
+const TEST_LEVEL_IMPERATIVE := "res://scenes/test_level_imperative.tscn"
+
+# State ordinals, shared by both player scripts (InterpretedPlayer.State mirrors
+# PlayerController.State exactly). Local copy so the suite is target-agnostic.
+const S_GROUND := 0
+const S_AIR := 1
+const S_SLIDE := 2
+const S_CROUCH := 3
+const S_WALL_RUN := 4
+const S_VAULT := 5
 
 var _pass_count := 0
 var _fail_count := 0
+
+## Current target scene + label, set by _run for each implementation.
+var _target_scene: String = TEST_LEVEL_INTERPRETED
+var _target_label: String = "interpreter"
 
 
 func _ready() -> void:
@@ -32,6 +52,20 @@ func _ready() -> void:
 func _run() -> void:
 	print("\n=== aeriea movement behavioral test ===\n")
 
+	for target in [
+		{"scene": TEST_LEVEL_INTERPRETED, "label": "interpreter"},
+		{"scene": TEST_LEVEL_IMPERATIVE, "label": "imperative"},
+	]:
+		_target_scene = target["scene"]
+		_target_label = target["label"]
+		print("\n--- target: %s (%s) ---\n" % [_target_label, _target_scene])
+		await _run_suite()
+
+	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass_count, _fail_count])
+	get_tree().quit(0 if _fail_count == 0 else 1)
+
+
+func _run_suite() -> void:
 	await _test_default_mouse_sensitivity_nonzero()
 	await _test_mouse_motion_rotates_camera()
 	_test_jump_binding_survives_autoload_init()
@@ -51,39 +85,39 @@ func _run() -> void:
 	await _test_wallrun_backward_does_not_accelerate_forward()
 	await _test_respawn_below_kill_y()
 
-	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass_count, _fail_count])
-	get_tree().quit(0 if _fail_count == 0 else 1)
-
 
 # ---------------------------------------------------------------------------
 # Assertion helpers
 # ---------------------------------------------------------------------------
 
 func _assert(test_name: String, condition: bool, evidence: String) -> void:
+	var labelled := "[%s] %s" % [_target_label, test_name]
 	if condition:
 		_pass_count += 1
-		print("  PASS  %s  [%s]" % [test_name, evidence])
+		print("  PASS  %s  [%s]" % [labelled, evidence])
 	else:
 		_fail_count += 1
-		print("  FAIL  %s  [%s]" % [test_name, evidence])
+		print("  FAIL  %s  [%s]" % [labelled, evidence])
 
 
-## Build a fresh level instance and return its PlayerController.
-## Healing GameSettings to defaults first so tests are deterministic and
-## independent of any persisted user config.
+## Build a fresh level instance for the current target and return its player.
+## The player is returned untyped (the two implementations share a duck-typed
+## surface: _state, _is_crouched, _capsule, the timer accessors, _apply_look,
+## _input, mouse_sensitivity, slide/wall tuning). Healing GameSettings to defaults
+## first so tests are deterministic and independent of any persisted user config.
 func _spawn_level() -> Dictionary:
 	GameSettings.reset_all()  # deterministic, sane defaults
-	var scene: PackedScene = load(TEST_LEVEL)
+	var scene: PackedScene = load(_target_scene)
 	var level: Node = scene.instantiate()
 	add_child(level)
 	# Let _ready run and a couple of physics frames settle the body on ground.
 	await get_tree().physics_frame
 	await get_tree().physics_frame
-	var player := level.get_node("Player") as PlayerController
+	var player: CharacterBody3D = level.get_node("Player")
 	return {"level": level, "player": player}
 
 
-func _step_physics(_player: PlayerController, frames: int) -> void:
+func _step_physics(_player: CharacterBody3D, frames: int) -> void:
 	for i in frames:
 		await get_tree().physics_frame
 
@@ -91,7 +125,7 @@ func _step_physics(_player: PlayerController, frames: int) -> void:
 ## Step physics until the player is on the floor (or a frame budget elapses).
 ## Returns true if grounded. Used so jump tests run from a known grounded state
 ## rather than guessing a frame count.
-func _settle_on_floor(player: PlayerController, max_frames: int = 120) -> bool:
+func _settle_on_floor(player: CharacterBody3D, max_frames: int = 120) -> bool:
 	for i in max_frames:
 		await get_tree().physics_frame
 		if player.is_on_floor():
@@ -149,7 +183,7 @@ func _test_default_mouse_sensitivity_nonzero() -> void:
 
 func _test_mouse_motion_rotates_camera() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 
 	var yaw_before := player.rotation.y
 	# Drive the real look math directly. The controller only gates this on
@@ -159,7 +193,7 @@ func _test_mouse_motion_rotates_camera() -> void:
 	player._apply_look(Vector2(100.0, 0.0))
 	var yaw_after := player.rotation.y
 	var delta := absf(yaw_after - yaw_before)
-	var expected := 100.0 * player.mouse_sensitivity
+	var expected: float = 100.0 * player.mouse_sensitivity
 
 	_assert(
 		"mouse motion rotates camera by nonzero amount at default sensitivity",
@@ -220,14 +254,14 @@ func _test_crouch_binding_survives_autoload_init() -> void:
 ## upward velocity.
 func _test_jump_from_real_key_event() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 
 	var on_floor := await _settle_on_floor(player)
 
 	# Clean key state, then inject a real Space-down through the input pipeline.
 	_send_key(KEY_SPACE, false)
 	_send_key(KEY_SPACE, true)
-	var buffered := player._jump_buffer_timer
+	var buffered: float = player._jump_buffer_timer
 	# Allow up to two physics frames: the jump may fire on the landing frame.
 	await get_tree().physics_frame
 	var vy := player.velocity.y
@@ -251,7 +285,7 @@ func _test_jump_from_real_key_event() -> void:
 ## path through the real InputMap binding rather than Input.action_press.
 func _test_crouch_from_real_key_event() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 
 	await _settle_on_floor(player)
 
@@ -262,20 +296,20 @@ func _test_crouch_from_real_key_event() -> void:
 	await _step_physics(player, 30)
 	var speed_before := Vector3(player.velocity.x, 0.0, player.velocity.z).length()
 
-	var stand_h := player._capsule.height
+	var stand_h: float = player._capsule.height
 	_send_key(KEY_CTRL, true)
 	await _step_physics(player, 8)
-	var crouched := player._is_crouched
-	var crouch_h := player._capsule.height
-	var state := player._state
+	var crouched: bool = player._is_crouched
+	var crouch_h: float = player._capsule.height
+	var state: int = player._state
 	_send_key(KEY_CTRL, false)
 	_send_key(KEY_W, false)
 	_send_key(KEY_SHIFT, false)
 
 	_assert(
 		"physical Ctrl key (real input pipeline) engages crouch/slide",
-		crouched and crouch_h < stand_h and state == PlayerController.State.SLIDE,
-		"speed_before=%.2f, crouched=%s, capsule h %.2f->%.2f, state=%d (SLIDE=%d)" % [speed_before, str(crouched), stand_h, crouch_h, state, PlayerController.State.SLIDE]
+		crouched and crouch_h < stand_h and state == S_SLIDE,
+		"speed_before=%.2f, crouched=%s, capsule h %.2f->%.2f, state=%d (SLIDE=%d)" % [speed_before, str(crouched), stand_h, crouch_h, state, S_SLIDE]
 	)
 	ctx["level"].queue_free()
 	await get_tree().process_frame
@@ -283,7 +317,7 @@ func _test_crouch_from_real_key_event() -> void:
 
 func _test_jump_after_pause_unpause() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 	var pause_menu: CanvasLayer = ctx["level"].get_node("PauseMenu")
 
 	await _settle_on_floor(player)
@@ -316,7 +350,7 @@ func _test_jump_after_pause_unpause() -> void:
 
 func _test_crouch_no_vertical_jitter() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 
 	# Settle on flat ground.
 	await _step_physics(player, 15)
@@ -357,7 +391,7 @@ func _test_crouch_no_vertical_jitter() -> void:
 
 func _test_wallrun_not_triggered_by_crouch() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 
 	await _step_physics(player, 10)
 
@@ -370,8 +404,8 @@ func _test_wallrun_not_triggered_by_crouch() -> void:
 
 	_assert(
 		"crouch/Ctrl does NOT trigger wall-run",
-		state != PlayerController.State.WALL_RUN,
-		"state after crouch=%d (WALL_RUN=%d)" % [state, PlayerController.State.WALL_RUN]
+		state != S_WALL_RUN,
+		"state after crouch=%d (WALL_RUN=%d)" % [state, S_WALL_RUN]
 	)
 	ctx["level"].queue_free()
 	await get_tree().process_frame
@@ -412,7 +446,7 @@ func _test_crouch_action_maps_to_crouch_only() -> void:
 ## (a) Crouch at LOW speed → CROUCH-WALK, not SLIDE.
 func _test_low_speed_crouch_is_crouchwalk_not_slide() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 	await _settle_on_floor(player)
 
 	# Walk (no sprint) for a moment, then ease off so speed is well below the
@@ -426,15 +460,15 @@ func _test_low_speed_crouch_is_crouchwalk_not_slide() -> void:
 	_send_key(KEY_CTRL, true)
 	await _step_physics(player, 6)
 	var state: int = player._state
-	var crouched := player._is_crouched
+	var crouched: bool = player._is_crouched
 	_send_key(KEY_CTRL, false)
 
 	_assert(
 		"low-speed crouch enters CROUCH-WALK, not SLIDE",
-		state == PlayerController.State.CROUCH and crouched and state != PlayerController.State.SLIDE,
+		state == S_CROUCH and crouched and state != S_SLIDE,
 		"speed_before=%.2f (entry=%.1f), state=%d (CROUCH=%d SLIDE=%d), crouched=%s" % [
 			speed_before, player.slide_entry_speed, state,
-			PlayerController.State.CROUCH, PlayerController.State.SLIDE, str(crouched)]
+			S_CROUCH, S_SLIDE, str(crouched)]
 	)
 	ctx["level"].queue_free()
 	await get_tree().process_frame
@@ -443,7 +477,7 @@ func _test_low_speed_crouch_is_crouchwalk_not_slide() -> void:
 ## (b) Crouch at HIGH speed → SLIDE.
 func _test_high_speed_crouch_is_slide() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 	await _settle_on_floor(player)
 
 	# Sprint forward to exceed slide_entry_speed, then crouch.
@@ -461,9 +495,9 @@ func _test_high_speed_crouch_is_slide() -> void:
 
 	_assert(
 		"high-speed crouch enters SLIDE",
-		state == PlayerController.State.SLIDE and speed_before >= player.slide_entry_speed,
+		state == S_SLIDE and speed_before >= player.slide_entry_speed,
 		"speed_before=%.2f (entry=%.1f), state=%d (SLIDE=%d)" % [
-			speed_before, player.slide_entry_speed, state, PlayerController.State.SLIDE]
+			speed_before, player.slide_entry_speed, state, S_SLIDE]
 	)
 	ctx["level"].queue_free()
 	await get_tree().process_frame
@@ -473,7 +507,7 @@ func _test_high_speed_crouch_is_slide() -> void:
 ## AND/OR exits the slide — proving steerable + cancelable.
 func _test_slide_is_steerable_and_cancelable() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 	await _settle_on_floor(player)
 
 	# Enter a slide at speed.
@@ -483,7 +517,7 @@ func _test_slide_is_steerable_and_cancelable() -> void:
 	_send_key(KEY_SHIFT, false)
 	_send_key(KEY_CTRL, true)
 	await _step_physics(player, 2)
-	var entered_slide := player._state == PlayerController.State.SLIDE
+	var entered_slide: bool = player._state == S_SLIDE
 	var vel_dir_before := Vector3(player.velocity.x, 0.0, player.velocity.z).normalized()
 
 	# Now steer hard to the left (and keep W) for several frames.
@@ -491,7 +525,7 @@ func _test_slide_is_steerable_and_cancelable() -> void:
 	await _step_physics(player, 12)
 	var vel_dir_after := Vector3(player.velocity.x, 0.0, player.velocity.z).normalized()
 	var dir_change := rad_to_deg(vel_dir_before.angle_to(vel_dir_after))
-	var exited := player._state != PlayerController.State.SLIDE
+	var exited: bool = player._state != S_SLIDE
 
 	_send_key(KEY_A, false)
 	_send_key(KEY_W, false)
@@ -511,7 +545,7 @@ func _test_slide_is_steerable_and_cancelable() -> void:
 ## (no involuntary downhill slide).
 func _test_slope_holds_position_without_crouch() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 
 	# Place the player above the centre of the ~15° slope (z=-30) and let it
 	# settle onto the surface. No movement / crouch input at all.
@@ -542,7 +576,7 @@ func _test_slope_holds_position_without_crouch() -> void:
 ## (The stationary-crouch jitter case is covered by _test_crouch_no_vertical_jitter.)
 func _test_crouchwalk_no_vertical_jitter() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 	await _settle_on_floor(player)
 
 	# Crouch-walk: hold W (slow) + crouch so we're in CROUCH-WALK and moving.
@@ -591,7 +625,7 @@ func _test_crouchwalk_no_vertical_jitter() -> void:
 ## the fix it must monotonically decay toward zero on flat ground.
 func _test_slide_speed_does_not_compound() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 	await _settle_on_floor(player)
 
 	# Build up sprint speed, then enter a slide.
@@ -603,7 +637,7 @@ func _test_slide_speed_does_not_compound() -> void:
 	# Enter slide via real Ctrl key.
 	_send_key(KEY_CTRL, true)
 	await _step_physics(player, 3)
-	var entered_slide := player._state == PlayerController.State.SLIDE
+	var entered_slide: bool = player._state == S_SLIDE
 
 	# Sample speed every frame for 60 frames of sliding on flat ground.
 	# Allow one frame of "entry" settling, then assert: speed never increases
@@ -623,7 +657,7 @@ func _test_slide_speed_does_not_compound() -> void:
 		if sp > max_cap + 0.01:
 			exceeded_cap = true
 		prev_speed = sp
-		if player._state != PlayerController.State.SLIDE:
+		if player._state != S_SLIDE:
 			break  # slide exited (speed decayed below exit threshold) — that's fine
 
 	_send_key(KEY_CTRL, false)
@@ -658,7 +692,7 @@ func _test_slide_speed_does_not_compound() -> void:
 ## must decay rather than hold or increase.
 func _test_wallrun_backward_does_not_accelerate_forward() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 
 	# Place player inside the wall corridor, near the right wall (WallB x=3.5).
 	# Wall surface faces inward at x≈3.0; player capsule radius 0.35 → centre
@@ -674,7 +708,7 @@ func _test_wallrun_backward_does_not_accelerate_forward() -> void:
 	var entered := false
 	for _i in 20:
 		await get_tree().physics_frame
-		if player._state == PlayerController.State.WALL_RUN:
+		if player._state == S_WALL_RUN:
 			entered = true
 			break
 
@@ -688,14 +722,14 @@ func _test_wallrun_backward_does_not_accelerate_forward() -> void:
 		player._wall_normal = Vector3(-1, 0, 0)
 		player._wall_run_side = 1.0
 		player._wall_run_timer = player.wall_run_max_time
-		player._transition(PlayerController.State.WALL_RUN)
+		player._transition(S_WALL_RUN)
 		await get_tree().physics_frame
-		entered = (player._state == PlayerController.State.WALL_RUN)
+		entered = (player._state == S_WALL_RUN)
 
-	var in_wall_run := (player._state == PlayerController.State.WALL_RUN)
+	var in_wall_run: bool = (player._state == S_WALL_RUN)
 
 	# Measure speed along the wall tangent (pointing in +Z when wall normal is -X).
-	var along_wall := player._wall_normal.cross(Vector3.UP).normalized()
+	var along_wall: Vector3 = player._wall_normal.cross(Vector3.UP).normalized()
 	if along_wall.dot(Vector3(0, 0, 1)) < 0.0:
 		along_wall = -along_wall
 	var speed_before := Vector3(player.velocity.x, 0.0, player.velocity.z).dot(along_wall)
@@ -725,7 +759,7 @@ func _test_wallrun_backward_does_not_accelerate_forward() -> void:
 
 func _test_respawn_below_kill_y() -> void:
 	var ctx := await _spawn_level()
-	var player: PlayerController = ctx["player"]
+	var player: CharacterBody3D = ctx["player"]
 
 	await _step_physics(player, 5)
 	var spawn_y := player.global_position.y

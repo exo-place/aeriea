@@ -18,21 +18,30 @@ extends RefCounted
 # "collapse asymmetries to primitives" — never a per-verb hack.
 # ---------------------------------------------------------------------------
 
-## Condition ops implemented this slice. (Slice 2 adds speed_v, wall_detected,
-## wall_still_near, ledge_vaultable, headroom, slope_angle, below_y, wish_input
-## variants.)
-const COND_OPS_SLICE1 := [
-	"on_ground", "airborne", "speed_h", "timer",
+## The closed Condition-op vocabulary. Slice 1 implemented the ground+jump
+## subset; Slice 2 added the remaining leaves (speed_v, wall_detected,
+## wall_still_near, ledge_vaultable, headroom, slope_angle, below_y). New leaves
+## are an engine change reviewed against "collapse asymmetries to primitives" —
+## never a per-verb hack.
+const COND_OPS := [
+	"on_ground", "airborne", "speed_h", "speed_v", "timer",
 	"input_pressed", "input_buffered", "wish_input",
+	"wall_detected", "wall_still_near", "ledge_vaultable", "headroom",
+	"slope_angle", "below_y",
 	"all", "any", "not",
 ]
 
-## Effect ops implemented this slice. (Slice 2 adds add_velocity, carve,
-## slope_accelerate, clamp_speed_h, set_collider_height, lerp_* , tween_position,
-## respawn.)
-const EFFECT_OPS_SLICE1 := [
+## The closed Effect-op vocabulary. Slice 1 implemented the ground+jump subset;
+## Slice 2 added add_velocity, carve, slope_accelerate, clamp_speed_h,
+## set_collider_height, lerp_camera_height/lerp_fov/lerp_camera_roll,
+## tween_position, respawn.
+const EFFECT_OPS := [
 	"accelerate_toward", "air_strafe", "apply_friction", "apply_gravity",
-	"set_velocity_y", "set_timer", "move_and_slide",
+	"set_velocity_y", "set_velocity_y_max", "add_velocity", "carve",
+	"slope_accelerate", "clamp_speed_h", "set_collider_height",
+	"set_timer", "add_timer",
+	"lerp_camera_height", "lerp_fov", "lerp_camera_roll",
+	"tween_position", "respawn", "move_and_slide",
 ]
 
 const CMP_OPS := ["ge", "gt", "le", "lt", "eq"]
@@ -74,6 +83,11 @@ var inputs: Dictionary = {}             # action -> InputSpec
 var initial: String = ""
 var states: Dictionary = {}             # name -> MovementState
 var state_order: Array = []             # insertion order of state names
+## Pre-tick transitions evaluated every tick BEFORE the active state's transitions,
+## regardless of active state (§3 step 2). Used for the kill-plane respawn:
+## `{ when: below_y(kill_y), do: [respawn] }`. A pre_tick transition that fires
+## aborts the rest of the tick (mirrors the imperative pre-tick `return`).
+var pre_tick: Array = []                # Array[Transition]
 var load_errors: Array = []             # Array[String]; non-empty => invalid kit
 
 func is_valid() -> bool:
@@ -178,6 +192,16 @@ func _load_from_dict(data: Dictionary) -> void:
 		states[st.name] = st
 		state_order.append(st.name)
 
+	# Pre-tick transitions (evaluated every tick before state transitions).
+	var raw_pre: Variant = data.get("pre_tick", [])
+	if typeof(raw_pre) == TYPE_ARRAY:
+		for raw_t: Variant in raw_pre:
+			var tr := _load_transition(raw_t, "<pre_tick>")
+			if tr != null:
+				pre_tick.append(tr)
+	elif raw_pre != null:
+		_err("pre_tick must be an array of transitions")
+
 	# Cross-checks: initial exists, transition targets exist.
 	if initial != "" and not states.has(initial):
 		_err("initial state '%s' is not defined" % initial)
@@ -187,6 +211,10 @@ func _load_from_dict(data: Dictionary) -> void:
 			if not states.has(tr.to_state):
 				_err("state '%s' transition targets undefined state '%s'" % [sname, tr.to_state])
 			_validate_condition(tr.when_cond, "state '%s' transition guard" % sname)
+	for tr: Transition in pre_tick:
+		if not states.has(tr.to_state):
+			_err("pre_tick transition targets undefined state '%s'" % tr.to_state)
+		_validate_condition(tr.when_cond, "pre_tick transition guard")
 
 func _load_transition(raw: Variant, state_name: String) -> Transition:
 	if typeof(raw) != TYPE_DICTIONARY:
@@ -217,14 +245,14 @@ func _load_effects(raw: Variant, ctx: String) -> Array:
 			_err("%s contains a non-object effect" % ctx)
 			continue
 		var op: String = str(e.get("do", ""))
-		if not EFFECT_OPS_SLICE1.has(op):
-			_err("%s: unknown/unsupported effect op '%s' (Slice 1 implements %s)" % [ctx, op, str(EFFECT_OPS_SLICE1)])
+		if not EFFECT_OPS.has(op):
+			_err("%s: unknown effect op '%s' (one of %s)" % [ctx, op, str(EFFECT_OPS)])
 		out.append(e)
 	return out
 
 func _validate_condition(cond: Dictionary, ctx: String) -> void:
 	var op: String = str(cond.get("op", ""))
-	if not COND_OPS_SLICE1.has(op):
+	if not COND_OPS.has(op):
 		_err("%s: unknown/unsupported condition op '%s'" % [ctx, op])
 		return
 	match op:
@@ -238,8 +266,10 @@ func _validate_condition(cond: Dictionary, ctx: String) -> void:
 					_validate_condition(sub, ctx)
 				else:
 					_err("%s: '%s'.of contains a non-condition" % [ctx, op])
-		"speed_h":
+		"speed_h", "speed_v", "slope_angle":
 			_validate_cmp(cond, ctx)
+			_validate_value(cond.get("value"), ctx)
+		"below_y":
 			_validate_value(cond.get("value"), ctx)
 		"timer":
 			if str(cond.get("name", "")) == "":
@@ -249,6 +279,10 @@ func _validate_condition(cond: Dictionary, ctx: String) -> void:
 		"input_pressed", "input_buffered":
 			if str(cond.get("action", "")) == "":
 				_err("%s: %s needs an 'action'" % [ctx, op])
+		"wall_detected":
+			var side: String = str(cond.get("side", "any"))
+			if not ["any", "left", "right"].has(side):
+				_err("%s: wall_detected side must be any/left/right, got '%s'" % [ctx, side])
 
 func _validate_cmp(cond: Dictionary, ctx: String) -> void:
 	var cmp: String = str(cond.get("cmp", ""))

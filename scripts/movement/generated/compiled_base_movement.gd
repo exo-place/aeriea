@@ -30,17 +30,39 @@ var wall_side: float = 0.0
 var _held_last: Dictionary = {}
 var yaw: float = 0.0
 var pitch: float = 0.0
+var toggle_actions: Dictionary = {}
+
+class ToggleHold:
+	extends RefCounted
+	var mode: int = 0
+	var _latched: bool = false
+	var _held_prev: bool = false
+	func resolve(held_now: bool) -> bool:
+		var active: bool
+		if mode == 1:
+			if held_now and not _held_prev:
+				_latched = not _latched
+			active = _latched
+		else:
+			active = held_now
+		_held_prev = held_now
+		return active
+	func reset() -> void:
+		_latched = false
+		_held_prev = false
 
 # --- Params lowered to consts (referenced by name in the kit) ---
 const P_air_acceleration := 20.0
 const P_air_speed_cap := 12.0
-const P_bullet_jump_base_up := 4.5
+const P_bullet_jump_base_up := 6.0
 const P_bullet_jump_buffer_time := 0.15
 const P_bullet_jump_cooldown := 0.6
 const P_bullet_jump_impulse := 13.0
 const P_camera_height_crouch := 0.85
 const P_camera_height_lerp_speed := 12.0
 const P_camera_height_stand := 1.65
+const P_camera_roll_lerp_speed := 10.0
+const P_camera_roll_level := 0.0
 const P_coyote_time := 0.12
 const P_crouch_height := 0.6
 const P_crouch_walk_speed := 2.8
@@ -51,7 +73,7 @@ const P_ground_snap_bias := -0.5
 const P_jump_buffer_time := 0.15
 const P_jump_hold_gravity_scale := 1.2
 const P_jump_hold_max_time := 0.25
-const P_jump_velocity := 7.5
+const P_jump_velocity := 9.5
 const P_kill_y := -25.0
 const P_max_slide_speed := 22.0
 const P_slide_boost := 3.0
@@ -71,6 +93,7 @@ const P_wall_detect_distance := 0.65
 const P_wall_jump_grace := 0.12
 const P_wall_jump_lateral := 6.5
 const P_wall_jump_up := 8.0
+const P_wall_run_camera_tilt := 8.0
 const P_wall_run_gravity_ramp := 1.8
 const P_wall_run_gravity_scale := 0.15
 const P_wall_run_max_time := 1.4
@@ -130,6 +153,9 @@ func _sample_input(dt: float) -> InputFrame:
 			actions.append(a)
 	for a in actions:
 		frame.pressed[a] = InputMap.has_action(a) and Input.is_action_pressed(a)
+	for a in toggle_actions:
+		var th: ToggleHold = toggle_actions[a]
+		frame.pressed[a] = th.resolve(bool(frame.pressed.get(a, false)))
 	for action in kit.inputs:
 		var spec: MovementKit.InputSpec = kit.inputs[action]
 		var held_now: bool = frame.is_pressed(action)
@@ -164,7 +190,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			timers["jump_buffer"] = 0.0
 			timers["jump_hold"] = 0.0
 			active_state = "AIR"
-			return true
+			return false
 		elif ((_speed_h() > P_vault_min_speed) and body.host_check_vault()):
 			timers["vault"] = P_vault_duration
 			active_state = "VAULT"
@@ -201,7 +227,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			timers["jump_buffer"] = 0.0
 			active_state = "AIR"
 			return true
-		elif ((_speed_h() >= P_wall_run_min_speed) and (not body.is_on_floor()) and _probe_walls("any")):
+		elif ((_speed_h() >= P_wall_run_min_speed) and (not body.is_on_floor()) and _probe_walls("any") and (frame.wish_dir.length_squared() >= 0.001)):
 			body.velocity.y = maxf(body.velocity.y, P_wall_run_vertical_boost)
 			timers["wall_run"] = P_wall_run_max_time
 			active_state = "WALL_RUN"
@@ -210,7 +236,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			timers["vault"] = P_vault_duration
 			active_state = "VAULT"
 			return false
-		elif body.is_on_floor():
+		elif (body.is_on_floor() and (body.velocity.y <= 0.0)):
 			active_state = "GROUND"
 			return true
 		return false
@@ -301,11 +327,13 @@ func _run_tick(frame: InputFrame, dt: float) -> void:
 		body.velocity.y = P_ground_snap_bias
 		body.move_and_slide()
 		body.host_lerp_camera_height(P_camera_height_stand, P_camera_height_lerp_speed, dt)
+		body.host_lerp_camera_roll(P_camera_roll_level, P_camera_roll_lerp_speed, dt)
 	elif active_state == "AIR":
 		_k_apply_gravity(dt, (P_jump_hold_gravity_scale if (frame.is_pressed("jump") and (float(timers.get("jump_hold", 0.0)) < P_jump_hold_max_time) and (body.velocity.y > 0.0)) else P_gravity_scale), false, INF)
 		_k_air_strafe(frame, dt, "wish", P_air_speed_cap, P_air_acceleration)
 		body.move_and_slide()
 		body.host_lerp_camera_height(P_camera_height_stand, P_camera_height_lerp_speed, dt)
+		body.host_lerp_camera_roll(P_camera_roll_level, P_camera_roll_lerp_speed, dt)
 	elif active_state == "SLIDE":
 		_k_slope_accelerate(dt, P_slope_acceleration, 45.0)
 		_k_clamp_speed_h(P_max_slide_speed)
@@ -318,16 +346,19 @@ func _run_tick(frame: InputFrame, dt: float) -> void:
 		body.velocity.y = P_ground_snap_bias
 		body.move_and_slide()
 		body.host_lerp_camera_height(P_camera_height_crouch, P_camera_height_lerp_speed, dt)
+		body.host_lerp_camera_roll(P_camera_roll_level, P_camera_roll_lerp_speed, dt)
 	elif active_state == "CROUCH":
 		_k_accelerate_toward(frame, dt, "wish", P_crouch_walk_speed, P_ground_acceleration)
 		_k_apply_friction(frame, dt, P_ground_friction, true)
 		body.velocity.y = P_ground_snap_bias
 		body.move_and_slide()
 		body.host_lerp_camera_height(P_camera_height_crouch, P_camera_height_lerp_speed, dt)
+		body.host_lerp_camera_roll(P_camera_roll_level, P_camera_roll_lerp_speed, dt)
 	elif active_state == "WALL_RUN":
 		_k_apply_gravity(dt, _curve_ramp("wall_run", P_wall_run_max_time, P_wall_run_gravity_scale, 1.0, P_wall_run_gravity_ramp), true, -9.8)
 		_k_accelerate_toward(frame, dt, "wall_tangent", P_wall_run_speed, P_wall_run_speed_rate)
 		body.move_and_slide()
+		body.host_lerp_camera_roll(-wall_side * P_wall_run_camera_tilt, P_camera_roll_lerp_speed, dt)
 	elif active_state == "VAULT":
 		_k_tween_position("vault", P_vault_duration)
 
@@ -464,13 +495,18 @@ func _k_accelerate_along_wall(frame: InputFrame, dt: float, run_speed: float, ra
 	if frame.is_pressed("move_backward"):
 		fwd_input -= 1.0
 	var current_along := Vector3(body.velocity.x, 0.0, body.velocity.z).dot(tangent)
+	# REWORKED FEEL (issue #2): forward input SUSTAINS along-wall momentum (capped at
+	# run_speed), it does not snap to a fixed run_speed; backward decelerates to 0; no
+	# input carries momentum. run_speed is a CAP. Mirrors MovementInterpreter.
 	var target_along: float
 	if fwd_input > 0.0:
-		target_along = run_speed
+		target_along = clampf(current_along, 0.0, run_speed)
 	elif fwd_input < 0.0:
 		target_along = 0.0
 	else:
 		target_along = current_along
+	if current_along > run_speed:
+		target_along = run_speed
 	var new_along := move_toward(current_along, target_along, rate * dt)
 	body.velocity.x = tangent.x * new_along
 	body.velocity.z = tangent.z * new_along

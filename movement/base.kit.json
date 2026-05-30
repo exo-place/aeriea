@@ -14,7 +14,7 @@
     "jump_hold_gravity_scale": 1.2,
     "jump_hold_max_time": 0.25,
 
-    "jump_velocity": 7.5,
+    "jump_velocity": 9.5,
     "coyote_time": 0.12,
     "jump_buffer_time": 0.15,
 
@@ -50,6 +50,9 @@
     "camera_height_stand": 1.65,
     "camera_height_crouch": 0.85,
     "camera_height_lerp_speed": 12.0,
+    "wall_run_camera_tilt": 8.0,
+    "camera_roll_lerp_speed": 10.0,
+    "camera_roll_level": 0.0,
 
     "kill_y": -25.0
   },
@@ -75,11 +78,10 @@
       "on_enter": [],
       "transitions": [
         {
-          "comment": "Buffered jump from the ground (highest priority).",
+          "comment": "Buffered jump from the ground (highest priority). NOT reenter: the jump sets vy>0 and hands to AIR, whose tick (gravity + move_and_slide) runs this same frame and lifts the body off the floor. Re-entering would re-evaluate AIR's transitions against the STALE is_on_floor()==true (move_and_slide has not run yet at transition-eval time), bouncing AIR->GROUND in the same tick; GROUND's tick then clobbers the jump impulse with ground_snap_bias, so the jump silently dies. Mirrors PlayerController._process_ground, which returns after _do_jump() and does NOT re-run air logic that frame.",
           "when": { "op": "input_buffered", "action": "jump" },
           "to": "AIR",
           "priority": 90,
-          "reenter": true,
           "do": [
             { "do": "set_velocity_y", "value": "jump_velocity" },
             { "do": "set_timer", "name": "jump_buffer", "value": 0 },
@@ -139,7 +141,8 @@
         { "do": "apply_friction", "rate": "ground_friction", "only_when_no_wish": true },
         { "do": "set_velocity_y", "value": "ground_snap_bias" },
         { "do": "move_and_slide" },
-        { "do": "lerp_camera_height", "target": "camera_height_stand", "rate": "camera_height_lerp_speed" }
+        { "do": "lerp_camera_height", "target": "camera_height_stand", "rate": "camera_height_lerp_speed" },
+        { "comment": "Level the camera (undo any wall-run roll).", "do": "lerp_camera_roll", "target": "camera_roll_level", "rate": "camera_roll_lerp_speed" }
       ],
       "on_exit": []
     },
@@ -181,11 +184,12 @@
           ]
         },
         {
-          "comment": "Auto wall-run entry: fast enough, airborne, wall on a side.",
+          "comment": "Wall-run entry (issue #2: require INTENT, don't snap people in). Engages only when the player is fast enough, airborne, beside a wall AND actively giving move input — so it feels deliberate, not an involuntary forward shove. The tick then CARRIES the player's existing along-wall momentum (no forced fixed speed) and lets it decay via the gravity ramp.",
           "when": { "op": "all", "of": [
             { "op": "speed_h", "cmp": "ge", "value": "wall_run_min_speed" },
             { "op": "airborne" },
-            { "op": "wall_detected", "side": "any" }
+            { "op": "wall_detected", "side": "any" },
+            { "op": "wish_input" }
           ] },
           "to": "WALL_RUN",
           "priority": 70,
@@ -205,8 +209,11 @@
           "do": [ { "do": "set_timer", "name": "vault", "value": "vault_duration" } ]
         },
         {
-          "comment": "Landed: hand off to GROUND this same frame so a buffered jump/slide fires on the landing frame.",
-          "when": { "op": "on_ground" },
+          "comment": "Landed: hand off to GROUND this same frame so a buffered jump/slide fires on the landing frame. Guarded by speed_v<=0 (not rising) so a FRESH jump (vy>0, is_on_floor() still stale-true at tick-top before move_and_slide) does NOT immediately bounce back to GROUND and get its impulse clobbered. You land when descending, not when launching.",
+          "when": { "op": "all", "of": [
+            { "op": "on_ground" },
+            { "op": "speed_v", "cmp": "le", "value": 0 }
+          ] },
           "to": "GROUND",
           "priority": 10,
           "reenter": true
@@ -227,7 +234,8 @@
         },
         { "do": "air_strafe", "space": "wish", "rate": "air_acceleration", "cap": "air_speed_cap" },
         { "do": "move_and_slide" },
-        { "do": "lerp_camera_height", "target": "camera_height_stand", "rate": "camera_height_lerp_speed" }
+        { "do": "lerp_camera_height", "target": "camera_height_stand", "rate": "camera_height_lerp_speed" },
+        { "comment": "Level the camera (undo any wall-run roll once off the wall).", "do": "lerp_camera_roll", "target": "camera_roll_level", "rate": "camera_roll_lerp_speed" }
       ],
       "on_exit": []
     },
@@ -296,7 +304,8 @@
         },
         { "do": "set_velocity_y", "value": "ground_snap_bias" },
         { "do": "move_and_slide" },
-        { "do": "lerp_camera_height", "target": "camera_height_crouch", "rate": "camera_height_lerp_speed" }
+        { "do": "lerp_camera_height", "target": "camera_height_crouch", "rate": "camera_height_lerp_speed" },
+        { "comment": "Level the camera.", "do": "lerp_camera_roll", "target": "camera_roll_level", "rate": "camera_roll_lerp_speed" }
       ],
       "on_exit": []
     },
@@ -340,7 +349,8 @@
         { "do": "apply_friction", "rate": "ground_friction", "only_when_no_wish": true },
         { "do": "set_velocity_y", "value": "ground_snap_bias" },
         { "do": "move_and_slide" },
-        { "do": "lerp_camera_height", "target": "camera_height_crouch", "rate": "camera_height_lerp_speed" }
+        { "do": "lerp_camera_height", "target": "camera_height_crouch", "rate": "camera_height_lerp_speed" },
+        { "comment": "Level the camera.", "do": "lerp_camera_roll", "target": "camera_roll_level", "rate": "camera_roll_lerp_speed" }
       ],
       "on_exit": []
     },
@@ -408,7 +418,12 @@
           "do": "accelerate_toward", "space": "wall_tangent",
           "speed": "wall_run_speed", "rate": "wall_run_speed_rate"
         },
-        { "do": "move_and_slide" }
+        { "do": "move_and_slide" },
+        {
+          "comment": "Wall-run camera tilt (issue #4): roll the camera toward the wall. Magnitude is data (wall_run_camera_tilt); the SIGN is -wall_side (computed deterministically by the interpreter from the tracked wall) via from_wall_side. Render-only (excluded from the trajectory hash). The level states below lerp it back to 0.",
+          "do": "lerp_camera_roll", "target": "wall_run_camera_tilt",
+          "from_wall_side": true, "rate": "camera_roll_lerp_speed"
+        }
       ],
       "on_exit": []
     },

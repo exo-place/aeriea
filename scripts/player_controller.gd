@@ -83,7 +83,7 @@ extends CharacterBody3D
 
 @export_group("Jump")
 ## Jump impulse velocity (m/s)
-@export var jump_velocity: float = 7.5
+@export var jump_velocity: float = 9.5
 ## Coyote time window (seconds) — allows jumping slightly after leaving ground.
 ## Designer-tunable in the editor; not exposed to players.
 @export var coyote_time: float = 0.12
@@ -704,14 +704,20 @@ func _process_wall_run(delta: float) -> void:
 	# Forward → run at wall_run_speed; backward → decelerate (target = 0 or negative);
 	# no longitudinal input → hold current speed (momentum-preserving).
 	var current_along := Vector3(velocity.x, 0.0, velocity.z).dot(along_wall)
+	# REWORKED FEEL (issue #2): forward input SUSTAINS along-wall momentum (capped at
+	# wall_run_speed), not a forced shove to a fixed speed; backward decelerates to 0;
+	# no input carries momentum. wall_run_speed is a CAP. Matches the data kit /
+	# interpreter so the oracle stays a faithful parity reference.
 	var target_along: float
 	if fwd_input > 0.0:
-		target_along = wall_run_speed
+		target_along = clampf(current_along, 0.0, wall_run_speed)
 	elif fwd_input < 0.0:
 		# Backward decelerates toward zero; does NOT accelerate you forward.
 		target_along = 0.0
 	else:
 		target_along = current_along  # no change — preserve momentum
+	if current_along > wall_run_speed:
+		target_along = wall_run_speed
 
 	# Move toward target at a responsive-but-not-instant rate.
 	var new_along := move_toward(current_along, target_along, wall_run_speed * 6.0 * delta)

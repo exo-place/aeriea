@@ -4,7 +4,7 @@
 
   "params": {
     "bullet_jump_impulse": 13.0,
-    "bullet_jump_base_up": 4.5,
+    "bullet_jump_base_up": 6.0,
     "bullet_jump_cooldown": 0.6,
     "bullet_jump_buffer_time": 0.15
   },

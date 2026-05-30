@@ -86,6 +86,7 @@ func _run_suite() -> void:
 	_test_jump_binding_survives_autoload_init()
 	_test_crouch_binding_survives_autoload_init()
 	await _test_jump_from_real_key_event()
+	await _test_ground_jump_from_settled_ground_state()
 	await _test_crouch_from_real_key_event()
 	await _test_jump_after_pause_unpause()
 	await _test_crouch_no_vertical_jitter()
@@ -291,6 +292,53 @@ func _test_jump_from_real_key_event() -> void:
 		"physical Space key (real input pipeline) makes velocity.y positive",
 		vy > 0.0,
 		"on_floor_before=%s, buffer_set=%.3f, velocity.y=%.3f after Space" % [str(on_floor), buffered, vy]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## Plain GROUND jump from a fully-SETTLED standing state (issue #1 regression
+## guard). The prior _test_jump_from_real_key_event pressed Space on the LANDING
+## frame, while the interpreter was still transiently in AIR (is_on_floor() true
+## but active_state==AIR): the jump fired via the AIR/landing-reenter path, so it
+## passed even though a plain GROUND-state jump was DEAD in the live game. The live
+## bug only manifests once the player is steady in GROUND for several ticks: the
+## GROUND buffered-jump transition was `reenter:true`, so after it set vy and handed
+## to AIR, the AIR->GROUND `on_ground` transition immediately bounced back the same
+## tick (is_on_floor() stale-true before move_and_slide), and GROUND's tick clobbered
+## the impulse with ground_snap_bias — vy stayed 0. This test reproduces the real
+## path: settle, idle until active_state==GROUND for real, THEN tap. It FAILS against
+## the broken kit (vy==0) and passes after (vy>0).
+func _test_ground_jump_from_settled_ground_state() -> void:
+	var ctx := await _spawn_level()
+	var player: CharacterBody3D = ctx["player"]
+	await _settle_on_floor(player)
+	# Idle until the state machine is genuinely in GROUND (not the AIR landing
+	# transient), then a few more ticks so we are unambiguously settled.
+	var in_ground := false
+	for _i in 30:
+		await get_tree().physics_frame
+		if player._state == S_GROUND:
+			in_ground = true
+			break
+	await _step_physics(player, 5)
+	var state_before: int = player._state
+
+	# One real Space tap (down one frame, up) from the settled GROUND state.
+	_send_key(KEY_SPACE, false)
+	_send_key(KEY_SPACE, true)
+	await get_tree().physics_frame
+	_send_key(KEY_SPACE, false)
+	var vy := player.velocity.y
+	if vy <= 0.0:
+		await get_tree().physics_frame
+		vy = maxf(vy, player.velocity.y)
+
+	_assert(
+		"plain GROUND jump from a fully-settled standing state produces upward velocity",
+		state_before == S_GROUND and vy > 0.0,
+		"state_before=%d (GROUND=%d), reached_ground=%s, velocity.y=%.3f after Space tap" % [
+			state_before, S_GROUND, str(in_ground), vy]
 	)
 	ctx["level"].queue_free()
 	await get_tree().process_frame
@@ -859,18 +907,21 @@ func _test_wallrun_backward_does_not_accelerate_forward() -> void:
 	player.rotation.y = 0.0
 	player.velocity = Vector3(0.0, 1.5, player.wall_run_speed + 1.0)
 
-	# Step frames — wall-run auto-detect fires when airborne + fast + wall close.
-	# Give up to 20 frames for the detection to engage.
+	# Step frames — wall-run engages when airborne + fast + wall close + INTENT.
+	# Issue #2 reworked entry to REQUIRE movement input (no involuntary snap-in), so
+	# hold forward (W) during detection to express intent. Give up to 20 frames.
+	_send_key(KEY_W, true)
 	var entered := false
 	for _i in 20:
 		await get_tree().physics_frame
 		if player._state == S_WALL_RUN:
 			entered = true
 			break
+	_send_key(KEY_W, false)
 
 	if not entered:
-		# Fallback: force wall-run state with real geometry.
-		# This keeps _is_wall_nearby() happy by placing the player flush to the wall.
+		# Fallback: force wall-run state with real geometry, holding forward so the
+		# new no-input exit (priority 55) doesn't immediately step off the wall.
 		player.global_position = Vector3(2.6, 2.0, 6.0)
 		player._yaw = 0.0
 		player.rotation.y = 0.0
@@ -879,7 +930,9 @@ func _test_wallrun_backward_does_not_accelerate_forward() -> void:
 		player._wall_run_side = 1.0
 		player._wall_run_timer = player.wall_run_max_time
 		player._transition(S_WALL_RUN)
+		_send_key(KEY_W, true)
 		await get_tree().physics_frame
+		_send_key(KEY_W, false)
 		entered = (player._state == S_WALL_RUN)
 
 	var in_wall_run: bool = (player._state == S_WALL_RUN)

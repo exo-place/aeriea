@@ -100,6 +100,28 @@ func _emit_fields() -> void:
 	_line("var _held_last: Dictionary = {}")
 	_line("var yaw: float = 0.0")
 	_line("var pitch: float = 0.0")
+	_line("var toggle_actions: Dictionary = {}")
+	_line("")
+	# ToggleHold — reusable tap-vs-hold resolver (accessibility #5). Mirrors
+	# MovementInterpreter.ToggleHold so the compiled path honors the same setting.
+	_line("class ToggleHold:")
+	_line("\textends RefCounted")
+	_line("\tvar mode: int = 0")
+	_line("\tvar _latched: bool = false")
+	_line("\tvar _held_prev: bool = false")
+	_line("\tfunc resolve(held_now: bool) -> bool:")
+	_line("\t\tvar active: bool")
+	_line("\t\tif mode == 1:")
+	_line("\t\t\tif held_now and not _held_prev:")
+	_line("\t\t\t\t_latched = not _latched")
+	_line("\t\t\tactive = _latched")
+	_line("\t\telse:")
+	_line("\t\t\tactive = held_now")
+	_line("\t\t_held_prev = held_now")
+	_line("\t\treturn active")
+	_line("\tfunc reset() -> void:")
+	_line("\t\t_latched = false")
+	_line("\t\t_held_prev = false")
 	_line("")
 
 func _emit_consts() -> void:
@@ -185,6 +207,9 @@ func _emit_input_sampling() -> void:
 	_line("\t\t\tactions.append(a)")
 	_line("\tfor a in actions:")
 	_line("\t\tframe.pressed[a] = InputMap.has_action(a) and Input.is_action_pressed(a)")
+	_line("\tfor a in toggle_actions:")
+	_line("\t\tvar th: ToggleHold = toggle_actions[a]")
+	_line("\t\tframe.pressed[a] = th.resolve(bool(frame.pressed.get(a, false)))")
 	_line("\tfor action in kit.inputs:")
 	_line("\t\tvar spec: MovementKit.InputSpec = kit.inputs[action]")
 	_line("\t\tvar held_now: bool = frame.is_pressed(action)")
@@ -455,8 +480,13 @@ func _emit_effect(e: Dictionary, indent: String) -> void:
 			_line("%sbody.host_lerp_fov(%s, %s, dt)" % [
 				indent, _lower_value(e.get("target")), _lower_value(e.get("rate"))])
 		"lerp_camera_roll":
-			_line("%sbody.host_lerp_camera_roll(%s, %s, dt)" % [
-				indent, _lower_value(e.get("target")), _lower_value(e.get("rate"))])
+			# target is the roll magnitude; from_wall_side -> sign -wall_side*mag.
+			if bool(e.get("from_wall_side", false)):
+				_line("%sbody.host_lerp_camera_roll(-wall_side * %s, %s, dt)" % [
+					indent, _lower_value(e.get("target")), _lower_value(e.get("rate"))])
+			else:
+				_line("%sbody.host_lerp_camera_roll(%s, %s, dt)" % [
+					indent, _lower_value(e.get("target")), _lower_value(e.get("rate"))])
 		"tween_position":
 			_line("%s_k_tween_position(%s, %s)" % [
 				indent, _quote(str(e.get("duration_timer", "vault"))), _lower_value(e.get("duration"))])
@@ -621,13 +651,18 @@ func _k_accelerate_along_wall(frame: InputFrame, dt: float, run_speed: float, ra
 	if frame.is_pressed("move_backward"):
 		fwd_input -= 1.0
 	var current_along := Vector3(body.velocity.x, 0.0, body.velocity.z).dot(tangent)
+	# REWORKED FEEL (issue #2): forward input SUSTAINS along-wall momentum (capped at
+	# run_speed), it does not snap to a fixed run_speed; backward decelerates to 0; no
+	# input carries momentum. run_speed is a CAP. Mirrors MovementInterpreter.
 	var target_along: float
 	if fwd_input > 0.0:
-		target_along = run_speed
+		target_along = clampf(current_along, 0.0, run_speed)
 	elif fwd_input < 0.0:
 		target_along = 0.0
 	else:
 		target_along = current_along
+	if current_along > run_speed:
+		target_along = run_speed
 	var new_along := move_toward(current_along, target_along, rate * dt)
 	body.velocity.x = tangent.x * new_along
 	body.velocity.z = tangent.z * new_along

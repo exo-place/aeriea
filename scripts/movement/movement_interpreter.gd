@@ -39,6 +39,39 @@ class InputFrame:
 		return bool(pressed.get(action, false))
 
 # ---------------------------------------------------------------------------
+# ToggleHold — reusable tap-vs-hold resolver for an action (accessibility #5).
+# Given the raw key-pressed state each tick and a mode (HOLD or TOGGLE), it emits
+# a consistent "active" signal: HOLD → active == key held; TOGGLE → a rising edge
+# flips a latched active flag. Owned by the interpreter so the once-per-tick
+# InputFrame exposes a single coherent "active" bool regardless of mode — the kit's
+# sprint condition never has to know which mode is in effect. Deliberately NOT
+# sprint-specific: one instance per action, so aim (or any future hold action) can
+# reuse the exact same mechanism by registering another instance. Deterministic:
+# state advances only on the sampled edge, once per tick.
+# ---------------------------------------------------------------------------
+class ToggleHold:
+	extends RefCounted
+	var mode: int = 0          # GameSettings.InputMode.HOLD (0) / TOGGLE (1)
+	var _latched: bool = false # TOGGLE latch
+	var _held_prev: bool = false
+
+	## Advance one tick from the raw held state; return the resolved "active" bool.
+	func resolve(held_now: bool) -> bool:
+		var active: bool
+		if mode == 1: # TOGGLE
+			if held_now and not _held_prev:
+				_latched = not _latched
+			active = _latched
+		else: # HOLD
+			active = held_now
+		_held_prev = held_now
+		return active
+
+	func reset() -> void:
+		_latched = false
+		_held_prev = false
+
+# ---------------------------------------------------------------------------
 # Explicit mutable simulation record (§3). Everything the sim touches lives here
 # or on the body; nothing hidden.
 # ---------------------------------------------------------------------------
@@ -62,6 +95,13 @@ var _held_last: Dictionary = {}   # action -> bool (held at end of previous tick
 ## Source of yaw for wish-dir (radians). The body's rotation.y by default; the
 ## host can override for tests. Mouse-look stays separate (yaw only, sampled once).
 var yaw: float = 0.0
+
+## Per-action tap-vs-hold resolvers (accessibility #5). action -> ToggleHold. The
+## host registers these from GameSettings (e.g. sprint mode). When an action has a
+## resolver, _sample_input replaces its raw pressed bool with the resolver's
+## "active" signal, so the kit's sprint condition sees one consistent signal in
+## either mode. Reusable for aim/others — register another ToggleHold, no new code.
+var toggle_actions: Dictionary = {}   # action -> ToggleHold
 
 ## Source of pitch for the `aim`/look space (radians, +up). Fed by the host from
 ## its camera-pivot pitch each tick (parallel to `yaw`). Mouse-look already drives
@@ -171,6 +211,13 @@ func _sample_input(dt: float) -> InputFrame:
 			actions.append(a)
 	for a in actions:
 		frame.pressed[a] = InputMap.has_action(a) and Input.is_action_pressed(a)
+
+	# Tap-vs-hold (#5): for any action with a registered resolver, replace the raw
+	# held bool with the resolved "active" signal (HOLD passes through; TOGGLE
+	# latches on the rising edge). One coherent signal for the kit, both modes.
+	for a in toggle_actions:
+		var th: ToggleHold = toggle_actions[a]
+		frame.pressed[a] = th.resolve(bool(frame.pressed.get(a, false)))
 
 	# Buffered-edge timers: an action with a `buffer` param arms its timer on the
 	# rising edge (pressed now, not held last tick). jump_hold accumulates while held.
@@ -337,7 +384,15 @@ func _run_effect(e: Dictionary, frame: InputFrame, dt: float) -> void:
 		"lerp_fov":
 			body.host_lerp_fov(_resolve_value(e.get("target"), frame), _resolve_value(e.get("rate"), frame), dt)
 		"lerp_camera_roll":
-			body.host_lerp_camera_roll(_resolve_value(e.get("target"), frame), _resolve_value(e.get("rate"), frame), dt)
+			# `target` is the roll magnitude (degrees). With `from_wall_side` true, the
+			# SIGN comes from the currently-tracked wall (-wall_side * magnitude), so a
+			# right-wall (+1) rolls one way and a left-wall (-1) the other — the
+			# Warframe/Mirror's-Edge wall-run tilt. Sign is computed here (deterministic,
+			# from sampled wall_side), magnitude stays data; the host owns only the lerp.
+			var roll_target := _resolve_value(e.get("target"), frame)
+			if bool(e.get("from_wall_side", false)):
+				roll_target = -wall_side * roll_target
+			body.host_lerp_camera_roll(roll_target, _resolve_value(e.get("rate"), frame), dt)
 		"tween_position":
 			_eff_tween_position(e, frame)
 		"respawn":
@@ -420,13 +475,26 @@ func _accelerate_along_wall(e: Dictionary, frame: InputFrame, dt: float) -> void
 	if frame.is_pressed("move_backward"):
 		fwd_input -= 1.0
 	var current_along := Vector3(body.velocity.x, 0.0, body.velocity.z).dot(tangent)
+	# REWORKED FEEL (issue #2): wall-run is DELIBERATELY CARRYING SPEED along a wall,
+	# not an involuntary forward shove. Forward input SUSTAINS the player's existing
+	# along-wall momentum (it does NOT snap to a fixed run_speed); backward input
+	# decelerates toward 0 (never pushes forward); no input lets momentum carry and
+	# bleed gently. `run_speed` is now a CAP, not a forced target — momentum above it
+	# is trimmed, momentum below it is preserved, never injected. The gravity ramp
+	# (vertical) is what ends the wall-run over time; horizontal speed is the player's.
 	var target_along: float
 	if fwd_input > 0.0:
-		target_along = run_speed
+		# Sustain current momentum (capped). Pressing forward = "keep carrying speed".
+		target_along = clampf(current_along, 0.0, run_speed)
 	elif fwd_input < 0.0:
 		target_along = 0.0          # backward decelerates; never pushes forward
 	else:
-		target_along = current_along  # no input → preserve momentum
+		# No longitudinal input: carry momentum with a gentle bleed (no forced speed).
+		target_along = current_along
+	# Trim any momentum above the cap regardless of input (so a fast entry doesn't
+	# get an extra shove, just rides its own speed up to the cap).
+	if current_along > run_speed:
+		target_along = run_speed
 	var new_along := move_toward(current_along, target_along, rate * dt)
 	body.velocity.x = tangent.x * new_along
 	body.velocity.z = tangent.z * new_along

@@ -29,14 +29,15 @@ func _ready() -> void:
 	_back_button.pressed.connect(_on_back)
 	_reset_button.pressed.connect(_on_reset)
 
-	_dynamic_fov_check.toggled.connect(_on_dynamic_fov_toggled)
-	_mouse_sens_slider.value_changed.connect(_on_mouse_sens_changed)
-	_coyote_slider.value_changed.connect(_on_coyote_changed)
-	_jump_buf_slider.value_changed.connect(_on_jump_buf_changed)
-
-	# Slider ranges
-	_mouse_sens_slider.min_value = 0.0001
-	_mouse_sens_slider.max_value = 0.02
+	# Configure slider ranges BEFORE connecting value_changed and BEFORE
+	# setting initial values. A freshly-instanced HSlider has value 0 within
+	# the default 0..100 range; assigning a min_value above the current value
+	# silently clamps the value and emits value_changed. If signals were
+	# connected first, that spurious emission would overwrite the saved
+	# sensitivity with the slider minimum — the root cause of the "mouse
+	# sensitivity defaults to 0 / cannot look around" bug. Order matters.
+	_mouse_sens_slider.min_value = GameSettings.MOUSE_SENS_MIN
+	_mouse_sens_slider.max_value = GameSettings.MOUSE_SENS_MAX
 	_mouse_sens_slider.step = 0.0001
 
 	_coyote_slider.min_value = 0.0
@@ -47,8 +48,20 @@ func _ready() -> void:
 	_jump_buf_slider.max_value = 0.5
 	_jump_buf_slider.step = 0.01
 
+	# Seed current values without emitting (ranges are already set).
+	_dynamic_fov_check.set_pressed_no_signal(GameSettings.dynamic_fov_enabled)
+	_mouse_sens_slider.set_value_no_signal(GameSettings.mouse_sensitivity)
+	_coyote_slider.set_value_no_signal(GameSettings.coyote_time)
+	_jump_buf_slider.set_value_no_signal(GameSettings.jump_buffer_time)
+
+	# Now it is safe to listen for genuine user changes.
+	_dynamic_fov_check.toggled.connect(_on_dynamic_fov_toggled)
+	_mouse_sens_slider.value_changed.connect(_on_mouse_sens_changed)
+	_coyote_slider.value_changed.connect(_on_coyote_changed)
+	_jump_buf_slider.value_changed.connect(_on_jump_buf_changed)
+
 	GameSettings.settings_changed.connect(_refresh_from_settings)
-	_refresh_from_settings()
+	_update_labels()
 
 
 func _refresh_from_settings() -> void:
@@ -73,7 +86,7 @@ func _refresh_from_settings() -> void:
 
 func _update_labels() -> void:
 	# Mouse sensitivity: display as a 0–100 percentage of the usable range.
-	var sens_pct := GameSettings.mouse_sensitivity / 0.02 * 100.0
+	var sens_pct := GameSettings.mouse_sensitivity / GameSettings.MOUSE_SENS_MAX * 100.0
 	_mouse_sens_label.text = "%.0f%%" % sens_pct
 	_coyote_label.text = "%.2f s" % GameSettings.coyote_time
 	_jump_buf_label.text = "%.2f s" % GameSettings.jump_buffer_time

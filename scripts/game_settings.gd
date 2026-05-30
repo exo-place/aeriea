@@ -22,6 +22,13 @@ const DEFAULT_MOUSE_SENS     := 0.002
 const DEFAULT_COYOTE_TIME    := 0.12
 const DEFAULT_JUMP_BUFFER    := 0.15
 
+## Usable mouse-sensitivity bounds (radians per pixel of mouse motion).
+## MIN is the lowest value the slider may reach AND the floor below which a
+## loaded/persisted value is treated as corrupt and healed to the default.
+## A value near 0 means "cannot look around", so the floor must be usable.
+const MOUSE_SENS_MIN := 0.0004
+const MOUSE_SENS_MAX := 0.02
+
 # ---------------------------------------------------------------------------
 # Live values
 # ---------------------------------------------------------------------------
@@ -50,7 +57,7 @@ func set_dynamic_fov(value: bool) -> void:
 
 
 func set_mouse_sensitivity(value: float) -> void:
-	mouse_sensitivity = clampf(value, 0.0001, 0.02)
+	mouse_sensitivity = clampf(value, MOUSE_SENS_MIN, MOUSE_SENS_MAX)
 	_save()
 	settings_changed.emit()
 
@@ -88,6 +95,12 @@ func _load() -> void:
 	mouse_sensitivity   = cfg.get_value("gameplay", "mouse_sensitivity",   DEFAULT_MOUSE_SENS)
 	coyote_time         = cfg.get_value("gameplay", "coyote_time",         DEFAULT_COYOTE_TIME)
 	jump_buffer_time    = cfg.get_value("gameplay", "jump_buffer_time",    DEFAULT_JUMP_BUFFER)
+
+	# Heal corrupt/unusable persisted values. A previous bug could persist a
+	# near-zero mouse sensitivity (looking around became impossible); any value
+	# below the usable floor is treated as corrupt and reset to the default.
+	if mouse_sensitivity < MOUSE_SENS_MIN:
+		mouse_sensitivity = DEFAULT_MOUSE_SENS
 
 
 func _save() -> void:

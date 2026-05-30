@@ -196,9 +196,14 @@ shape = SubResource("BoxShape3D_vault_block")
 [node name="MeshInstance3D" type="MeshInstance3D" parent="VaultSection/VaultBlock"]
 mesh = SubResource("BoxMesh_vault_block")
 
+[node name="SpawnPoint" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 20)
+
 [node name="Player" type="CharacterBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 20)
 script = ExtResource("1_script")
+kill_y = -25.0
+spawn_path = NodePath("../SpawnPoint")
 
 [node name="PauseMenu" parent="." instance=ExtResource("2_pause_menu")]
 

@@ -138,6 +138,17 @@ extends CharacterBody3D
 @export var wall_jump_grace: float = 0.12
 
 # ---------------------------------------------------------------------------
+# Respawn / out-of-bounds recovery
+# ---------------------------------------------------------------------------
+
+@export_group("Respawn")
+## Y position below which the player is considered out of bounds and respawned.
+@export var kill_y: float = -25.0
+## Optional explicit spawn point. If left empty, the player's start transform
+## (captured in _ready) is used as the spawn.
+@export var spawn_path: NodePath
+
+# ---------------------------------------------------------------------------
 # Vault / mantle / ledge climb
 # ---------------------------------------------------------------------------
 
@@ -207,6 +218,10 @@ var _is_vaulting: bool = false
 ## Reference gravity (project setting)
 var _gravity: float = 0.0
 
+## Spawn transform captured at _ready (or from spawn_path if set), used by
+## the out-of-bounds respawn system.
+var _spawn_transform: Transform3D = Transform3D.IDENTITY
+
 ## Whether collider is currently in crouch shape (avoids redundant resize).
 var _is_crouched: bool = false
 
@@ -216,6 +231,14 @@ var _is_crouched: bool = false
 
 func _ready() -> void:
 	_gravity = ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)
+
+	# Capture the spawn transform for out-of-bounds respawn. Prefer an explicit
+	# spawn node if one was assigned; otherwise use the player's start position.
+	_spawn_transform = global_transform
+	if not spawn_path.is_empty():
+		var spawn_node := get_node_or_null(spawn_path)
+		if spawn_node is Node3D:
+			_spawn_transform = (spawn_node as Node3D).global_transform
 
 	# Build scene tree: CameraPivot child → Camera child
 	_camera_pivot = Node3D.new()
@@ -248,6 +271,17 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
+## Apply a relative mouse-motion delta to yaw/pitch using the current
+## sensitivity. Separated from input gating so it is unit-testable headlessly
+## (where the OS mouse cannot actually be captured).
+func _apply_look(relative: Vector2) -> void:
+	_yaw -= relative.x * mouse_sensitivity
+	_pitch -= relative.y * mouse_sensitivity
+	_pitch = clamp(_pitch, deg_to_rad(pitch_min), deg_to_rad(pitch_max))
+	rotation.y = _yaw
+	_camera_pivot.rotation.x = _pitch
+
+
 func _apply_game_settings() -> void:
 	mouse_sensitivity = GameSettings.mouse_sensitivity
 	coyote_time       = GameSettings.coyote_time
@@ -264,11 +298,7 @@ func _input(event: InputEvent) -> void:
 
 	# Mouse look — only while captured.
 	if _mouse_captured and event is InputEventMouseMotion:
-		_yaw -= event.relative.x * mouse_sensitivity
-		_pitch -= event.relative.y * mouse_sensitivity
-		_pitch = clamp(_pitch, deg_to_rad(pitch_min), deg_to_rad(pitch_max))
-		rotation.y = _yaw
-		_camera_pivot.rotation.x = _pitch
+		_apply_look((event as InputEventMouseMotion).relative)
 
 	# Click-to-recapture: when unpaused and mouse is freed, a left-click
 	# inside the viewport recaptures. We check get_tree().paused to avoid
@@ -298,6 +328,12 @@ func _input(event: InputEvent) -> void:
 # ---------------------------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
+	# Out-of-bounds recovery: if the player has fallen below the kill plane,
+	# teleport back to spawn with zeroed velocity before doing anything else.
+	if global_position.y < kill_y:
+		respawn()
+		return
+
 	_tick_timers(delta)
 
 	match _state:
@@ -436,9 +472,12 @@ func _process_air(delta: float) -> void:
 	if horiz_speed > vault_min_speed and _check_vault():
 		return
 
-	# Landing
+	# Landing — transition and immediately run ground logic this frame so a
+	# buffered jump (or slide) fires on the landing frame instead of being
+	# delayed/eaten. Mirrors how GROUND re-runs air logic when it leaves the floor.
 	if is_on_floor():
 		_transition(State.GROUND)
+		_process_ground(delta)
 		return
 
 	move_and_slide()
@@ -812,3 +851,27 @@ func _update_camera(delta: float) -> void:
 
 func _transition(new_state: State) -> void:
 	_state = new_state
+
+
+# ---------------------------------------------------------------------------
+# Respawn
+# ---------------------------------------------------------------------------
+
+## Teleport the player back to the captured spawn transform with all motion
+## and parkour state cleared. Called automatically when below kill_y, and
+## available for manual respawn (e.g. a reset key) later.
+func respawn() -> void:
+	global_transform = _spawn_transform
+	velocity = Vector3.ZERO
+	_jump_held = false
+	_jump_buffer_timer = 0.0
+	_coyote_timer = 0.0
+	_wall_run_timer = 0.0
+	_wall_jump_grace_timer = 0.0
+	_slide_timer = 0.0
+	_vault_timer = 0.0
+	_is_vaulting = false
+	_wall_normal = Vector3.ZERO
+	if _is_crouched:
+		_set_crouch_shape(false)
+	_transition(State.AIR)

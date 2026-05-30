@@ -12,6 +12,16 @@ extends CanvasLayer
 @onready var _rows_container: VBoxContainer = %OverlayRows
 @onready var _hint_label: Label = %HintLabel
 
+## Automatic, non-rebindable parkour verbs. These have no key — they trigger
+## from movement context. Listed so players understand wall-run is automatic
+## (triggered by moving fast alongside a wall) and NOT bound to Crouch/Ctrl.
+const AUTOMATIC_VERBS: Array[Dictionary] = [
+	{"label": "Wall-run", "trigger": "Automatic — run fast alongside a wall"},
+	{"label": "Wall-jump", "trigger": "Automatic — Jump while wall-running"},
+	{"label": "Vault / Mantle", "trigger": "Automatic — approach a ledge with speed"},
+	{"label": "Slide", "trigger": "Automatic — Crouch while moving fast"},
+]
+
 const HINT_FADE_DURATION := 4.0
 const HINT_VISIBLE_DURATION := 3.0
 var _hint_timer: float = 0.0
@@ -82,6 +92,32 @@ func _build_rows() -> void:
 		row.add_child(lbl)
 		row.add_child(key_lbl)
 		_rows_container.add_child(row)
+
+	# Automatic verbs section — these have no binding and are NOT on Crouch/Ctrl.
+	var sep := HSeparator.new()
+	_rows_container.add_child(sep)
+
+	var header := Label.new()
+	header.text = "Automatic (no key)"
+	_rows_container.add_child(header)
+
+	for entry in AUTOMATIC_VERBS:
+		var auto_row := HBoxContainer.new()
+		auto_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		var auto_lbl := Label.new()
+		auto_lbl.text = entry["label"]
+		auto_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		auto_lbl.size_flags_stretch_ratio = 2.0
+
+		var trig_lbl := Label.new()
+		trig_lbl.text = entry["trigger"]
+		trig_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		trig_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+
+		auto_row.add_child(auto_lbl)
+		auto_row.add_child(trig_lbl)
+		_rows_container.add_child(auto_row)
 
 
 func _refresh_rows() -> void:

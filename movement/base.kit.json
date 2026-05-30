@@ -1,0 +1,130 @@
+{
+  "$schema": "aeriea-movement-kit/1",
+  "comment": "Base movement kit — Slice 1: ground move (accel/friction/air-strafe) + jump (coyote + buffer), expressed as data. See docs/decisions/movement-substrate.md.",
+
+  "params": {
+    "walk_speed": 5.5,
+    "sprint_speed": 10.0,
+    "ground_acceleration": 60.0,
+    "ground_friction": 30.0,
+
+    "air_acceleration": 20.0,
+    "air_speed_cap": 12.0,
+    "gravity_scale": 2.2,
+    "jump_hold_gravity_scale": 1.2,
+    "jump_hold_max_time": 0.25,
+
+    "jump_velocity": 7.5,
+    "coyote_time": 0.12,
+    "jump_buffer_time": 0.15,
+
+    "ground_snap_bias": -0.5
+  },
+
+  "inputs": {
+    "jump": { "buffer": "jump_buffer_time", "hold": true }
+  },
+
+  "initial": "AIR",
+
+  "states": [
+    {
+      "name": "GROUND",
+      "on_enter": [],
+      "transitions": [
+        {
+          "comment": "Left the floor: arm coyote, hand off to AIR this same frame.",
+          "when": { "op": "airborne" },
+          "to": "AIR",
+          "priority": 10,
+          "reenter": true,
+          "do": [ { "do": "set_timer", "name": "coyote", "value": "coyote_time" } ]
+        },
+        {
+          "comment": "Buffered jump from the ground.",
+          "when": { "op": "input_buffered", "action": "jump" },
+          "to": "AIR",
+          "priority": 80,
+          "do": [
+            { "do": "set_velocity_y", "value": "jump_velocity" },
+            { "do": "set_timer", "name": "jump_buffer", "value": 0 },
+            { "do": "set_timer", "name": "jump_hold", "value": 0 }
+          ]
+        }
+      ],
+      "tick": [
+        {
+          "comment": "Accelerate horizontal velocity toward wish-dir * top_speed; friction when no input.",
+          "do": "accelerate_toward",
+          "space": "wish",
+          "speed": { "select": "sprint", "if_held": "sprint", "then": "sprint_speed", "else": "walk_speed" },
+          "rate": "ground_acceleration"
+        },
+        {
+          "do": "apply_friction",
+          "rate": "ground_friction",
+          "only_when_no_wish": true
+        },
+        { "do": "set_velocity_y", "value": "ground_snap_bias" },
+        { "do": "move_and_slide" }
+      ],
+      "on_exit": []
+    },
+
+    {
+      "name": "AIR",
+      "on_enter": [],
+      "transitions": [
+        {
+          "comment": "Coyote jump: buffered jump while still within the coyote window.",
+          "when": {
+            "op": "all",
+            "of": [
+              { "op": "input_buffered", "action": "jump" },
+              { "op": "timer", "name": "coyote", "cmp": "gt", "value": 0 }
+            ]
+          },
+          "to": "AIR",
+          "priority": 80,
+          "reenter": true,
+          "do": [
+            { "do": "set_velocity_y", "value": "jump_velocity" },
+            { "do": "set_timer", "name": "coyote", "value": 0 },
+            { "do": "set_timer", "name": "jump_buffer", "value": 0 },
+            { "do": "set_timer", "name": "jump_hold", "value": 0 }
+          ]
+        },
+        {
+          "comment": "Landed: hand off to GROUND this same frame so a buffered jump fires on the landing frame.",
+          "when": { "op": "on_ground" },
+          "to": "GROUND",
+          "priority": 10,
+          "reenter": true
+        }
+      ],
+      "tick": [
+        {
+          "comment": "Gravity, floaty when holding jump near apex (ramp gated by jump_hold timer + rising).",
+          "do": "apply_gravity",
+          "scale": {
+            "select": "jump_floaty",
+            "if_held": "jump",
+            "and_timer_lt": { "name": "jump_hold", "value": "jump_hold_max_time" },
+            "and_rising": true,
+            "then": "jump_hold_gravity_scale",
+            "else": "gravity_scale"
+          }
+        },
+        {
+          "comment": "Air strafe — add toward wish-dir up to air_speed_cap, never decelerating.",
+          "do": "air_strafe",
+          "space": "wish",
+          "rate": "air_acceleration",
+          "cap": "air_speed_cap"
+        },
+        { "do": "move_and_slide" }
+      ],
+      "on_exit": []
+    }
+  ]
+}

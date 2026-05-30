@@ -34,6 +34,15 @@ const _STATE_NAME_TO_ENUM := {
 @export var kill_y: float = -25.0
 @export var spawn_path: NodePath
 
+## When true, this host is driven by the COMPILED projection
+## (CompiledBaseMovement, generated from the kit) instead of the interpreter.
+## The two drivers share an identical surface (setup/step/reset_state +
+## active_state/timers/wall_normal/wall_side/yaw), so the same host and the same
+## tests exercise either path. The golden-trace harness asserts they're identical;
+## the live scene keeps the interpreter (hot-reload), the compiled path is
+## validated via tests. See docs/decisions/movement-substrate.md §4.
+@export var use_compiled: bool = false
+
 # --- Camera tuning (render-side; mirrors PlayerController defaults) ----------
 @export_group("Camera")
 @export var mouse_sensitivity: float = 0.002
@@ -68,7 +77,11 @@ const _STATE_NAME_TO_ENUM := {
 @export var vault_duration: float = 0.28
 @export var vault_overshoot: float = 0.6
 
-var interpreter: MovementInterpreter
+## The movement driver: a MovementInterpreter (reference semantics) or a
+## CompiledBaseMovement (the lowered projection) when use_compiled is set. Both
+## expose the same surface, so this stays duck-typed. Named `interpreter` for
+## parity with the accessors/tests that read it.
+var interpreter
 var kit: MovementKit
 
 var _capsule: CapsuleShape3D
@@ -162,7 +175,10 @@ func _ready() -> void:
 	wall_run_max_time = float(kit.params.get("wall_run_max_time", wall_run_max_time))
 	wall_detect_distance = float(kit.params.get("wall_detect_distance", wall_detect_distance))
 
-	interpreter = MovementInterpreter.new()
+	if use_compiled:
+		interpreter = CompiledBaseMovement.new()
+	else:
+		interpreter = MovementInterpreter.new()
 	interpreter.setup(kit, self)
 
 	if Engine.is_editor_hint():

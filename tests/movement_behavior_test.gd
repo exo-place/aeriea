@@ -27,6 +27,11 @@ extends Node
 ## two player scripts, so `== S_SLIDE` holds for both.
 const TEST_LEVEL_INTERPRETED := "res://scenes/test_level.tscn"
 const TEST_LEVEL_IMPERATIVE := "res://scenes/test_level_imperative.tscn"
+## The COMPILED projection (CompiledBaseMovement, generated from the same kit),
+## driving the same InterpretedPlayer host via use_compiled=true. The compiled
+## path must pass the SAME assertions as the interpreter and imperative oracle
+## (docs/decisions/movement-substrate.md Slice 3 verify).
+const TEST_LEVEL_COMPILED := "res://scenes/test_level_compiled.tscn"
 
 # State ordinals, shared by both player scripts (InterpretedPlayer.State mirrors
 # PlayerController.State exactly). Local copy so the suite is target-agnostic.
@@ -54,11 +59,21 @@ func _run() -> void:
 
 	for target in [
 		{"scene": TEST_LEVEL_INTERPRETED, "label": "interpreter"},
+		{"scene": TEST_LEVEL_COMPILED, "label": "compiled"},
 		{"scene": TEST_LEVEL_IMPERATIVE, "label": "imperative"},
 	]:
 		_target_scene = target["scene"]
 		_target_label = target["label"]
 		print("\n--- target: %s (%s) ---\n" % [_target_label, _target_scene])
+		# Clear residual physics bodies from the prior target's freed levels and any
+		# lingering global input state before starting this target's suite, so each
+		# target runs in a clean world (targets share one physics space + global Input).
+		for action in ["move_forward", "move_backward", "move_left", "move_right", "sprint", "crouch", "jump"]:
+			if InputMap.has_action(action):
+				Input.action_release(action)
+		Input.flush_buffered_events()
+		for _i in 10:
+			await get_tree().physics_frame
 		await _run_suite()
 
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass_count, _fail_count])

@@ -42,6 +42,11 @@ func _run() -> void:
 	await _test_crouch_no_vertical_jitter()
 	await _test_wallrun_not_triggered_by_crouch()
 	await _test_crouch_action_maps_to_crouch_only()
+	await _test_low_speed_crouch_is_crouchwalk_not_slide()
+	await _test_high_speed_crouch_is_slide()
+	await _test_slide_is_steerable_and_cancelable()
+	await _test_slope_holds_position_without_crouch()
+	await _test_crouchwalk_no_vertical_jitter()
 	await _test_respawn_below_kill_y()
 
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass_count, _fail_count])
@@ -161,10 +166,17 @@ func _test_mouse_motion_rotates_camera() -> void:
 	)
 
 	# Also confirm the gating: while NOT captured, _input must not rotate.
-	player._mouse_captured = false
+	# _input re-reads the REAL Input.mouse_mode (the source of truth) on entry —
+	# setting the cached _mouse_captured flag alone is overwritten immediately,
+	# so we must set the actual mouse mode to exercise the gate. Under a real
+	# window (xvfb) the mode is genuinely honoured; headless it's a no-op but the
+	# code path is identical.
+	var prev_mode := Input.mouse_mode
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var yaw_pre_gate := player.rotation.y
 	player._input(_make_motion(100.0, 0.0))
 	var gated_ok := is_equal_approx(player.rotation.y, yaw_pre_gate)
+	Input.mouse_mode = prev_mode
 	_assert(
 		"look is gated off when mouse not captured",
 		gated_ok,
@@ -389,6 +401,180 @@ func _test_crouch_action_maps_to_crouch_only() -> void:
 		crouch_has_ctrl and no_wallrun_action and not ctrl_other,
 		"crouch_has_ctrl=%s, no_wallrun_action=%s, ctrl_bound_elsewhere=%s" % [str(crouch_has_ctrl), str(no_wallrun_action), str(ctrl_other)]
 	)
+
+
+# ---------------------------------------------------------------------------
+# Slide / crouch state-machine behaviour (the reworked system)
+# ---------------------------------------------------------------------------
+
+## (a) Crouch at LOW speed → CROUCH-WALK, not SLIDE.
+func _test_low_speed_crouch_is_crouchwalk_not_slide() -> void:
+	var ctx := await _spawn_level()
+	var player: PlayerController = ctx["player"]
+	await _settle_on_floor(player)
+
+	# Walk (no sprint) for a moment, then ease off so speed is well below the
+	# slide-entry threshold, then press crouch.
+	_send_key(KEY_W, true)
+	await _step_physics(player, 6)
+	_send_key(KEY_W, false)
+	await _step_physics(player, 6)
+	var speed_before := Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+
+	_send_key(KEY_CTRL, true)
+	await _step_physics(player, 6)
+	var state: int = player._state
+	var crouched := player._is_crouched
+	_send_key(KEY_CTRL, false)
+
+	_assert(
+		"low-speed crouch enters CROUCH-WALK, not SLIDE",
+		state == PlayerController.State.CROUCH and crouched and state != PlayerController.State.SLIDE,
+		"speed_before=%.2f (entry=%.1f), state=%d (CROUCH=%d SLIDE=%d), crouched=%s" % [
+			speed_before, player.slide_entry_speed, state,
+			PlayerController.State.CROUCH, PlayerController.State.SLIDE, str(crouched)]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## (b) Crouch at HIGH speed → SLIDE.
+func _test_high_speed_crouch_is_slide() -> void:
+	var ctx := await _spawn_level()
+	var player: PlayerController = ctx["player"]
+	await _settle_on_floor(player)
+
+	# Sprint forward to exceed slide_entry_speed, then crouch.
+	_send_key(KEY_W, true)
+	_send_key(KEY_SHIFT, true)
+	await _step_physics(player, 30)
+	var speed_before := Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+
+	_send_key(KEY_CTRL, true)
+	await _step_physics(player, 4)
+	var state: int = player._state
+	_send_key(KEY_CTRL, false)
+	_send_key(KEY_W, false)
+	_send_key(KEY_SHIFT, false)
+
+	_assert(
+		"high-speed crouch enters SLIDE",
+		state == PlayerController.State.SLIDE and speed_before >= player.slide_entry_speed,
+		"speed_before=%.2f (entry=%.1f), state=%d (SLIDE=%d)" % [
+			speed_before, player.slide_entry_speed, state, PlayerController.State.SLIDE]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## (c) While sliding, lateral/forward input measurably changes velocity direction
+## AND/OR exits the slide — proving steerable + cancelable.
+func _test_slide_is_steerable_and_cancelable() -> void:
+	var ctx := await _spawn_level()
+	var player: PlayerController = ctx["player"]
+	await _settle_on_floor(player)
+
+	# Enter a slide at speed.
+	_send_key(KEY_W, true)
+	_send_key(KEY_SHIFT, true)
+	await _step_physics(player, 30)
+	_send_key(KEY_SHIFT, false)
+	_send_key(KEY_CTRL, true)
+	await _step_physics(player, 2)
+	var entered_slide := player._state == PlayerController.State.SLIDE
+	var vel_dir_before := Vector3(player.velocity.x, 0.0, player.velocity.z).normalized()
+
+	# Now steer hard to the left (and keep W) for several frames.
+	_send_key(KEY_A, true)
+	await _step_physics(player, 12)
+	var vel_dir_after := Vector3(player.velocity.x, 0.0, player.velocity.z).normalized()
+	var dir_change := rad_to_deg(vel_dir_before.angle_to(vel_dir_after))
+	var exited := player._state != PlayerController.State.SLIDE
+
+	_send_key(KEY_A, false)
+	_send_key(KEY_W, false)
+	_send_key(KEY_CTRL, false)
+
+	_assert(
+		"slide is steerable (direction changes) and/or cancelable (exits) under input",
+		entered_slide and (dir_change > 2.0 or exited),
+		"entered_slide=%s, dir_change=%.2f deg, exited_slide=%s (state=%d)" % [
+			str(entered_slide), dir_change, str(exited), player._state]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## (d) Standing on the slope with NO crouch input → horizontal position is stable
+## (no involuntary downhill slide).
+func _test_slope_holds_position_without_crouch() -> void:
+	var ctx := await _spawn_level()
+	var player: PlayerController = ctx["player"]
+
+	# Place the player above the centre of the ~15° slope (z=-30) and let it
+	# settle onto the surface. No movement / crouch input at all.
+	player.global_position = Vector3(0.0, 5.0, -30.0)
+	player.velocity = Vector3.ZERO
+	# Let it fall and settle on the slope.
+	await _settle_on_floor(player, 180)
+	await _step_physics(player, 20)  # let any settling motion damp out
+
+	var p0 := Vector2(player.global_position.x, player.global_position.z)
+	var max_drift := 0.0
+	for i in 40:
+		await get_tree().physics_frame
+		var p := Vector2(player.global_position.x, player.global_position.z)
+		max_drift = maxf(max_drift, p.distance_to(p0))
+
+	_assert(
+		"player holds position on slope with no crouch input (no involuntary slide)",
+		max_drift < 0.15,
+		"max horizontal drift=%.4f m over 40 frames on the 15deg slope, state=%d, on_floor=%s" % [
+			max_drift, player._state, str(player.is_on_floor())]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## (e) Crouch collider does not jitter while crouch-MOVING on flat ground.
+## (The stationary-crouch jitter case is covered by _test_crouch_no_vertical_jitter.)
+func _test_crouchwalk_no_vertical_jitter() -> void:
+	var ctx := await _spawn_level()
+	var player: PlayerController = ctx["player"]
+	await _settle_on_floor(player)
+
+	# Crouch-walk: hold W (slow) + crouch so we're in CROUCH-WALK and moving.
+	_send_key(KEY_W, true)
+	_send_key(KEY_CTRL, true)
+	await _step_physics(player, 12)  # let the height transition settle
+
+	var samples: Array[float] = []
+	# Sample the body Y relative to a smoothly-advancing baseline is wrong on a
+	# moving body on flat ground (y should be constant), so sample raw y — flat
+	# ground means y must be flat too.
+	for i in 30:
+		await get_tree().physics_frame
+		samples.append(player.global_position.y)
+	_send_key(KEY_W, false)
+	_send_key(KEY_CTRL, false)
+
+	var mean := 0.0
+	for y in samples:
+		mean += y
+	mean /= samples.size()
+	var variance := 0.0
+	for y in samples:
+		variance += (y - mean) * (y - mean)
+	variance /= samples.size()
+
+	_assert(
+		"crouch-walk does not oscillate body Y (variance < epsilon)",
+		variance < 0.0005,
+		"y variance=%.6f over %d frames (mean y=%.3f), state=%d" % [
+			variance, samples.size(), mean, player._state]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
 
 
 # ---------------------------------------------------------------------------

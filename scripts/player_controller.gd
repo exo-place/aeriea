@@ -95,19 +95,30 @@ extends CharacterBody3D
 # Slide
 # ---------------------------------------------------------------------------
 
-@export_group("Slide")
-## Minimum ground speed required to initiate a slide (m/s)
-@export var slide_min_speed: float = 4.5
+@export_group("Slide / Crouch")
+## Horizontal speed at/above which pressing crouch enters a SLIDE (m/s).
+## Below this, pressing crouch enters CROUCH-WALK instead. Tuned near run speed
+## so a slide is a deliberate "crouch while running" rather than any crouch.
+@export var slide_entry_speed: float = 8.0
 ## Speed impulse added when initiating a slide (m/s, along current velocity)
 @export var slide_boost: float = 3.0
 ## Friction during slide (m/s²) — low to preserve momentum
 @export var slide_friction: float = 4.0
-## Speed below which slide automatically ends
-@export var slide_exit_speed: float = 1.8
+## Speed below which slide automatically ends (bleeds into crouch-walk/run)
+@export var slide_exit_speed: float = 3.0
 ## Maximum slide duration (seconds) — prevents infinite slides
 @export var slide_max_time: float = 1.8
+## How strongly wish-direction input steers/carves the slide (m/s²). Lower than
+## ground accel so the slide stays momentum-led, but clearly responsive.
+@export var slide_steer_accel: float = 16.0
+## Sustained wish-input alignment (dot of input vs velocity, 0..1) held for
+## slide_steer_exit_time that bleeds the slide out into running. Pushing into
+## your motion "stands you up" smoothly.
+@export var slide_steer_exit_time: float = 0.18
 ## Speed multiplier gained per unit of downward slope angle during slide
 @export var slope_acceleration: float = 18.0
+## Top speed while crouch-walking (m/s) — reduced from walk_speed.
+@export var crouch_walk_speed: float = 2.8
 ## Collision capsule half-height when crouched
 @export var crouch_height: float = 0.6
 ## Collision capsule half-height when standing
@@ -178,6 +189,7 @@ enum State {
 	GROUND,
 	AIR,
 	SLIDE,
+	CROUCH,
 	WALL_RUN,
 	VAULT,
 }
@@ -201,6 +213,9 @@ var _wall_run_timer: float = 0.0
 var _wall_jump_grace_timer: float = 0.0
 var _slide_timer: float = 0.0
 var _vault_timer: float = 0.0
+## Accumulated time the player has pushed wish-input forward into the slide —
+## when it crosses slide_steer_exit_time the slide bleeds out into running.
+var _slide_steer_timer: float = 0.0
 
 ## Wall run state
 var _wall_normal: Vector3 = Vector3.ZERO
@@ -264,6 +279,14 @@ func _ready() -> void:
 	# when crouching to keep feet planted — see _set_crouch_shape.
 	_collision_shape.position = Vector3.ZERO
 	add_child(_collision_shape)
+
+	# Floor handling: hold position on standable slopes (no involuntary slide).
+	# floor_max_angle 45° keeps the ~15° test slope standable; stop_on_slope
+	# cancels gravity-induced downhill drift while grounded. floor_snap_length
+	# keeps the body glued across slope seams so the collider doesn't pop.
+	floor_stop_on_slope = true
+	floor_max_angle = deg_to_rad(max_slope_angle)
+	floor_snap_length = 0.5
 
 	# Pull runtime-overridable settings from GameSettings autoload.
 	_apply_game_settings()
@@ -343,6 +366,8 @@ func _physics_process(delta: float) -> void:
 			_process_air(delta)
 		State.SLIDE:
 			_process_slide(delta)
+		State.CROUCH:
+			_process_crouch(delta)
 		State.WALL_RUN:
 			_process_wall_run(delta)
 		State.VAULT:
@@ -400,25 +425,26 @@ func _process_ground(delta: float) -> void:
 		var friction := ground_friction
 		horiz_vel = horiz_vel.move_toward(Vector3.ZERO, friction * delta)
 
-	# Slope-slide acceleration: if on a steep slope, add velocity downhill
-	var floor_normal := get_floor_normal()
-	var slope_angle := rad_to_deg(acos(floor_normal.dot(Vector3.UP)))
-	if slope_angle > 5.0:
-		var slope_dir := Vector3(floor_normal.x, 0.0, floor_normal.z).normalized()
-		# Always accelerate downhill when sliding
-		horiz_vel += slope_dir * slope_acceleration * (slope_angle / 45.0) * delta
+	# NOTE: no involuntary downhill push here. On a standable slope the body
+	# must HOLD POSITION; floor_stop_on_slope + floor_max_angle do that for us.
+	# Downhill acceleration is a deliberate SLIDE behaviour only (see _process_slide).
 
 	velocity.x = horiz_vel.x
 	velocity.z = horiz_vel.z
-	velocity.y = -0.5  # keep grounded on slopes
+	velocity.y = -0.5  # small downward bias keeps the body snapped to the floor
 
 	# Vault check — moving forward with sufficient speed toward a climbable ledge
 	if speed > vault_min_speed and _check_vault():
 		return
 
-	# Slide trigger — crouch while moving fast enough
-	if is_crouching and speed >= slide_min_speed:
-		_begin_slide()
+	# Crouch trigger — branch on horizontal speed.
+	#   fast  → SLIDE (deliberate slide while running)
+	#   slow  → CROUCH-WALK (lowered, slower, fully steerable)
+	if is_crouching:
+		if speed >= slide_entry_speed:
+			_begin_slide()
+		else:
+			_begin_crouch()
 		return
 
 	# Jump
@@ -489,21 +515,44 @@ func _process_air(delta: float) -> void:
 
 func _process_slide(delta: float) -> void:
 	if not is_on_floor():
-		_end_slide()
+		# Airborne mid-slide: leave the slide but stay crouched until we land
+		# (don't pop up in the air). Standing-up is re-evaluated on the ground.
 		_transition(State.AIR)
 		_process_air(delta)
 		return
 
-	# Slope acceleration
+	# Slide-jump — highest-priority exit; preserves momentum + forward boost.
+	if _jump_buffer_timer > 0.0:
+		_end_slide()
+		_do_jump()
+		var forward := -transform.basis.z
+		velocity.x += forward.x * 2.5
+		velocity.z += forward.z * 2.5
+		return
+
+	var horiz_vel := Vector3(velocity.x, 0.0, velocity.z)
+
+	# Slope acceleration — sliding downhill speeds up, but this is NOT a lock:
+	# all the exit conditions below still fire, so it can never be perpetual.
 	var floor_normal := get_floor_normal()
-	var slope_angle := rad_to_deg(acos(floor_normal.dot(Vector3.UP)))
+	var slope_angle := rad_to_deg(acos(clampf(floor_normal.dot(Vector3.UP), -1.0, 1.0)))
 	if slope_angle > 2.0:
 		var down_slope := Vector3(floor_normal.x, 0.0, floor_normal.z).normalized()
-		velocity.x += down_slope.x * slope_acceleration * (slope_angle / 45.0) * delta
-		velocity.z += down_slope.z * slope_acceleration * (slope_angle / 45.0) * delta
+		horiz_vel += down_slope * slope_acceleration * (slope_angle / 45.0) * delta
+
+	# STEERABLE: wish-direction carves the slide. We steer the velocity vector
+	# toward the wish direction at slide_steer_accel without forcing a target
+	# speed, so momentum leads but the player clearly redirects the slide.
+	var wish_dir := _get_wish_dir()
+	var has_input := wish_dir.length_squared() > 0.001
+	if has_input:
+		var speed_now := horiz_vel.length()
+		var steered := horiz_vel + wish_dir * slide_steer_accel * delta
+		# Preserve magnitude (carve, don't accelerate) — re-normalise to prior speed.
+		if steered.length() > 0.001:
+			horiz_vel = steered.normalized() * speed_now
 
 	# Slide friction
-	var horiz_vel := Vector3(velocity.x, 0.0, velocity.z)
 	horiz_vel = horiz_vel.move_toward(Vector3.ZERO, slide_friction * delta)
 	velocity.x = horiz_vel.x
 	velocity.z = horiz_vel.z
@@ -511,21 +560,79 @@ func _process_slide(delta: float) -> void:
 
 	var speed := horiz_vel.length()
 
-	# Exit conditions
+	# SUSTAINED-INPUT EXIT: pushing into your direction of motion for a short
+	# window bleeds the slide out into normal locomotion (seamless stand-up).
+	if has_input and speed > 0.001 and wish_dir.dot(horiz_vel.normalized()) > 0.5:
+		_slide_steer_timer += delta
+	else:
+		_slide_steer_timer = max(0.0, _slide_steer_timer - delta)
+
+	# EXIT CONDITIONS — any of: crouch released, speed decayed, timer expired,
+	# or sustained forward input. All bleed momentum (no abrupt stop): we hand
+	# the current velocity to GROUND or CROUCH-WALK, which carry it forward.
 	var is_crouching := Input.is_action_pressed("crouch")
-	if not is_crouching or speed < slide_exit_speed or _slide_timer <= 0.0:
-		_end_slide()
-		_transition(State.GROUND)
+	var steered_out := _slide_steer_timer >= slide_steer_exit_time
+	if not is_crouching or speed < slide_exit_speed or _slide_timer <= 0.0 or steered_out:
+		_slide_steer_timer = 0.0
+		# If crouch is still held and there's no headroom, fall through to
+		# crouch-walk (stay low); otherwise stand and run.
+		if is_crouching:
+			_transition(State.CROUCH)  # stays crouched; velocity preserved
+		else:
+			_end_slide()  # stands up if headroom
+			_transition(State.GROUND)
 		return
 
-	# Slide-jump
-	if _jump_buffer_timer > 0.0:
-		_end_slide()
+	move_and_slide()
+
+
+# ---------------------------------------------------------------------------
+# State: CROUCH (crouch-walk) — lowered, slower, FULLY steerable like walking.
+# ---------------------------------------------------------------------------
+
+func _process_crouch(delta: float) -> void:
+	if not is_on_floor():
+		_coyote_timer = coyote_time
+		_transition(State.AIR)
+		_process_air(delta)
+		return
+
+	# Crouch released → try to stand and return to GROUND (headroom-checked).
+	if not Input.is_action_pressed("crouch"):
+		_end_slide()  # stands up only if there's headroom
+		# Whether or not we could stand, hand momentum back to GROUND. If blocked,
+		# _is_crouched stays true and the body remains low until headroom opens.
+		_transition(State.GROUND)
+		_process_ground(delta)
+		return
+
+	# Ensure crouched collider engaged (no-op if already crouched → no jitter).
+	if not _is_crouched:
+		_set_crouch_shape(true)
+
+	var wish_dir := _get_wish_dir()
+	var horiz_vel := Vector3(velocity.x, 0.0, velocity.z)
+
+	# FULLY steerable: wish-direction fully applies, just at a reduced top speed.
+	if wish_dir.length_squared() > 0.001:
+		var target_vel := wish_dir * crouch_walk_speed
+		horiz_vel = horiz_vel.move_toward(target_vel, ground_acceleration * delta)
+		# If still fast enough (e.g. arrived here from a slide), let it become a
+		# slide again when the player is clearly running.
+		if horiz_vel.length() >= slide_entry_speed:
+			_begin_slide()
+			return
+	else:
+		horiz_vel = horiz_vel.move_toward(Vector3.ZERO, ground_friction * delta)
+
+	velocity.x = horiz_vel.x
+	velocity.z = horiz_vel.z
+	velocity.y = -0.5
+
+	# Crouch-jump: stand (if headroom) and jump.
+	if _jump_buffer_timer > 0.0 and _can_stand():
+		_set_crouch_shape(false)
 		_do_jump()
-		# Add extra forward boost for slide-jump
-		var forward := -transform.basis.z
-		velocity.x += forward.x * 2.5
-		velocity.z += forward.z * 2.5
 		return
 
 	move_and_slide()
@@ -638,8 +745,15 @@ func _begin_slide() -> void:
 		velocity.x = horiz.normalized().x * (horiz.length() + slide_boost)
 		velocity.z = horiz.normalized().z * (horiz.length() + slide_boost)
 	_slide_timer = slide_max_time
+	_slide_steer_timer = 0.0
 	_set_crouch_shape(true)
 	_transition(State.SLIDE)
+
+
+## Enter crouch-walk (low-speed crouch). Lowers the collider; momentum preserved.
+func _begin_crouch() -> void:
+	_set_crouch_shape(true)
+	_transition(State.CROUCH)
 
 
 func _end_slide() -> void:
@@ -656,13 +770,15 @@ func _set_crouch_shape(crouching: bool) -> void:
 	var new_half := crouch_height if crouching else stand_height
 	var new_height := new_half * 2.0
 
-	# Height delta: positive means we got shorter (crouching down).
-	# We compensate by shifting the body UP by half the delta so the feet
-	# stay planted at the same world position.
-	var delta_height := old_height - new_height
+	# The capsule is centred on the body origin, so its bottom (the feet) sits
+	# half the height below the origin. When the capsule shrinks by `shrink`,
+	# the feet would rise by shrink/2 unless we move the origin DOWN by the same
+	# amount. When it grows, the origin must move UP so we don't clip the floor.
+	#   shrink = old_height - new_height  (positive when crouching down)
+	#   feet stay planted ⇔ origin.y -= shrink / 2
+	var shrink := old_height - new_height
 	_capsule.height = new_height
-	# CollisionShape stays centred at body origin; shift body so feet don't move.
-	global_position.y += delta_height * 0.5
+	global_position.y -= shrink * 0.5
 
 	_is_crouched = crouching
 
@@ -824,7 +940,7 @@ func _get_wish_dir() -> Vector3:
 
 func _update_camera(delta: float) -> void:
 	# Height — lerp to target based on state
-	var target_height := camera_height_crouch if _state == State.SLIDE else camera_height_stand
+	var target_height := camera_height_crouch if (_state == State.SLIDE or _state == State.CROUCH) else camera_height_stand
 	_camera_pivot.position.y = lerp(_camera_pivot.position.y, target_height, camera_height_lerp_speed * delta)
 
 	# FOV — dynamic (speed-based) unless disabled in GameSettings

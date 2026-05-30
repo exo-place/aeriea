@@ -11,6 +11,10 @@
 
 Parkour 2.0 movement is load-bearing per DESIGN.md (the per-second dopamine engine). First prototype: get a player capsule moving fluently with carve/momentum feel in a basic level. Reference: Mirror's Edge, Ghostrunner, Redout 2 (for the carving feel even though it's vehicular).
 
+## Movement abilities / extra movement (future design pass)
+
+Placeholder for additional movement verbs to compose with the existing slide/crouch/wall-run/vault set — e.g. dash / air-dash, double-jump, wall-climb, grapple/swing. To be designed (loop, momentum interaction, NSFW/SFW parity), not built yet.
+
 ## Open design questions (from DESIGN.md)
 
 - Project name (aeriea is tentative; pronounced "area")

@@ -29,6 +29,14 @@
             mold
             # JS tooling for docs
             bun
+            # Virtual framebuffer — lets agents run the real WINDOWED game (not
+            # --headless) in a CI / headless environment. --headless skips
+            # GDScript parsing and misses parse errors; xvfb-run boots a real
+            # window under a virtual display so the full script-reload pipeline
+            # runs. xvfb-run bundles its own Xvfb path; xorg.xvfb adds Xvfb to
+            # PATH for scripts that invoke it directly.
+            xvfb-run
+            xvfb
           ];
           LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH";
         };

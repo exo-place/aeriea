@@ -41,12 +41,26 @@ edit), each still needing its own loop/momentum interaction / NSFW–SFW parity 
 - **Wormhole** — area-denial teleport portal (cf. Warframe Nova)
 - **Teleport** — instant directional blink (cf. Warframe Ash / Loki)
 - **Aim / ADS** — precision mode; interact with momentum (slow? steady?)
+- **Aim glide** — slow descent + precision while aiming (cf. Warframe aim glide)
 - **Wall cling / wall latch** — momentary grip, interrupt wall-run momentum
+
+**Named presets** — the kit-overlay + manifest mechanism is a natural seam for
+named movement presets: a preset is just a manifest that selects a specific set
+of verb kits. Example: a "Warframe" preset bundling bullet jump (already a data
+verb), wall jump (already in base kit), wall cling, and aim glide (both backlog
+verbs above). No new architecture needed; the composition seam already exists.
 
 (Some of the above — teleport/wormhole/charge — may exercise primitives the
 current vocabulary does not yet have, e.g. an instantaneous position set or a
 collision-cast; per the spec, adding such a leaf is the one sanctioned engine
 change, reviewed against "collapse asymmetries to primitives.")
+
+## Body / animation backlog
+
+- **Tail physics** — satisfying tail swish + wagging + collision (tail should
+  collide with body/world, not clip). Fits the existing bet on specialized cheap
+  soft-body/cloth solvers (DESIGN.md animation-fidelity). Cross-reference
+  `~/git/rhizone/playmate` (`frond`) during the refining stage.
 
 ## Open design questions (from DESIGN.md)
 

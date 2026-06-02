@@ -269,6 +269,10 @@ definition — the interpreter is the spec.
   seam** (the loader already takes an ordered list of overlay sources) and
   build nothing player-facing yet. Note: coyote_time / jump_buffer_time stay
   designer-only, exactly as today.
+- **Named presets** are a natural extension: a preset is a manifest that
+  selects a named set of verb kits (e.g. a "Warframe" preset bundling bullet
+  jump + wall jump + wall cling + aim glide). The seam already exists; no
+  schema change needed.
 
 ### 6. Validation strategy ("tests are the spec")
 

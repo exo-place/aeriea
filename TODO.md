@@ -97,6 +97,18 @@ change, reviewed against "collapse asymmetries to primitives.")
   read-only rest-state invariant — never updated by the solver, or volume
   drifts by feedback and the guarantee is defeated.
 
+- **Physics-driven bodily transformation** (R&D direction) — treat a morph /
+  blendshape / shape-parameter change as an *authored moving rest-state target*
+  and let the soft-body surrogate track it dynamically, so in-between frames are
+  the physics resolving (flesh redistributing, jiggling, settling) rather than
+  a naive vertex LERP. Reuses predict-then-project surrogate. Volume may be
+  intentionally conserved (redistribution) or changed (growth/shrink) — the
+  authored target is external drive, not solver feedback, so the canonical-volume
+  invariant is unaffected. Bridges body-transformation system (TiTS/FS/LT
+  lineage) and soft-body physics R&D bet. Cross-reference
+  `~/git/rhizone/playmate` (`frond`). See DESIGN.md soft-body section for full
+  write-up.
+
 ## Open design questions (from DESIGN.md)
 
 - Project name (aeriea is tentative; pronounced "area")

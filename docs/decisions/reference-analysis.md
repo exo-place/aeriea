@@ -33,16 +33,16 @@ The framework instrument, read firsthand:
 - `../../../rhizone/github-io/docs/affordance-surfaces.md` — surfaces,
   Miller's Law, removal-not-prioritization.
 
-**Governing principle.** Every barren node in an interaction graph is a
-small theft of the player's time: it is a state they navigated to, only
-to find nothing that compounds their input into meaningful change. When
-barren nodes dominate — as in the 2D-grid walking sim or the wait→wait→
-wait re-roll loop — the design is not merely failing at fun; it is
-failing at basic respect for the player's time. Interaction-graph design
-is therefore an ethical stance as much as a craft one: a dense,
-composable graph respects time; a field of barren nodes wastes it. This
-is the principled root of aeriea's refusal of quantity-gated repetition
-of identical actions — the same value, stated at the graph level.
+**Governing principle.** When barren nodes dominate an interaction graph
+— as in the 2D-grid walking sim or the wait→wait→wait re-roll loop —
+the result is not merely low-density design; it *feels* like pointless
+grind: samey, repetitive, grinding for its own sake. The defect is
+phenomenological: the same low-meaning action repeating with no
+variation, no compounding, and no meaningful change of state. That
+grind-feel is why barren-node-dominated graphs are the failure mode to
+design against — and it is exactly what aeriea's refusal of
+quantity-gated repetition of identical actions names, stated at the
+graph level.
 
 ---
 

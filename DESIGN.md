@@ -1445,6 +1445,19 @@ also the expensive part of the offline accurate sim — which is
 acceptable, since the offline sim is where accuracy is paid for and the
 surrogate is what gets baked/learned from it.
 
+A finger poke is already the hard case for modal reduction, but it is
+not the hardest rung. **Full-hand cupping, squishing, or grasping** is
+harder: it introduces multiple simultaneous contact regions, large-
+deformation (large-strain) loading across a wide area, and a visible
+volume-redistribution requirement — displaced tissue must bulge
+*between and around* the fingers, not just at a single point. This is
+where genuine volume preservation shifts from cosmetic to load-bearing.
+It stresses the surrogate harder than a poke does: not localized
+high-frequency detail, but *coordinated multi-region large-strain
+deformation under grasp*. The correct mental image for the target
+fidelity is the cupping/squishing case, not the poke; the poke is a
+waypoint on the same ladder.
+
 ### Perceptual vs physical realism (a useful distinction)
 
 Worth keeping the distinction in mind: **physically accurate**

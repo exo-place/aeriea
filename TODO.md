@@ -80,6 +80,11 @@ change, reviewed against "collapse asymmetries to primitives.")
   a small modal basis smears out localized contact stress — so this target
   pushes toward learned or hybrid surrogates (global base + local contact
   enrichment), not pure modal reduction. See DESIGN.md for the full caveat.
+  The poke is a waypoint; the harder rung is **full-hand cupping /
+  squishing / grasping** — multiple simultaneous contact regions,
+  large-strain loading, and visible volume redistribution (tissue bulging
+  between/around fingers). That is where volume preservation becomes
+  load-bearing, not cosmetic.
 
 ## Open design questions (from DESIGN.md)
 

@@ -81,12 +81,31 @@ Loosely "species" (the term used in design conversation, kept verbatim),
 but these are **not mutually exclusive** — see *The carveout* below.
 
 With a technological origin, the lineages read naturally as
-**technological methods / traditions / techniques** rather than biological
-essences — different approaches to the same underlying body-tech, each
-with its own history of practice. This makes the non-exclusivity carveout
-even more natural: they are tools, and most people specialize in one out
-of familiarity rather than because only one is possible. The seven entries
-and their names are unchanged; this is a framing note only.
+**technological methods / traditions / techniques** — different approaches
+to the same underlying body-tech, each with its own history of practice.
+"Technological" does not mean "non-biological": genetic engineering,
+tissue regrowth, and transplantation are biotechnology; the lineages span
+from the fully biological through the electronic and mechanical. This
+makes the non-exclusivity carveout even more natural: they are tools, and
+most people specialize in one out of familiarity rather than because only
+one is possible. The seven entries and their names are unchanged; this is
+a framing note only.
+
+**Orthogonal axes — method × medium.** The *method* (which lineage) and
+the *medium / substrate* a lineage is realized in are **independent**.
+Biological, electronic, mechanical, swarm-based, and other substrates can
+all express the same method. These are two composable axes, not one.
+Concrete examples: weavers and scavengers are as-typical biological;
+puppeteers are also typically biological in their piloted bodies — but
+puppeteers can equally be **electronic**, since controlling or
+transferring across multiple bodies is fundamentally informational, not
+necessarily fleshy. This medium-independence is already implicit in the
+existing entries (Synthetic is "not necessarily non-biological";
+Shapeless spans "mechanical, biological, a swarm, or otherwise"); this
+note states it as a principle. Method × medium is therefore yet another
+dimension along which the "discrete species" surface-lie (see *The
+carveout*) conceals real composability: the carveout operates on both
+axes, not just the method axis.
 
 The seven, as given:
 

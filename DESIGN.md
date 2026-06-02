@@ -856,6 +856,18 @@ What each reference contributes.
   sandbox structure with deep simulation, heavy authoring, and
   procedural recombination. Proven pattern for delivering hundreds of
   hours of content without LLMs.
+
+  > **Interaction-structure evaluation.** TiTS, Lilith's Throne, and
+  > Flexible Survival are evaluated *as interaction graphs* — through
+  > the affordance / interaction-graph rubric — in
+  > `docs/decisions/reference-analysis.md`. That doc diagnoses the
+  > "walking sim" failure (2D-grid traversal + wait-to-re-roll a
+  > stochastic event) in the framework's terms, shows where each game
+  > exhibits or escapes it (notably Lilith's Throne's composable sex
+  > engine), and states aeriea's positive target: a dense composable
+  > graph that must stand on its own **as pure text**, because the
+  > affordance structure lives in the simulation, not the rendering.
+
 - **`existence`** (our own prior art) — simulation-underneath
   rendering-on-top pattern; deterministic state drives generative
   surface; ~67k LOC of working code demonstrating the architecture.

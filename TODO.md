@@ -120,6 +120,17 @@ change, reviewed against "collapse asymmetries to primitives.")
   in `units-and-scale.md` (in progress, not closed). Names are the user's to
   set — coin none.
 
+## Interaction-structure (anti-walking-sim)
+
+- Apply the **pure-text litmus** from `docs/decisions/reference-analysis.md`
+  to each activity surface as it gets its design pass: at a representative
+  state, are most edges *composing* (not navigational/terminal), are there
+  barren nodes, is there a wait→wait→wait stochastic self-loop, does the
+  edge set scan at ≤7 by removal? The text reduction is the unit test for
+  the interaction graph; the 3D client is the release build. Treat a
+  boring text reduction as a strong negative signal (caveat: genuinely
+  spatial/embodied composition may under-credit in text — see the doc).
+
 ## Open design questions (from DESIGN.md)
 
 - Project name (aeriea is tentative; pronounced "area")

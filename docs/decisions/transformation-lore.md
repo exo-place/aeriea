@@ -24,6 +24,29 @@ below), but does not close it — the grounding lore is WIP.
   a setting-defining choice: it reshapes the social fabric, i.e. how NPCs,
   relationships, and society read and respond to bodies that are not fixed.
 
+- **The origin is technological advancement — mundane, not mythic.** Why
+  are bodies malleable? Technology progressed to the point where bodily
+  malleability became normal. That is the full answer. There is no
+  supernatural cause, no mythic event, no grand cosmological origin. The
+  world is a slightly-near-future point where body-tech matured the way
+  phones matured — pervasive infrastructure, unremarked, ambient. This
+  deliberately banal origin is the correct Second-Dream surface: it
+  pre-spends nothing, so the withheld depth underneath (the provenance
+  ecology, the puppeteer secrecy, the lie-by-omission about composability)
+  can land as the real horror. A grand origin myth would over-explain and
+  defuse the reveal. "Technology got good" is the surface truth that earns
+  the deeper truth.
+
+- **Texture guardrail — body-tech is infrastructure, not spectacle.** The
+  technology is ambient and normalized in the same way phones are now:
+  pervasive, but not the *texture of place*. Places stay lived-in-modern
+  (per DESIGN.md's modern-elastic decision: apartments, street markets,
+  phones, real-feeling people in real-feeling places). The body-tech exists
+  but must not tip the aesthetic toward chrome-and-neon sci-fi spectacle.
+  Sci-fi trappings may exist; the *places* feel like real life. This is the
+  line: body-tech is surfaced through mundane, everyday means, not through
+  exotic set-dressing.
+
 - **Fully worldbuilt, delivered "Second Dream"–style.** The premise is
   fully worldbuilt underneath, but on the surface it is mundane and
   unremarked: a deep truth / horror is withheld and surfaced as an *earned
@@ -39,22 +62,33 @@ below), but does not close it — the grounding lore is WIP.
   multiplayer*) forbid a central live-service lore event; the premise must
   hold per-server, coherently, with no central authority.
 
-- **Unifies with the superhuman-capability question.** The same fact that
-  makes bodies malleable is *why* they are superhuman. A body here is not a
-  fixed inheritance — it is assembled / regrown / fabricated / reconfigured
-  / projected to spec — so superhuman feats are simply "what that body can
-  do." This is the intended answer to the deferred "why is the avatar
-  superhuman?" open question (`units-and-scale.md`, *Diegetic framing →
-  Open question*; echoed in DESIGN.md, *Platforms and presentation*). The
-  lore is WIP, so the question is being **addressed, not closed**.
+- **Unifies with the superhuman-capability question.** The same body-tech
+  that makes bodies malleable is *why* they are superhuman. A body here is
+  not a fixed inheritance — it is assembled / regrown / fabricated /
+  reconfigured / projected to spec — so superhuman feats are simply "what
+  that body can do." One technological origin answers both questions. This
+  is the intended answer to the deferred "why is the avatar superhuman?"
+  open question (`units-and-scale.md`, *Diegetic framing → Open question*;
+  echoed in DESIGN.md, *Platforms and presentation*). The origin and
+  superhuman-grounding are now decided; the broader transformation lore
+  remains WIP.
 
 ---
 
 ## The lineages / modalities
 
 Loosely "species" (the term used in design conversation, kept verbatim),
-but these are **not mutually exclusive** — see *The carveout* below. The
-seven, as given:
+but these are **not mutually exclusive** — see *The carveout* below.
+
+With a technological origin, the lineages read naturally as
+**technological methods / traditions / techniques** rather than biological
+essences — different approaches to the same underlying body-tech, each
+with its own history of practice. This makes the non-exclusivity carveout
+even more natural: they are tools, and most people specialize in one out
+of familiarity rather than because only one is possible. The seven entries
+and their names are unchanged; this is a framing note only.
+
+The seven, as given:
 
 1. **Scavenger** — scavenge body parts and attach / swap them; acquire
    parts externally. (For where the parts come from, see *Provenance
@@ -183,10 +217,6 @@ tag system).
 
 ## Open threads (explicitly unresolved)
 
-- **The deeper "fully worldbuilt" ORIGIN / cosmology of WHY bodies are
-  malleable is not yet specified** — to be developed. This doc records the
-  *delivery stance* (Second-Dream, fully worldbuilt) and the lineages, not
-  the root cause.
 - **Lineage-as-identity vs composable-traits** at the system level.
 - **How transformation history persists / accumulates** — ties to
   DESIGN.md's open *Persistence model* question (what *accumulates*).

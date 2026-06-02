@@ -626,13 +626,18 @@ for awe but worse for *being-there*.
 ### Transformation lore (sketch, WIP)
 
 The body-as-cosmetic / transformation framing (see *Cosmetic depth*,
-*Mid-session form swapping*) is gaining an in-fiction grounding: a
-sketch in which **bodily malleability is ambient and normal** in the
-world, fully worldbuilt but delivered "Second Dream"–style — mundane on
-the surface, with a withheld deeper truth surfaced as an earned reveal.
-The same fact that makes bodies malleable is the intended answer to *why
-the avatar is superhuman*. WIP, not frozen canon; lineages, the
-composability carveout, and the (still-unspecified) origin live in
+*Mid-session form swapping*) has an in-fiction grounding: bodily
+malleability is **ambient and normal** in the world, delivered
+"Second Dream"–style — mundane on the surface, with a withheld deeper
+truth surfaced as an earned reveal. **The origin is decided: technological
+advancement** — the world is a slightly-near-future point where body-tech
+matured to the degree that malleable bodies are normal infrastructure, the
+way phones are now. This same body-tech is also the in-fiction answer to
+*why the avatar is superhuman* (bodies are assembled / regrown / fabricated
+/ projected to spec; superhuman feats are simply "what that body can do").
+The tech is ambient, not spectacle — places stay lived-in-modern per this
+section's modern-elastic decision. Broader lore (lineages, composability
+carveout, reveal staging, names) remains WIP; see
 `docs/decisions/transformation-lore.md`.
 
 ## Architecture commitments

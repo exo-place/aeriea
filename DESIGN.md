@@ -1429,6 +1429,22 @@ precisely because it is deterministic — it is not a per-query LLM,
 and should not be confused for one. Status: open R&D bet, same
 multi-year horizon as the primary-motion ML bet above.
 
+A high-want fidelity target — immersion-defining, feasibility
+uncertain — is **fine-grained contact deformation**: fingers (or other
+articulated parts) pressing into soft tissue and the tissue responding
+locally, deforming and bulging around the contact point, with proper
+two-way coupling between the rigid articulated part and the deformable
+body. This is the hard case for the cheap-surrogate plan: reduced-order
+/ subspace (modal) models capture global wobble well but smear out
+arbitrary *local* deformation — a small modal basis handles coarse
+jiggle but handles a finger poke poorly. This requirement therefore
+pushes toward **learned or hybrid surrogates** (a cheap global base
+plus local contact-detail handling, or a contact-aware enriched
+subspace) rather than pure modal reduction. Two-way fine contact is
+also the expensive part of the offline accurate sim — which is
+acceptable, since the offline sim is where accuracy is paid for and the
+surrogate is what gets baked/learned from it.
+
 ### Perceptual vs physical realism (a useful distinction)
 
 Worth keeping the distinction in mind: **physically accurate**

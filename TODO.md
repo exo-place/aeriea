@@ -74,7 +74,12 @@ change, reviewed against "collapse asymmetries to primitives.")
   repo's build-time-inference / deterministic-hot-loop principle precisely
   because it is deterministic, not a per-query LLM. Fits the animation-fidelity
   bet in DESIGN.md. Cross-reference `~/git/rhizone/playmate` (`frond`) during
-  the refining stage.
+  the refining stage. **High-want fidelity target:** fine-grained contact
+  deformation (fingers pressing into soft tissue, tissue deforming/bulging
+  locally around the contact). This is the hard case for modal surrogates —
+  a small modal basis smears out localized contact stress — so this target
+  pushes toward learned or hybrid surrogates (global base + local contact
+  enrichment), not pure modal reduction. See DESIGN.md for the full caveat.
 
 ## Open design questions (from DESIGN.md)
 

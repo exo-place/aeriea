@@ -112,6 +112,35 @@ biological species, and several overlap:
   the engine rhyme. (See `movement-substrate.md`, *Composition model*; and
   the named-presets seam in *Configurability surface*.)
 
+### Worked example — Puppeteer × any lineage (canonical composability illustration)
+
+The Puppeteer lineage is the clearest worked example of the carveout,
+because its composition is **not flat but nested**.
+
+- **A puppeteer's bodies need not be static.** Each body a puppeteer
+  pilots can itself be malleable — a given piloted body might be
+  shapeless, a weaver body that regrows its own spares, a shifter with
+  its own N stable forms, and so on.
+
+- **Puppeteer is therefore effectively a meta-modality.** It operates
+  *on* bodies — not *as* a body-shape — so "puppeteer × any other
+  lineage" nests naturally rather than merely adding traits side-by-side.
+  Composition here does not flatten: it nests. A composite being whose
+  components are themselves composite.
+
+- **This deepens the personhood question already flagged in the
+  Provenance ecology.** A piloted body that can itself transform, regrow,
+  or shift reads even more like a being with its own agency being worn —
+  which loops directly back into the deliberate ambiguity around whether
+  inactive bodies are people, and whether they were acquired or created.
+  **That question is not answered here; the ambiguity is preserved.**
+
+- **Architecture rhyme (brief).** The nesting maps onto the substrate
+  cleanly: each body is its own composed body-kit, and the puppeteer
+  layer selects which kit is active. Composition nests in the data model
+  exactly as it nests in the fiction — the same composition-over-
+  enumeration through-line already noted above.
+
 ---
 
 ## Provenance ecology

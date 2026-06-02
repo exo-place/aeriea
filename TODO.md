@@ -83,8 +83,13 @@ change, reviewed against "collapse asymmetries to primitives.")
   The poke is a waypoint; the harder rung is **full-hand cupping /
   squishing / grasping** — multiple simultaneous contact regions,
   large-strain loading, and visible volume redistribution (tissue bulging
-  between/around fingers). That is where volume preservation becomes
-  load-bearing, not cosmetic.
+  between/around fingers, and with fingers splayed tissue redistributes
+  up through the gaps between them). That is where volume preservation
+  becomes load-bearing, not cosmetic. The surrogate likely needs an
+  **iterated solve (predict-then-project)**: a single feed-forward pass
+  cannot guarantee volume preservation or non-penetration; a few XPBD-
+  style constraint-projection passes after the predictor enforce them
+  exactly. Iteration count fixed → determinism preserved.
 
 ## Open design questions (from DESIGN.md)
 

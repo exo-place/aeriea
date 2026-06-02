@@ -1450,13 +1450,31 @@ not the hardest rung. **Full-hand cupping, squishing, or grasping** is
 harder: it introduces multiple simultaneous contact regions, large-
 deformation (large-strain) loading across a wide area, and a visible
 volume-redistribution requirement — displaced tissue must bulge
-*between and around* the fingers, not just at a single point. This is
+*between and around* the fingers — and with fingers splayed, tissue
+actively redistributes up through the gaps between spread fingers, not
+only around the periphery — not just at a single point. This is
 where genuine volume preservation shifts from cosmetic to load-bearing.
 It stresses the surrogate harder than a poke does: not localized
 high-frequency detail, but *coordinated multi-region large-strain
 deformation under grasp*. The correct mental image for the target
 fidelity is the cupping/squishing case, not the poke; the poke is a
 waypoint on the same ladder.
+
+The realtime surrogate likely requires an **iterated solve, not a single
+feed-forward pass**. Hard constraints — volume preservation and non-
+penetration / contact — generally cannot be guaranteed by a one-shot
+predictor: a neural net or reduced model will drift, slightly gaining or
+losing volume, letting a fingertip sink in. The standard remedy is
+**iterative constraint projection** (XPBD / position-based-dynamics
+style: project distance, volume, and contact constraints over several
+Gauss-Seidel passes until satisfied) — the same PBD already named for
+cloth above. The surrogate is therefore plausibly a **hybrid: predict,
+then project** — a learned or reduced predictor handles the expensive
+global response, followed by a few cheap constraint-projection passes
+to enforce volume and contact exactly. This iteration is most likely
+*required* for the large-deformation cupping/squishing case. Determinism
+is preserved as long as the iteration count is fixed — compatible with
+the seeded-simulation invariant.
 
 ### Perceptual vs physical realism (a useful distinction)
 

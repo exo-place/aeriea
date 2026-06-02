@@ -89,7 +89,13 @@ change, reviewed against "collapse asymmetries to primitives.")
   **iterated solve (predict-then-project)**: a single feed-forward pass
   cannot guarantee volume preservation or non-penetration; a few XPBD-
   style constraint-projection passes after the predictor enforce them
-  exactly. Iteration count fixed → determinism preserved.
+  exactly. Determinism holds as long as the stopping rule is deterministic
+  — fixed count is one sufficient case; iterate-until-convergence with a
+  deterministic error metric, epsilon, and max-iteration cap is equally
+  valid (a variable actual count is still deterministic). Additionally, the
+  canonical (rest) volume targeted by the preservation constraint must be a
+  read-only rest-state invariant — never updated by the solver, or volume
+  drifts by feedback and the guarantee is defeated.
 
 ## Open design questions (from DESIGN.md)
 

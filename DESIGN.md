@@ -1473,8 +1473,15 @@ then project** — a learned or reduced predictor handles the expensive
 global response, followed by a few cheap constraint-projection passes
 to enforce volume and contact exactly. This iteration is most likely
 *required* for the large-deformation cupping/squishing case. Determinism
-is preserved as long as the iteration count is fixed — compatible with
-the seeded-simulation invariant.
+is preserved as long as the stopping rule is deterministic — a fixed
+iteration count is one sufficient case; so is iterate-until-convergence
+with a deterministic error metric, threshold (epsilon), and max-iteration
+cap. A convergence-based solve whose actual iteration count varies with
+the input is still fully deterministic. Separately, the canonical (rest)
+volume that the volume-preservation constraint targets must be a
+read-only rest-state invariant: if the solver feeds its own output back
+as the new target volume, volume drifts by feedback and the preservation
+guarantee is defeated — compatible with the seeded-simulation invariant.
 
 ### Perceptual vs physical realism (a useful distinction)
 

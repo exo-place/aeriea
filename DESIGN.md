@@ -1405,6 +1405,30 @@ sims (PBD cloth, dynamic bones with shape matching, purpose-built
 soft body solvers for key areas, procedural overlays for life,
 learned/ML approaches as the tech matures over the timeline).
 
+**Secondary / soft-body physics as the secondary-motion instance of
+this bet.** Jiggle bones (spring-driven dynamic bones) are the
+industry baseline for secondary motion — ears, tails, flesh, soft
+tissue. They are not sufficient: they do not preserve volume and
+do not self/world-collide, so the result reads as wobbly sticks
+rather than mass. The goal is volume-preserving, physically accurate
+secondary motion with proper self- and world-collision. A full
+physically accurate soft-body sim is prohibitively expensive in
+realtime, so the plan mirrors the broader bet: use an accurate
+offline simulator and produce a cheap realtime *surrogate* that
+approximates it — evaluated dynamically at runtime (responds to
+arbitrary motion and collisions), not canned baked animation. Two
+viable surrogate shapes: (a) **reduced-order / subspace deformable
+dynamics** — project the accurate sim onto a small modal basis,
+physical and orders of magnitude cheaper; (b) **learned dynamics**
+— a neural net trained against the offline accurate sim, as the
+frontier / fallback option. Either surrogate must be deterministic
+(fixed weights / deterministic evaluation) to satisfy the seeded-
+simulation invariant. A trained soft-body net is fully compatible
+with the build-time-inference / deterministic-hot-loop principle
+precisely because it is deterministic — it is not a per-query LLM,
+and should not be confused for one. Status: open R&D bet, same
+multi-year horizon as the primary-motion ML bet above.
+
 ### Perceptual vs physical realism (a useful distinction)
 
 Worth keeping the distinction in mind: **physically accurate**

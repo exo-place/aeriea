@@ -57,10 +57,24 @@ change, reviewed against "collapse asymmetries to primitives.")
 
 ## Body / animation backlog
 
-- **Tail physics** — satisfying tail swish + wagging + collision (tail should
-  collide with body/world, not clip). Fits the existing bet on specialized cheap
-  soft-body/cloth solvers (DESIGN.md animation-fidelity). Cross-reference
-  `~/git/rhizone/playmate` (`frond`) during the refining stage.
+- **Secondary / soft-body physics** (jiggle, ears, tails, flesh/soft tissue) —
+  R&D bet, multi-year horizon. The standard jiggle-bone approach (spring-driven)
+  does not preserve volume and does not self/world-collide; it reads as wobbly
+  sticks. Goal: volume-preserving, physically accurate secondary motion with
+  proper self- and world-collision (e.g. tail collides with body/ground, doesn't
+  clip). Approach: develop or use an accurate offline simulator and produce a
+  cheap realtime surrogate evaluated dynamically at runtime — NOT canned
+  animation. Two surrogate shapes: (a) reduced-order / subspace deformable
+  dynamics (project the accurate sim onto a small modal basis — physical, orders
+  of magnitude cheaper), and (b) a neural net trained against the offline
+  accurate sim as the frontier option. "Bake" = precompute / fit offline; "fully
+  dynamic" = evaluate responsively at runtime. The surrogate must be
+  deterministic (fixed weights / deterministic evaluation) to satisfy the
+  seeded-simulation invariant — a trained soft-body net is compatible with the
+  repo's build-time-inference / deterministic-hot-loop principle precisely
+  because it is deterministic, not a per-query LLM. Fits the animation-fidelity
+  bet in DESIGN.md. Cross-reference `~/git/rhizone/playmate` (`frond`) during
+  the refining stage.
 
 ## Open design questions (from DESIGN.md)
 

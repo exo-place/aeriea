@@ -109,6 +109,17 @@ change, reviewed against "collapse asymmetries to primitives.")
   `~/git/rhizone/playmate` (`frond`). See DESIGN.md soft-body section for full
   write-up.
 
+## Transformation lore (sketch, WIP)
+
+- **Transformation-lore sketch** — `docs/decisions/transformation-lore.md`
+  (SKETCH / WIP). Captures the malleable-body premise (ambient/normal,
+  Second-Dream delivery), seven lineages/modalities, and the composability
+  carveout. Open: the deeper origin/cosmology, lineage-as-identity vs
+  composable-traits, persistence/accumulation of transformation history,
+  staging of the reveal(s). Begins to address the "why superhuman" question
+  in `units-and-scale.md` (in progress, not closed). Names are the user's to
+  set — coin none.
+
 ## Open design questions (from DESIGN.md)
 
 - Project name (aeriea is tentative; pronounced "area")

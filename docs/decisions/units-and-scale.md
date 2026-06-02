@@ -122,13 +122,19 @@ normal human for arcade feel." The world stays real-scale and real-gravity
 *so that* the superhuman capability reads as a property of the *character*,
 which is the whole point of an embodied power fantasy.
 
-**Open question (deferred — do not invent lore here):** the precise
-in-fiction justification for *why* the avatar is superhuman —
+**Open question (being addressed — in progress, not closed):** the
+precise in-fiction justification for *why* the avatar is superhuman —
 augmentation? species? setting lore? — is a broader design/lore question
 that links to the power-fantasy/lore design (DESIGN.md, *Variety of power
 fantasies*). It is **not decided in this doc.** What is decided: the
 movement magnitudes are intentionally superhuman, expressed in real units,
 and their in-fiction grounding is owned by the lore design when it lands.
+That lore is now being sketched: the **malleable-body premise** in
+`docs/decisions/transformation-lore.md` (WIP) proposes that a body here is
+assembled / regrown / fabricated / projected to spec rather than a fixed
+inheritance, so superhuman feats are "what that body can do." This begins
+to answer the question but does **not** close it — the grounding lore is
+still WIP.
 
 ---
 

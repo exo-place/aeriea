@@ -623,6 +623,18 @@ the *places* feel like real life — recognizable, lived-in, modern.
 Modern is the aesthetic of *inhabitance*; sci-fi/fantasy work harder
 for awe but worse for *being-there*.
 
+### Transformation lore (sketch, WIP)
+
+The body-as-cosmetic / transformation framing (see *Cosmetic depth*,
+*Mid-session form swapping*) is gaining an in-fiction grounding: a
+sketch in which **bodily malleability is ambient and normal** in the
+world, fully worldbuilt but delivered "Second Dream"–style — mundane on
+the surface, with a withheld deeper truth surfaced as an earned reveal.
+The same fact that makes bodies malleable is the intended answer to *why
+the avatar is superhuman*. WIP, not frozen canon; lineages, the
+composability carveout, and the (still-unspecified) origin live in
+`docs/decisions/transformation-lore.md`.
+
 ## Architecture commitments
 
 ### Deterministic seeded simulation
@@ -689,8 +701,10 @@ units; only the *capability* is above baseline. The full convention,
 the reference avatar dimensions, and the movement-magnitude table
 (real value / human baseline / multiplier) live in
 `docs/decisions/units-and-scale.md`. The in-fiction grounding for *why*
-the avatar is superhuman is an open lore question, deferred to the
-power-fantasy/lore design — not decided here.
+the avatar is superhuman is now being **addressed (in progress, not
+closed)** by the transformation-lore sketch: a body assembled / regrown
+/ fabricated / projected to spec is superhuman because that is "what
+that body can do." See `docs/decisions/transformation-lore.md` (WIP).
 
 **Diegetic UI** — menus live on the body or in the world, not as
 screen overlays. Wrist menus, palm panels, in-world objects. Works

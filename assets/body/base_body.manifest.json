@@ -46,6 +46,15 @@
 	],
 	"license": "CC0-1.0 (MakeHuman core base mesh + targets, explicitly CC0 since Sept 2020)",
 	"mh_to_meters": 0.1,
+	"rig": {
+		"bone_count": 163,
+		"max_influences": 4,
+		"rigged_scene": "res://assets/body/base_body_rig.json",
+		"skeleton": "rigs/default.mhskel",
+		"unweighted_vertices": 0,
+		"weights": "rigs/default_weights.mhw",
+		"weights_license": "CC0 (MakeHuman default_weights.mhw, symmetric weights for the default mesh)"
+	},
 	"source": {
 		"owner": "makehumancommunity",
 		"repo": "makehuman",

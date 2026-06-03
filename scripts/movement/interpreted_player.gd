@@ -92,6 +92,13 @@ const _STATE_NAME_TO_ENUM := {
 var interpreter
 var kit: MovementKit
 
+## Slice 3 — the visible, animated, skinned body (BodyRig). RENDER-SIDE: it reads
+## MovementState (grounded + horizontal speed) each frame and poses itself; it
+## never writes the sim. Toggle off for the pure-capsule parity/golden runs (tests
+## construct the player without a body). Built in _ready, driven after the sim step.
+@export var show_body: bool = true
+var body_rig: BodyRig
+
 var _capsule: CapsuleShape3D
 var _collision_shape: CollisionShape3D
 var _camera_pivot: Node3D
@@ -172,6 +179,18 @@ func _ready() -> void:
 	floor_max_angle = deg_to_rad(max_slope_angle)
 	floor_snap_length = 0.5
 
+	# Slice 3 — the visible, animated, skinned body. The mesh has feet at its local
+	# y=0; the capsule origin is at body-centre with feet ~stand_height below, so
+	# drop the rig by stand_height to plant its feet at the capsule's feet
+	# (units-and-scale.md body-origin-at-feet seam: noted; here we offset the render
+	# body, the sim capsule is unchanged). The body faces -Z (Godot forward), the
+	# same forward the camera/yaw uses, so it turns with the player automatically.
+	if show_body:
+		body_rig = BodyRig.new()
+		body_rig.name = "BodyRig"
+		body_rig.position = Vector3(0.0, -stand_height, 0.0)
+		add_child(body_rig)
+
 	if kit_path.ends_with(".manifest.json"):
 		kit = MovementKit.load_from_manifest(kit_path)
 	else:
@@ -241,6 +260,17 @@ func _physics_process(delta: float) -> void:
 	# the existing yaw plumbing (mouse-look already maintains _pitch in _apply_look).
 	interpreter.pitch = _pitch
 	interpreter.step(delta)
+
+	# Slice 3 — drive the visible body from the sim's MovementState. RENDER-SIDE:
+	# a pure read of grounded + horizontal speed -> pose; never feeds back into the
+	# sim (the sim already stepped above; this only moves bones). The golden traces
+	# / behavioral suite construct a body-less player, so this path is render-only.
+	if body_rig != null:
+		if body_rig._space == null:
+			body_rig.setup_ik(get_world_3d().direct_space_state, [self])
+		var hv := Vector3(velocity.x, 0.0, velocity.z)
+		body_rig.set_movement_state(is_on_floor(), hv.length())
+		body_rig.apply_pose(delta)
 
 func _input(event: InputEvent) -> void:
 	_mouse_captured = (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED)

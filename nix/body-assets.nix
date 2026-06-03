@@ -51,6 +51,8 @@ pkgs.stdenvNoCC.mkDerivation {
 
     test -f assets/body/base_body.res || { echo "body-assets: converter produced no mesh" >&2; exit 1; }
     test -f assets/body/base_body.manifest.json || { echo "body-assets: no manifest" >&2; exit 1; }
+    # Slice 3: the rig data JSON (Skeleton3D + skin reconstruction at runtime).
+    test -f assets/body/base_body_rig.json || { echo "body-assets: no rig data" >&2; exit 1; }
 
     runHook postBuild
   '';
@@ -60,6 +62,7 @@ pkgs.stdenvNoCC.mkDerivation {
     mkdir -p "$out"
     cp assets/body/base_body.res "$out/"
     cp assets/body/base_body.manifest.json "$out/"
+    cp assets/body/base_body_rig.json "$out/"
     runHook postInstall
   '';
 

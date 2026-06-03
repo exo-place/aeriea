@@ -22,7 +22,7 @@ and: https://www.makehumancommunity.org/wiki/License
 Only core CC0 bundled assets are included. No community-DB assets, no non-CC0
 content. The full MakeHuman repository (~200 MB) is NOT vendored here.
 
-## Vendored files (9 files, ~4.1 MB)
+## Vendored files (10 files, ~5.0 MB)
 
 ```
 data/3dobjs/base.obj                                               (1.7 MB)  base mesh
@@ -33,8 +33,17 @@ data/targets/macrodetails/caucasian-male-young.target              (388 KB)  gen
 data/targets/macrodetails/universal-female-young-maxmuscle-averageweight.target   (135 KB)  muscle_max blendshape
 data/targets/macrodetails/universal-female-young-averagemuscle-maxweight.target   (122 KB)  weight_max blendshape
 data/targets/macrodetails/height/female-young-averagemuscle-averageweight-maxheight.target  (412 KB)  height_max blendshape
-data/rigs/default.mhskel                                           (116 KB)  skeleton (Slice 3 readiness)
+data/rigs/default.mhskel                                           (116 KB)  skeleton (bone tree + joint cubes)
+data/rigs/default_weights.mhw                                      (898 KB)  per-vertex LBS skin weights (Slice 3)
 ```
+
+`default_weights.mhw` (Slice 3) carries the MakeHuman default mesh's per-vertex
+bone weights as plain JSON (`{ "weights": { bone: [[vertex_index, weight], ...] }}`).
+Its own header declares CC0 ("Symmetric weights for default makehuman mesh",
+(c) 2021 Data Collection AB). It is byte-identical to the file at
+`makehuman/data/rigs/default_weights.mhw` in the pinned `v1.3.0` source archive
+(verified by `cmp` against the `fetchFromGitHub` store path). The `.mhskel`
+references it via its `weights_file` field; it is NOT embedded in the skeleton.
 
 ## Usage
 

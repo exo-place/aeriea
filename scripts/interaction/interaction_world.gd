@@ -19,12 +19,22 @@ extends Node
 
 const InteractionKitScript := preload("res://scripts/interaction/interaction_kit.gd")
 const InteractionInterpreterScript := preload("res://scripts/interaction/interaction_interpreter.gd")
+const CompiledInteractionScript := preload("res://scripts/interaction/generated/compiled_sandbox_interaction.gd")
 
 ## Path to the kit JSON describing this world's interactables.
 @export var kit_path: String = "res://interaction/sandbox.kit.json"
 
+## When true, drive the COMPILED projection (CompiledSandboxInteraction) instead of
+## the interpreter. The live sandbox stays on the interpreter (hot-reload); the
+## behavioral suite flips this to exercise the same assertions against the compiled
+## path. Both expose the same host-facing surface (setup/step/state/project_prompt).
+@export var use_compiled: bool = false
+
 var kit: InteractionKit
-var interp: InteractionInterpreter
+## The active driver — InteractionInterpreter OR CompiledSandboxInteraction. Both
+## share the host protocol + the `state` record + project_prompt(); the rest of
+## this host is driver-agnostic. Named `interp` for back-compat with shims/tests.
+var interp
 
 ## kit id -> scene node (the registered interactable body/area).
 var _nodes: Dictionary = {}
@@ -71,7 +81,7 @@ func _enter_tree() -> void:
 		for e in kit.load_errors:
 			push_error("InteractionWorld: kit load error: %s" % e)
 		return
-	interp = InteractionInterpreterScript.new()
+	interp = CompiledInteractionScript.new() if use_compiled else InteractionInterpreterScript.new()
 	interp.setup(kit, self)
 
 

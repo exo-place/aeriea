@@ -25,6 +25,11 @@ const SANDBOX := "res://scenes/interaction_sandbox.tscn"
 var _pass := 0
 var _fail := 0
 
+## Which path the current pass drives: false = interpreter, true = compiled. Set per
+## pass in _run; threaded into _spawn so the InteractionWorld picks the driver. The
+## SAME assertions run against both paths (Slice 2 §8: compiled must pass the spec too).
+var _compiled := false
+
 
 func _ready() -> void:
 	_run()
@@ -32,28 +37,37 @@ func _ready() -> void:
 
 func _run() -> void:
 	print("\n=== aeriea interaction behavioral test ===\n")
-	await _test_lookat_focus_and_prompt()
-	await _test_grab_carry_and_throw()
-	await _test_valve_toggles_flow()
-	await _test_chain_a_fill_place_arms_beacon()
-	await _test_chain_b_stack_parkour_triggers_beacon()
+	for compiled in [false, true]:
+		_compiled = compiled
+		print("\n--- driving the %s path ---\n" % ("COMPILED" if compiled else "INTERPRETER"))
+		await _test_lookat_focus_and_prompt()
+		await _test_grab_carry_and_throw()
+		await _test_valve_toggles_flow()
+		await _test_chain_a_fill_place_arms_beacon()
+		await _test_chain_b_stack_parkour_triggers_beacon()
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
 
 
 func _assert(name: String, cond: bool, evidence: String) -> void:
+	var tag := "compiled" if _compiled else "interp"
 	if cond:
 		_pass += 1
-		print("  PASS  %s  [%s]" % [name, evidence])
+		print("  PASS  (%s) %s  [%s]" % [tag, name, evidence])
 	else:
 		_fail += 1
-		print("  FAIL  %s  [%s]" % [name, evidence])
+		print("  FAIL  (%s) %s  [%s]" % [tag, name, evidence])
 
 
 func _spawn() -> Dictionary:
 	GameSettings.reset_all()
 	var scene: PackedScene = load(SANDBOX)
 	var level: Node = scene.instantiate()
+	# Select the driver BEFORE the world's _enter_tree runs (it builds the driver
+	# there). The InteractionWorld is a direct child named "InteractionWorld".
+	var world := level.get_node_or_null("InteractionWorld")
+	if world != null:
+		world.use_compiled = _compiled
 	add_child(level)
 	await get_tree().physics_frame
 	await get_tree().physics_frame

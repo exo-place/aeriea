@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://body_converter_v1"]
+
+[ext_resource type="Script" path="res://tools/body_converter.gd" id="1_bodyconv"]
+
+[node name="BodyConverter" type="Node"]
+script = ExtResource("1_bodyconv")

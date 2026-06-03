@@ -18,6 +18,16 @@
         };
       in
       {
+        # Nix-reproducible body asset pipeline (Slice 1 of
+        # docs/decisions/body-and-locomotion-slice.md): fetches the PINNED
+        # MakeHuman CC0 source and runs the in-repo GDScript converter headless
+        # to emit the Godot ArrayMesh + macro blendshapes, with NO manual step.
+        #   nix build .#body-assets   →   result/base_body.res
+        packages.body-assets = import ./nix/body-assets.nix {
+          inherit pkgs;
+          godot = pkgs.godot_4;
+        };
+
         devShells.default = pkgs.mkShell rec {
           buildInputs = with pkgs; [
             # Godot 4.x — primary engine

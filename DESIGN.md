@@ -493,9 +493,19 @@ Its justification *is* consent-ethics — an entity that genuinely cannot
 consent — which makes it a values stance, not mere optics.
 
 It is also a **living curation line**: periodically evaluate whether
-emergent instances warrant being soft-patched out, and do so as found —
-an ongoing review process, not a one-time declaration. The generative
-substrate evolves; the curation process stays active with it.
+emergent instances warrant remediation and, when they do, apply a
+**programmatic steer / down-weight / guard in the generation pipeline**
+— a tunable policy layer sitting *over* the general engine (consistent
+with the project's "policy layer over a general engine, don't cripple
+primitives" approach) — **not** surgical / manual removal of specific
+authored content. "Soft-patching" means adding or tightening a
+programmatic suppression or steering mechanism in the pipeline, not
+deleting content by hand. This programmatic layer is necessarily
+**heuristic / best-effort**: the target (a child-coded /
+non-consenting-capable mind) is not crisply checkable, in contrast to
+Layer 1's exact body-state guard — which is precisely *why* it is the
+soft line and why Layer 1 remains the hard, exact backstop. The
+generative substrate evolves; the curation process stays active with it.
 
 **Layer 1 remains the hard, generation-proof backstop regardless.**
 The body-state guard holds no matter how content is generated — the

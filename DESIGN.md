@@ -837,6 +837,26 @@ seeded-sim commitment above.
 Full spec, schema, worked examples (jump/slide/wall-run), and the
 incremental slice plan: **`docs/decisions/movement-substrate.md`**.
 
+### Interaction as a data-driven affordance substrate
+
+Interaction is the *graph*: dense, composable command edges per node (no barren
+nodes, no wait→wait→wait self-loops — see `reference-analysis.md`). The "second
+kit" rhymes with movement: an interactable is **recomposable data** — its verbs,
+the **guards** that gate them (a closed union of serializable predicates over
+self / held / focus / world state — the load-bearing case being a guard that
+reads *another object's* state, e.g. "place full jug"), and its **effects** (a
+closed union of state-transition primitives: toggle/set-state, add-fill,
+arm/trigger, consume-into-socket, grab/release, apply-impulse) are data, never
+hardcoded nodes. Cross-object wiring (valve→spout→jug→pedestal→beacon) is
+declared **refs + events + reactions**, not signals; convergence (`armed ∧
+reached`) is a first-class `all`-composed guard. The prompt is a pure projection
+of the live verb set, making the pure-text litmus mechanical. Same dual path as
+movement (interpreter is the spec; compiler with golden-trace equivalence), same
+determinism posture; physics (carry spring, box-stacking, overlap) stays
+in-engine — only the verb/guard/effect/event graph extracts. Full spec, schema,
+the worked valve→…→beacon chain, and the slice plan:
+**`docs/decisions/affordance-substrate.md`**.
+
 ## Reference set
 
 What each reference contributes.

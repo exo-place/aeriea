@@ -122,6 +122,22 @@ change, reviewed against "collapse asymmetries to primitives.")
 
 ## Interaction-structure (anti-walking-sim)
 
+- **Affordance substrate (the "second kit")** — designed, not yet implemented:
+  see **`docs/decisions/affordance-substrate.md`** for the serializable
+  interactable-as-data schema (verbs / guards / effects / refs+events+reactions),
+  the prompt-as-projection model, AND-gating convergence as a first-class guard,
+  the interpreter+compiler dual path with golden-trace equivalence, and the
+  determinism + physics/affordance seam. Generalizes the hand-built interaction
+  slice (`scripts/interaction/`, 6/6 behavioral tests).
+  - [ ] **Slice 1** — schema + loader + deterministic interpreter; reproduce the
+    sandbox interactables (valve/spout/jug/pedestal/beacon/box) as data,
+    interpreter-driven, full 6 assertions passing.
+  - [ ] **Slice 2** — GDScript compiler + golden-trace harness; interpreter ==
+    compiled, hash-identical; 6 assertions pass against the compiled path.
+  - [ ] **Slice 3** — a brand-new dense interactable authored **purely as data**
+    (e.g. pressure-plate+lever→door, a second AND-gate convergence) with **zero
+    engine code change** — the payoff proof, analogous to movement's bullet jump.
+
 - Apply the **pure-text litmus** from `docs/decisions/reference-analysis.md`
   to each activity surface as it gets its design pass: at a representative
   state, are most edges *composing* (not navigational/terminal), are there

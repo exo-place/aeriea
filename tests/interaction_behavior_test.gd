@@ -45,6 +45,7 @@ func _run() -> void:
 		await _test_valve_toggles_flow()
 		await _test_chain_a_fill_place_arms_beacon()
 		await _test_chain_b_stack_parkour_triggers_beacon()
+		await _test_slice3_lever_plate_gate_and_gate()
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
 
@@ -398,5 +399,92 @@ func _test_chain_b_stack_parkour_triggers_beacon() -> void:
 		"armed=%s triggered=%s player_y=%.2f" % [str(beacon2.is_armed), str(beacon2.is_triggered), p2.global_position.y]
 	)
 	ctx2["level"].queue_free()
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## SLICE 3 — the payoff proof, authored PURELY AS DATA (no engine change). A SECOND
+## convergence AND-gate with a different independently-composed pair: a LEVER (a
+## stateful command toggle) AND a PRESSURE PLATE held down by a placed weight (a box
+## overlapping the plate's Area3D `pad` region). The GATE opens only on the AND of
+## both. We prove (a) the gate opens when BOTH chains are satisfied, AND (b) each
+## single chain ALONE is inert (the converse-is-inert property of the all-guard),
+## driving the lever via the REAL command-verb input path and the plate via a real
+## box weight + the once-per-tick region overlap.
+func _test_slice3_lever_plate_gate_and_gate() -> void:
+	var ctx := await _spawn()
+	var player: CharacterBody3D = ctx["player"]
+	var interactor = ctx["interactor"]
+	var level = ctx["level"]
+	var lever = level.get_node("Lever")
+	var plate = level.get_node("Plate")
+	var gate = level.get_node("Gate")
+	var box = level.get_node("BoxPile/Box1")
+
+	# --- 1) Lever ALONE: throw the lever, no weight on the plate -> gate stays shut. ---
+	# Park the weight box far from the plate so the plate is not pressed.
+	box.global_position = Vector3(8.0, 0.45, 8.0)
+	box.linear_velocity = Vector3.ZERO
+	player.global_position = Vector3(-2.0, 1.5, -4.0)
+	player.velocity = Vector3.ZERO
+	await _step(2)
+	_aim_at(player, Vector3(-2.0, 0.25, -6.0))   # look at the lever handle
+	await _step_focus()
+	var lever_prompt: String = interactor.current_prompt()
+	interactor._do_primary()                     # throw the lever (command verb)
+	await _step(4)
+	var lever_thrown: bool = lever.is_thrown
+	var gate_open_lever_only: bool = gate.is_open
+	var plate_pressed_lever_only: bool = plate.is_pressed
+
+	# --- 2) Plate ALONE: reset the lever, put a weight on the plate -> gate stays shut. ---
+	interactor._do_primary()                     # reset the lever (toggle back off)
+	await _step(2)
+	var lever_reset: bool = not lever.is_thrown
+	# Drop the box onto the plate pad (centre 2,0.3,-3; pad area spans y 0..0.6).
+	box.global_position = Vector3(2.0, 0.45, -3.0)
+	box.linear_velocity = Vector3.ZERO
+	await _step(20)                              # let the overlap register + plate tick
+	var plate_pressed: bool = plate.is_pressed
+	var gate_open_plate_only: bool = gate.is_open
+
+	# --- 3) BOTH chains: throw the lever WHILE the weight presses the plate -> OPEN. ---
+	player.global_position = Vector3(-2.0, 1.5, -4.0)
+	player.velocity = Vector3.ZERO
+	await _step(2)
+	_aim_at(player, Vector3(-2.0, 0.25, -6.0))
+	await _step_focus()
+	interactor._do_primary()                     # throw the lever again
+	await _step(6)
+	var gate_open_both: bool = gate.is_open
+
+	# --- 4) Live close: remove the weight -> plate springs up -> gate closes again. ---
+	box.global_position = Vector3(8.0, 0.45, 8.0)
+	box.linear_velocity = Vector3.ZERO
+	await _step(20)
+	var gate_closed_after_remove: bool = not gate.is_open
+
+	_assert(
+		"SLICE 3 gate: lever ALONE is inert (gate stays shut without the plate weight)",
+		lever_thrown and not gate_open_lever_only and not plate_pressed_lever_only and lever_prompt.contains("lever"),
+		"thrown=%s gate_open=%s plate=%s prompt='%s'" % [
+			str(lever_thrown), str(gate_open_lever_only), str(plate_pressed_lever_only), lever_prompt]
+	)
+	_assert(
+		"SLICE 3 gate: weight on plate ALONE is inert (gate stays shut without the lever)",
+		lever_reset and plate_pressed and not gate_open_plate_only,
+		"lever_reset=%s plate_pressed=%s gate_open=%s" % [
+			str(lever_reset), str(plate_pressed), str(gate_open_plate_only)]
+	)
+	_assert(
+		"SLICE 3 gate: lever AND plate-weight converge -> gate OPENS (second AND-gate, pure data)",
+		gate_open_both,
+		"gate_open=%s (lever thrown + plate pressed)" % str(gate_open_both)
+	)
+	_assert(
+		"SLICE 3 gate: live close — removing the weight drops one chain and the gate shuts again",
+		gate_closed_after_remove,
+		"gate_open_after_remove=%s" % str(not gate_closed_after_remove)
+	)
 	ctx["level"].queue_free()
 	await get_tree().process_frame

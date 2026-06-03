@@ -72,6 +72,12 @@ func _init_state_for(instance_id: String, def_id: String) -> void:
 	elif def_id == "beacon":
 		rec["armed"] = false
 		rec["triggered"] = false
+	elif def_id == "lever":
+		rec["thrown"] = false
+	elif def_id == "plate":
+		rec["pressed"] = false
+	elif def_id == "gate":
+		rec["open"] = false
 	state[instance_id] = rec
 
 func step(dt: float) -> void:
@@ -93,6 +99,18 @@ func _run_tick(frame: ResolvedFrame, dt: float) -> void:
 			var _owner: InteractionKit.Interactable = kit.interactables["beacon"]
 			if (_g_state_bool("beacon", _self, "self", "armed", true) and frame.player_reached(_self, "reach")):
 				_e_set_true("beacon", _self, "self", "triggered", frame)
+		elif _def == "plate":
+			var _owner: InteractionKit.Interactable = kit.interactables["plate"]
+			if _g_in_region(frame, _self, "pad", "grabbable_box"):
+				_e_set_state("plate", _self, "self", "pressed", frame, true)
+			if (not _g_in_region(frame, _self, "pad", "grabbable_box")):
+				_e_set_state("plate", _self, "self", "pressed", frame, false)
+		elif _def == "gate":
+			var _owner: InteractionKit.Interactable = kit.interactables["gate"]
+			if (_g_state_bool("gate", _self, "ref:lever", "thrown", true) and _g_state_bool("gate", _self, "ref:plate", "pressed", true)):
+				_e_set_state("gate", _self, "self", "open", frame, true)
+			if (not (_g_state_bool("gate", _self, "ref:lever", "thrown", true) and _g_state_bool("gate", _self, "ref:plate", "pressed", true))):
+				_e_set_state("gate", _self, "self", "open", frame, false)
 
 func _process_verb_fire(frame: ResolvedFrame, dt: float) -> void:
 	var interact_edge := frame.is_edge("interact")
@@ -164,6 +182,12 @@ func _fire_verb(def_id_inst: String, self_id: String, frame: ResolvedFrame, dt: 
 				_e_set_state("pedestal", _self, "self", "active", frame, true)
 			if _g_state_bool("pedestal", _self, "self", "active", true):
 				_events.append({ "from": _self, "event": "activated" })
+			return true
+	elif _def == "lever":
+		var _owner: InteractionKit.Interactable = kit.interactables["lever"]
+		if kind == "command" and (name_hint == "" or name_hint == "toggle") and (true):
+			_e_toggle_state("lever", _self, "self", "thrown", frame)
+			_events.append({ "from": _self, "event": "lever_changed" })
 			return true
 	return false
 

@@ -1,4 +1,4 @@
-[gd_scene load_steps=40 format=3 uid="uid://interaction_sandbox_v1"]
+[gd_scene load_steps=53 format=3 uid="uid://interaction_sandbox_v1"]
 
 [ext_resource type="Script" path="res://scripts/movement/interpreted_player.gd" id="1_player"]
 [ext_resource type="Script" path="res://scripts/interaction/interactor.gd" id="2_interactor"]
@@ -11,6 +11,9 @@
 [ext_resource type="Script" path="res://scripts/interaction/goal_beacon.gd" id="9_beacon"]
 [ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="10_pause"]
 [ext_resource type="Script" path="res://scripts/interaction/interaction_world.gd" id="11_world"]
+[ext_resource type="Script" path="res://scripts/interaction/lever.gd" id="12_lever"]
+[ext_resource type="Script" path="res://scripts/interaction/pressure_plate.gd" id="13_plate"]
+[ext_resource type="Script" path="res://scripts/interaction/gate.gd" id="14_gate"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_mat"]
 
@@ -107,6 +110,30 @@ size = Vector3(0.5, 1.2, 0.5)
 
 [sub_resource type="BoxShape3D" id="Shape_beacon_area"]
 size = Vector3(2, 2, 2)
+
+[sub_resource type="BoxShape3D" id="Shape_lever_base"]
+size = Vector3(0.4, 0.5, 0.4)
+
+[sub_resource type="BoxMesh" id="Mesh_lever_base"]
+size = Vector3(0.4, 0.5, 0.4)
+
+[sub_resource type="BoxMesh" id="Mesh_lever_handle"]
+size = Vector3(0.08, 0.7, 0.08)
+
+[sub_resource type="BoxShape3D" id="Shape_plate_area"]
+size = Vector3(1.2, 0.6, 1.2)
+
+[sub_resource type="BoxMesh" id="Mesh_plate_pad"]
+size = Vector3(1.2, 0.1, 1.2)
+
+[sub_resource type="BoxShape3D" id="Shape_gate_post"]
+size = Vector3(0.3, 2.5, 0.3)
+
+[sub_resource type="BoxMesh" id="Mesh_gate_post"]
+size = Vector3(0.3, 2.5, 0.3)
+
+[sub_resource type="BoxMesh" id="Mesh_gate_panel"]
+size = Vector3(1.8, 1.8, 0.2)
 
 [node name="InteractionSandbox" type="Node3D"]
 
@@ -305,6 +332,58 @@ mesh = SubResource("Mesh_ped_ind")
 
 [node name="Socket" type="Marker3D" parent="Pedestal"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)
+
+[node name="Lever" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0.25, -6)
+script = ExtResource("12_lever")
+handle_path = NodePath("Handle")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Lever"]
+shape = SubResource("Shape_lever_base")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Lever"]
+mesh = SubResource("Mesh_lever_base")
+
+[node name="Handle" type="MeshInstance3D" parent="Lever"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.45, 0)
+mesh = SubResource("Mesh_lever_handle")
+
+[node name="Plate" type="Area3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0.3, -3)
+script = ExtResource("13_plate")
+pad_path = NodePath("Pad")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Plate"]
+shape = SubResource("Shape_plate_area")
+
+[node name="Pad" type="MeshInstance3D" parent="Plate"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.25, 0)
+mesh = SubResource("Mesh_plate_pad")
+
+[node name="Gate" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -8)
+script = ExtResource("14_gate")
+panel_path = NodePath("Panel")
+
+[node name="PostL" type="CollisionShape3D" parent="Gate"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.05, 1.25, 0)
+shape = SubResource("Shape_gate_post")
+
+[node name="PostLMesh" type="MeshInstance3D" parent="Gate"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.05, 1.25, 0)
+mesh = SubResource("Mesh_gate_post")
+
+[node name="PostR" type="CollisionShape3D" parent="Gate"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.05, 1.25, 0)
+shape = SubResource("Shape_gate_post")
+
+[node name="PostRMesh" type="MeshInstance3D" parent="Gate"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.05, 1.25, 0)
+mesh = SubResource("Mesh_gate_post")
+
+[node name="Panel" type="MeshInstance3D" parent="Gate"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.0, 0)
+mesh = SubResource("Mesh_gate_panel")
 
 [node name="SpawnPoint" type="Marker3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 4)

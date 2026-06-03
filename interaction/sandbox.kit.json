@@ -163,6 +163,74 @@
           "do": [ { "do": "trigger", "scope": "self", "field": "triggered" } ]
         }
       ]
+    },
+
+    {
+      "comment": "SLICE 3 — a brand-new dense interactable authored PURELY AS DATA (no engine change), the interaction analogue of movement's bullet-jump payoff. A second convergence puzzle that mirrors the beacon's armed-AND-reached gate with a DIFFERENT pair of independently-composed chains: a LEVER (a stateful command toggle, like the valve) AND a PRESSURE PLATE held down by a placed/standing weight (a box overlapping the plate's Area3D region, read via in_region — the same physics-seam guard the spout uses). The GATE opens only on the AND of both, and (unlike the latching beacon) it is a LIVE gate: it closes again the moment either condition drops, proving the AND-gate composition generalizes in both directions. Every verb/guard/effect/region used here ALREADY existed before this slice: command verb, toggle_state, emit, in_region(tag), set_state(true/false), state_bool, all/not, ref:<name> cross-object reads, region decl. ZERO new primitives.",
+
+      "id": "lever",
+      "tags": ["lever"],
+      "state": { "thrown": { "type": "bool", "init": false } },
+      "verbs": [
+        {
+          "name": "toggle", "kind": "command", "target": "self",
+          "when": {},
+          "prompt": [
+            { "when": { "op": "state_bool", "scope": "self", "field": "thrown", "value": true }, "text": "[E] Reset lever" },
+            { "text": "[E] Throw lever" }
+          ],
+          "do": [
+            { "do": "toggle_state", "scope": "self", "field": "thrown" },
+            { "do": "emit", "signal": "lever_changed" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "comment": "PRESSURE PLATE — pressed is DATA derived from a placed/standing weight: while a box (grabbable_box) overlaps the plate's Area3D region, set pressed=true; otherwise set it false. Two complementary tick entries (in_region / not in_region) make `pressed` a faithful, deterministic projection of the weight overlap. The overlap test itself is engine physics (the once-per-tick frame); the affordance — what 'a weight holds the plate down' MEANS — is data.",
+      "id": "plate",
+      "tags": ["plate"],
+      "regions": [ { "name": "pad", "kind": "area" } ],
+      "state": { "pressed": { "type": "bool", "init": false } },
+      "tick": [
+        {
+          "comment": "A weight on the pad presses it.",
+          "while": { "op": "in_region", "region": "pad", "tag": "grabbable_box" },
+          "do": [ { "do": "set_state", "scope": "self", "field": "pressed", "value": true } ]
+        },
+        {
+          "comment": "No weight -> the plate springs back up.",
+          "while": { "op": "not", "of": [ { "op": "in_region", "region": "pad", "tag": "grabbable_box" } ] },
+          "do": [ { "do": "set_state", "scope": "self", "field": "pressed", "value": false } ]
+        }
+      ]
+    },
+
+    {
+      "comment": "GATE — the SECOND convergence AND-gate, the densest node of Slice 3. open iff (lever.thrown AND plate.pressed), read cross-object via two refs. Unlike the beacon's idempotent latch, this is a LIVE gate: a second tick closes it (open=false) the moment EITHER chain drops, so the converse-is-inert property is proven continuously, not just at first contact. lever.thrown comes from the lever's command chain; plate.pressed comes from the placed-weight chain — two independently-composed inputs converging in one all-guard, exactly as the beacon's armed AND reached, but with an entirely different upstream pair.",
+      "id": "gate",
+      "tags": ["gate"],
+      "refs": { "lever": "@lever", "plate": "@plate" },
+      "state": { "open": { "type": "bool", "init": false } },
+      "tick": [
+        {
+          "comment": "AND-gate: both chains satisfied -> open.",
+          "while": { "op": "all", "of": [
+            { "op": "state_bool", "scope": "ref:lever", "field": "thrown", "value": true },
+            { "op": "state_bool", "scope": "ref:plate", "field": "pressed", "value": true }
+          ] },
+          "do": [ { "do": "set_state", "scope": "self", "field": "open", "value": true } ]
+        },
+        {
+          "comment": "Either chain drops -> close (live gate; the converse of the AND is inert by construction).",
+          "while": { "op": "not", "of": [ { "op": "all", "of": [
+            { "op": "state_bool", "scope": "ref:lever", "field": "thrown", "value": true },
+            { "op": "state_bool", "scope": "ref:plate", "field": "pressed", "value": true }
+          ] } ] },
+          "do": [ { "do": "set_state", "scope": "self", "field": "open", "value": false } ]
+        }
+      ]
     }
   ]
 }

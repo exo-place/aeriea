@@ -141,7 +141,68 @@ func _logs() -> Array:
 			"log": _place_empty_log(),
 			"expect": {"pedestal": {"active": false, "socketed": "jug"}, "beacon": {"armed": false, "triggered": false}},
 		},
+		{
+			"name": "SLICE 3 gate: lever ALONE is inert (open never set)",
+			"log": _gate_lever_only_log(),
+			"expect": {"lever": {"thrown": true}, "plate": {"pressed": false}, "gate": {"open": false}},
+		},
+		{
+			"name": "SLICE 3 gate: weight on plate ALONE is inert (open never set)",
+			"log": _gate_plate_only_log(),
+			"expect": {"lever": {"thrown": false}, "plate": {"pressed": true}, "gate": {"open": false}},
+		},
+		{
+			"name": "SLICE 3 gate: lever AND plate -> gate OPENS (the second AND-gate convergence)",
+			"log": _gate_both_log(),
+			"expect": {"lever": {"thrown": true}, "plate": {"pressed": true}, "gate": {"open": true}},
+		},
+		{
+			"name": "SLICE 3 gate: live close — both open it, then removing the weight closes it again",
+			"log": _gate_open_then_close_log(),
+			"expect": {"lever": {"thrown": true}, "plate": {"pressed": false}, "gate": {"open": false}},
+		},
 	]
+
+
+## SLICE 3 — gate logs. The plate's `pressed` is driven by a box overlapping its
+## `plate:pad` region (the same physics-seam in_region guard the spout uses); the
+## lever is a command toggle. The gate's open is the AND of both, recomputed each tick.
+
+## Throw the lever; never put a weight on the plate. The gate must stay closed.
+func _gate_lever_only_log() -> Array:
+	var log: Array = []
+	log.append({"focus": "lever", "edges": {"interact": true}})   # throw lever
+	for _i in 8:
+		log.append({"focus": ""})                                  # no weight on plate
+	return log
+
+
+## Put a weight (a box) on the plate; never throw the lever. The gate must stay closed.
+func _gate_plate_only_log() -> Array:
+	var log: Array = []
+	for _i in 8:
+		log.append({"focus": "", "region_members": {"plate:pad": ["box"]}})
+	return log
+
+
+## Both chains: throw the lever AND stand a weight on the plate -> the gate opens.
+func _gate_both_log() -> Array:
+	var log: Array = []
+	log.append({"focus": "lever", "edges": {"interact": true}})    # throw lever
+	for _i in 8:
+		log.append({"focus": "", "region_members": {"plate:pad": ["box"]}})
+	return log
+
+
+## Open it (both), then remove the weight -> plate springs back, gate closes (live).
+func _gate_open_then_close_log() -> Array:
+	var log: Array = []
+	log.append({"focus": "lever", "edges": {"interact": true}})    # throw lever
+	for _i in 6:
+		log.append({"focus": "", "region_members": {"plate:pad": ["box"]}})  # opens
+	for _i in 6:
+		log.append({"focus": ""})                                  # weight gone -> closes
+	return log
 
 
 ## Open the valve, then hold a jug in the stream for many ticks while flowing.

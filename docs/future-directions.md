@@ -166,6 +166,11 @@ Status: **R&D direction; literature review landed.** Two-tier split is clean
   fixed-weight deterministic, the best neural+deterministic fit in the survey;
   the natural step off the MM floor (build-time-trained → deterministic eval —
   exactly the sanctioned shape) (research §A2).
+- **Slice-planned floor:** `decisions/body-and-locomotion-slice.md` ships
+  **analytic foot-IK + procedural locomotion first** (no motion-database
+  dependency, deterministic, reads `MovementState`), with Motion Matching /
+  Learned MM as a **deferred** upgrade gated on a license-clean,
+  nix-reproducible motion set (the explicit open dependency).
 
 **Aspirational (SOTA / research).**
 - **Physics-RL / neural environment-responsive animation** — **DReCon** is the
@@ -380,9 +385,14 @@ Ordered, drawn only from what is proven/ready (no invented steps):
 4. **Affordance Slice 3** — a new dense interactable authored purely as data,
    zero engine change (the payoff proof).
 5. **Body/locomotion usable-now slice** — **MakeHuman CC0 canonical-topology
-   base + within-family blendshape morph stack + LBS**, animated with **Motion
-   Matching + foot-IK** (research §A, §C). License-verify SMPL/Meshcapade
-   before any reliance.
+   base + within-family blendshape morph stack + LBS**, animated with **analytic
+   foot-IK + procedural locomotion** first (Motion Matching deferred behind a
+   license-clean nix-reproducible motion set), with the age morph axis wired to
+   the Layer-1 NSFW gate from the first body-state slice. Designed +
+   slice-planned in **`decisions/body-and-locomotion-slice.md`** (the
+   nix-reproducible asset pipeline parses MakeHuman CC0 `.target`/`base.obj`/
+   `.mhskel` directly — no Blender, builds with the existing Godot+xvfb shell).
+   License-verify SMPL/Meshcapade before any reliance (we ship none of it).
 6. **Apply the pure-text litmus** to each activity surface as it gets its
    design pass (reference-analysis.md).
 

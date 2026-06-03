@@ -143,6 +143,35 @@ change, reviewed against "collapse asymmetries to primitives.")
     foot-IK; procgen-body floor = canonical quad topology + morph stack + LBS
     (MakeHuman CC0 base, SMPL-X as reference). Several citations flagged
     unverified/low-confidence + SMPL/Meshcapade licence to verify before relying.
+  - **Body + locomotion usable-now slice (DESIGN + SLICE PLAN)** —
+    `docs/decisions/body-and-locomotion-slice.md`. Nix-reproducible asset
+    pipeline: a derivation fetches the **pinned MakeHuman CC0 source** (v1.3.0,
+    verified `base.obj` = 19158-vert quad mesh + 1280 `.target` ASCII
+    vertex-delta morphs incl. the macro axes gender/age/muscle/weight/height/
+    proportions + `default.mhskel` LBS rig) and **parses `.target`/OBJ/`.mhskel`
+    directly into a Godot `ArrayMesh` + blendshapes + `Skeleton3D`** — **no
+    Blender/MPFB** (the nixpkgs makehuman *app* is broken on numpy-2.x anyway;
+    we use only its pinned source), buildable with the **existing Godot+xvfb dev
+    shell** (no flake additions needed; GDScript converter default). The **age
+    morph axis → `adult_body_state` predicate → Layer-1 NSFW gate** (affordance
+    guard on the intersection; primitives stay general/continuous per DESIGN.md
+    *Age × NSFW*) is wired from the first body-state slice. Animation: **analytic
+    foot-IK + procedural locomotion FIRST** (deterministic, reads `MovementState`,
+    no motion-database dependency; GDScript), **Motion Matching DEFERRED** behind
+    a license-clean nix-reproducible motion set (the explicit open dependency).
+    - [ ] **Slice 1** — nix-reproducible MakeHuman→Godot base body, a few macro
+      blendshapes (incl. age) shown morphing in-engine; `nix build` produces it
+      with no manual step.
+    - [ ] **Slice 2** — `BodyState` params drive the morph stack; `age` →
+      `adult_body_state` → Layer-1 gate hook (NSFW verb available at adult,
+      absent at child-range; age axis stays continuous).
+    - [ ] **Slice 3** — skin to the `.mhskel` rig; analytic foot-IK + procedural
+      locomotion on the existing movement sim (visible animated body; movement
+      golden traces unchanged — animation is render-side).
+    - [ ] **Slice 4 (DEFERRED)** — Motion Matching once a license-clean
+      nix-reproducible motion dataset is sourced (the gating open dependency:
+      sourcing + commercial licensing + nix-reproducibility + cross-platform
+      deterministic search).
 
 ## Transformation lore (sketch, WIP)
 

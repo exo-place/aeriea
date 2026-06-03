@@ -628,6 +628,23 @@ are not — they are a **multi-year research endeavor**, not a
 conventional build, and the project is honest that the bulk of its
 fidelity goal lives in them.
 
+But the research-program framing is only half the truth, and stated alone
+it is lopsided. **aeriea must SIMULTANEOUSLY be a rapidly-prototyped,
+actually-usable game — not only an aspirational SOTA research program.**
+The end goal is highly SOTA, but there must *always* also be something
+usable *now*. So **every pillar is two-tiered**: a **usable-now tier**
+(proven, shippable tech that's good-enough, built fast) AND an
+**aspirational-SOTA tier** (the open research bet). The research bets above
+— soft-body, language, embodied performance, the semantic layer, and the
+procedural body / animation pillar
+(`docs/decisions/procedural-body-and-animation.md`) — are the aspirational
+tier; the proven composable-data substrates (movement, interaction) plus
+conventional tech are the usable-now tier. The plan is to **ship a real
+game rapidly on the usable-now tier while the SOTA tiers mature**, each
+pillar **degrading gracefully** from aspirational to usable. Both framings
+sit together: aeriea is a research program AND a rapidly-prototyped usable
+game, at once.
+
 ## Sources of change
 
 Experiences without change are finite. Even an active, verb-dense,
@@ -1581,6 +1598,8 @@ as the new target volume, volume drifts by feedback and the preservation
 guarantee is defeated — compatible with the seeded-simulation invariant.
 
 **R&D direction: physics-driven bodily transformation.** The same predict-then-project surrogate opens a direct path to physically plausible transformation sequences. Rather than lerping vertex positions from shape A to shape B (geometry that reads as sliding), treat the transformation as an *authored moving rest-state target* and let the surrogate dynamically track it — so in-between frames are the physics resolving toward the new shape: flesh redistributing, jiggling, settling, flowing. The payoff is the genuine phenomenology of what a physically realistic transformation would feel like IRL. This reuses the surrogate exactly: predict toward the evolving target each frame, project to satisfy volume and contact constraints. Reconciliation with the canonical-volume invariant: the invariant prohibits the *solver* from writing its output back as the new target (that is solver-feedback drift, which defeats preservation). A transformation deliberately re-authors the rest target over time as an *external authored drive* — categorically different. Volume during a transformation may be intentionally conserved (pure redistribution: flesh moves, total mass unchanged) or intentionally changed (growth, shrink) per the transformation's semantic intent; either is fine, since the target is authored input, never solver output. The invariant is unaffected. This bridges the body-customization / transformation system (the TiTS / Flexible Survival / Lilith's Throne transformation lineage — identity fluidity, deep species/body change, NSFW-first; see *NSFW-first with SFW toggle* and *Cosmetic depth*) and the soft-body physics R&D bet; cross-reference `~/git/rhizone/playmate` (`frond`) for the body/transformation/tag system. Status: R&D direction, not a committed spec.
+
+The mesh side of this — fully procedural human bodies, the deformation-aligned topology those bodies share, the escalating morph tiers (within-form blendshapes, female↔male, and across-form topology-changing metamorphosis), and full procedural / environment-responsive animation (potentially neural walk cycles) — is captured as its own two-tiered R&D direction in **`docs/decisions/procedural-body-and-animation.md`** (R&D direction, open). It shares one substrate with the soft-body sim above: the mesh + its consistent, deformation-aligned topology.
 
 ### Perceptual vs physical realism (a useful distinction)
 

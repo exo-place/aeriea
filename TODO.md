@@ -109,6 +109,34 @@ change, reviewed against "collapse asymmetries to primitives.")
   `~/git/rhizone/playmate` (`frond`). See DESIGN.md soft-body section for full
   write-up.
 
+- **Procedural body + animation** (R&D direction, two-tiered) —
+  `docs/decisions/procedural-body-and-animation.md`. Fully procedural human
+  bodies at a real quality bar ("don't look like shit"); a principled,
+  deformation-aligned **topology philosophy** (loops follow muscle/joint flow,
+  quad-dominant, poles in low-deformation zones, a consistent template per
+  body-plan family) with a **hard spec**: the topology must keep the entire
+  intended within-family morph envelope pinch-free. The **morph tiering**
+  (escalating): within-form blendshapes (high bar) → female↔male (middle;
+  bonus: embryologically-homologous parts morph into each other, not
+  crossfade — clitoris↔glans, labia↔scrotum) → across-form / topology-changing
+  metamorphosis (hardest; "even more procedural", layered atop per-form
+  blendshapes, still seamless — NOT a carved-out regen-event; ties to
+  shapeless/weaver/synthetic lineages in `transformation-lore.md`). "Morph" ≠
+  "blendshape" (morphs can change topology); morphs must be seamless.
+  **Full procedural animation** — environment-responsive, potentially neural
+  walk cycles; build-time-trained → deterministic-eval at runtime (peer to the
+  other surrogate bets; no hot-loop inference). Two tiers throughout
+  (usable-now: proven procgen/topology + standard rig+blends+proc-anim;
+  aspirational: across-form metamorphosis + neural animation). Shares ONE
+  substrate with the soft-body sim and morph/TF: the mesh + its
+  deformation-aligned topology. Prior art (lighter touch, sim side):
+  `~/git/paragarden/existence`. Cross-ref `transformation-lore.md` and the
+  soft-body / physics-driven-transformation R&D in DESIGN.md.
+  - [ ] **Literature review** (concrete next step, blocks method choices for
+    the aspirational tiers): neural motion synthesis / environment-responsive
+    & physics-based animation; topology-changing mesh metamorphosis;
+    deformation-aligned procgen body topology.
+
 ## Transformation lore (sketch, WIP)
 
 - **Transformation-lore sketch** — `docs/decisions/transformation-lore.md`

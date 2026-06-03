@@ -8,8 +8,7 @@
     "ground_acceleration": 60.0,
     "ground_friction": 30.0,
 
-    "air_acceleration": 20.0,
-    "air_speed_cap": 12.0,
+    "air_steer_rate": 14.0,
     "gravity_scale": 2.2,
     "jump_hold_gravity_scale": 1.2,
     "jump_hold_max_time": 0.25,
@@ -232,7 +231,10 @@
             "else": "gravity_scale"
           }
         },
-        { "do": "air_strafe", "space": "wish", "rate": "air_acceleration", "cap": "air_speed_cap" },
+        {
+          "comment": "Air control = STEER ONLY, magnitude-preserving (playtest fix). Holding a direction in the air ROTATES the existing horizontal velocity toward wish-dir at air_steer_rate WITHOUT changing its magnitude — the same carve kernel the slide uses. This removes the old additive Quake-style air-strafe that added net speed off-axis (the spurious gain that survived the landing and caused post-landing slide). From zero horizontal velocity the redirect of a ~zero vector stays ~zero, so a straight-up jump + held direction adds ~nothing horizontally. Bullet jump (a verb) is the one deliberate horizontal/aim launch and is unaffected (it runs on the SLIDE/CROUCH transition, not here). air_acceleration / air_speed_cap are retired (no additive accel); air_steer_rate tunes responsiveness.",
+          "do": "carve", "rate": "air_steer_rate"
+        },
         { "do": "move_and_slide" },
         { "do": "lerp_camera_height", "target": "camera_height_stand", "rate": "camera_height_lerp_speed" },
         { "comment": "Level the camera (undo any wall-run roll once off the wall).", "do": "lerp_camera_roll", "target": "camera_roll_level", "rate": "camera_roll_lerp_speed" }

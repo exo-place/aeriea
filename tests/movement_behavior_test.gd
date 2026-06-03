@@ -95,6 +95,10 @@ func _run_suite() -> void:
 	await _test_low_speed_crouch_is_crouchwalk_not_slide()
 	await _test_high_speed_crouch_is_slide()
 	await _test_slide_is_steerable_and_cancelable()
+	await _test_air_control_steers_without_adding_speed()
+	await _test_jump_from_standstill_stays_horizontal_zero()
+	await _test_moving_jump_preserves_horizontal_speed()
+	await _test_landing_no_input_bleeds_momentum()
 	await _test_bullet_jump_forward_up_burst()
 	await _test_bullet_jump_tracks_aim_pitch()
 	await _test_wall_cling_latches_and_suppresses_gravity()
@@ -603,6 +607,186 @@ func _test_slide_is_steerable_and_cancelable() -> void:
 		entered_slide and (dir_change > 2.0 or exited),
 		"entered_slide=%s, dir_change=%.2f deg, exited_slide=%s (state=%d)" % [
 			str(entered_slide), dir_change, str(exited), player._state]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## PLAYTEST FIX (air control = steer only). While airborne, holding a movement
+## direction must ROTATE the existing horizontal velocity toward wish-dir WITHOUT
+## increasing its magnitude (magnitude-preserving carve), not add net speed
+## (the old additive Quake-style air-strafe). Data paths only: the imperative
+## oracle (PlayerController) intentionally keeps the old additive air-strafe and is
+## not in scope for this fix, so it would (correctly) fail a steer-only assertion.
+##
+## (a) Airborne + held OFF-AXIS direction does NOT raise horizontal speed magnitude
+## vs the pre-input magnitude. We jump, build a forward horizontal speed, then hold
+## a perpendicular direction and confirm |horiz| does not grow.
+func _test_air_control_steers_without_adding_speed() -> void:
+	if _target_label == "imperative":
+		return
+	var ctx := await _spawn_level()
+	var player: CharacterBody3D = ctx["player"]
+	await _settle_on_floor(player)
+
+	# Put the player airborne in clear air, moving forward (-Z) at a known speed, with
+	# yaw=0 so the wish-dir spaces are axis-aligned. This isolates the air-control
+	# kernel from ground/jump timing — we are testing what held input does to an
+	# EXISTING airborne horizontal velocity.
+	player.global_position = Vector3(0.0, 6.0, 0.0)
+	player._yaw = 0.0
+	player.rotation.y = 0.0
+	player.velocity = Vector3(0.0, 0.5, -6.0)   # ~6 m/s forward, slightly rising
+	await get_tree().physics_frame
+	var airborne_before: bool = not player.is_on_floor()
+	var speed_before := Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+
+	# Hold a hard-perpendicular direction (D = strafe right, +X) while airborne.
+	# Additive air-strafe would push |horiz| UP (adding +X speed on top of the -Z
+	# speed); steer-only must keep magnitude ~flat (it rotates the vector instead).
+	_send_key(KEY_D, true)
+	var max_speed := speed_before
+	for _i in 18:
+		await get_tree().physics_frame
+		if player.is_on_floor():
+			break
+		max_speed = maxf(max_speed, Vector3(player.velocity.x, 0.0, player.velocity.z).length())
+	_send_key(KEY_D, false)
+
+	# Allow a tiny epsilon for float carve renormalization.
+	var did_not_gain := max_speed <= speed_before + 0.2
+	_assert(
+		"air control steers without adding horizontal speed (magnitude preserved)",
+		airborne_before and speed_before > 1.0 and did_not_gain,
+		"airborne=%s, speed_before=%.3f, max_speed_while_steering=%.3f (gain=%+.3f, must be <= +0.20)" % [
+			str(airborne_before), speed_before, max_speed, max_speed - speed_before]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## (b) From standstill: jump straight up and hold a direction → horizontal speed
+## stays ~0 (carve of a ~zero vector adds nothing). Additive air-strafe would
+## accelerate the body sideways from rest.
+func _test_jump_from_standstill_stays_horizontal_zero() -> void:
+	if _target_label == "imperative":
+		return
+	var ctx := await _spawn_level()
+	var player: CharacterBody3D = ctx["player"]
+	await _settle_on_floor(player)
+	# Standstill: airborne in clear air with ZERO horizontal velocity (a straight-up
+	# jump from rest is exactly this — vy>0, no horizontal). yaw=0 so W = -Z wish.
+	player.global_position = Vector3(0.0, 6.0, 0.0)
+	player._yaw = 0.0
+	player.rotation.y = 0.0
+	player.velocity = Vector3(0.0, 6.0, 0.0)   # rising, no horizontal — "just jumped from standstill"
+	await get_tree().physics_frame
+	var airborne: bool = not player.is_on_floor()
+
+	# Hold forward for many frames. Steer-only of a ~zero horizontal vector adds
+	# ~nothing; additive air-strafe would accelerate sideways from rest.
+	_send_key(KEY_W, true)
+	var max_h := 0.0
+	for _i in 18:
+		await get_tree().physics_frame
+		if player.is_on_floor():
+			break
+		max_h = maxf(max_h, Vector3(player.velocity.x, 0.0, player.velocity.z).length())
+	_send_key(KEY_W, false)
+
+	_assert(
+		"jump from standstill + held direction keeps horizontal speed ~0 (steer-only)",
+		airborne and max_h < 0.5,
+		"airborne=%s, max horizontal speed while holding W airborne from rest=%.4f (epsilon 0.5)" % [str(airborne), max_h]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## (c) Moving + jump: horizontal speed magnitude is PRESERVED through the jump (the
+## jump is a vertical impulse only; air control redirects, doesn't boost). We hold
+## W throughout, so the only forces on |horiz| in the air are carve (magnitude-
+## preserving). Speed must not be boosted above the pre-jump ground speed.
+func _test_moving_jump_preserves_horizontal_speed() -> void:
+	if _target_label == "imperative":
+		return
+	var ctx := await _spawn_level()
+	var player: CharacterBody3D = ctx["player"]
+	await _settle_on_floor(player)
+
+	# The regular-jump transition in the kit is a vertical impulse ONLY (set_velocity_y
+	# jump_velocity; no horizontal effect), so the horizontal magnitude entering AIR
+	# equals the ground speed. We reproduce the post-jump airborne state deterministically:
+	# the body airborne (vy = jump_velocity) carrying its forward speed, holding W
+	# (forward, ALIGNED with motion). Holding a direction aligned with velocity must NOT
+	# boost speed (steer-only); the magnitude must hold at the entry speed.
+	player.global_position = Vector3(0.0, 6.0, 10.0)
+	player._yaw = 0.0
+	player.rotation.y = 0.0
+	var speed_ground := float(player.kit.params.get("walk_speed", 5.5))
+	player.velocity = Vector3(0.0, float(player.kit.params.get("jump_velocity", 9.5)), -speed_ground)
+	await get_tree().physics_frame
+	var airborne: bool = not player.is_on_floor()
+	# Hold W (forward, aligned with the -Z motion) through the air.
+	_send_key(KEY_W, true)
+	var max_air := speed_ground
+	for _i in 18:
+		await get_tree().physics_frame
+		if player.is_on_floor():
+			break
+		max_air = maxf(max_air, Vector3(player.velocity.x, 0.0, player.velocity.z).length())
+	_send_key(KEY_W, false)
+
+	_assert(
+		"moving jump preserves horizontal speed (not boosted by air input)",
+		airborne and max_air <= speed_ground + 0.2,
+		"airborne=%s, speed_ground=%.3f, max_air_speed=%.3f (gain=%+.3f, must be <= +0.20)" % [
+			str(airborne), speed_ground, max_air, max_air - speed_ground]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## (d) Landing with NO input bleeds horizontal momentum to rest (no persistent
+## post-landing slide). Build air speed, land, release all input, and confirm the
+## horizontal speed decays to ~0 within a sensible window via ground friction.
+func _test_landing_no_input_bleeds_momentum() -> void:
+	if _target_label == "imperative":
+		return
+	var ctx := await _spawn_level()
+	var player: CharacterBody3D = ctx["player"]
+	await _settle_on_floor(player)
+
+	# Put the body airborne in clear air, moving forward at a real speed, with NO
+	# input held — the post-jump airborne state carrying horizontal momentum. It will
+	# fall, land, and (with the fix) ground friction must bleed the carried momentum to
+	# rest. Deterministic (no shared-Input buffered-jump timing).
+	player.global_position = Vector3(0.0, 4.0, 10.0)
+	player._yaw = 0.0
+	player.rotation.y = 0.0
+	player.velocity = Vector3(0.0, 0.5, -6.0)   # ~6 m/s forward, slightly rising
+	await get_tree().physics_frame
+	var landed := false
+	for _i in 120:
+		await get_tree().physics_frame
+		if player.is_on_floor() and player._state == S_GROUND:
+			landed = true
+			break
+	var speed_on_land := Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+
+	# With no input, ground friction must bleed it to rest within ~1 s (60 frames).
+	var speed_after := speed_on_land
+	for _i in 60:
+		await get_tree().physics_frame
+		speed_after = Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+		if speed_after < 0.1:
+			break
+
+	_assert(
+		"landing with no input bleeds horizontal momentum to rest (no lingering slide)",
+		landed and speed_after < 0.1,
+		"landed=%s, speed_on_land=%.3f -> speed_after_60f=%.4f (must be < 0.10)" % [
+			str(landed), speed_on_land, speed_after]
 	)
 	ctx["level"].queue_free()
 	await get_tree().process_frame

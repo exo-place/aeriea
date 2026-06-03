@@ -344,6 +344,14 @@ func _test_chain_b_stack_parkour_triggers_beacon() -> void:
 	# kit's jump impulse — not a hand-set velocity — does the lifting. This proves
 	# the COMPOSITION: from the floor a jump reaches ~2.1 m (ledge top is 3.2 m,
 	# unreachable); standing on the box stack (~2.4 m) a jump clears the ledge.
+	#
+	# Air control is STEER-ONLY (magnitude-preserving): holding a direction in the
+	# air no longer ADDS speed (the old additive air-strafe was removed — playtest
+	# fix). So parkour reach is now CARRIED MOMENTUM, not air-acceleration: the
+	# player builds forward speed ON the stack (ground accelerate_toward) and the
+	# vertical-only jump preserves it through the arc. We seed that carry with a
+	# forward velocity toward the ledge (a running approach), exactly the realistic
+	# technique — a standstill straight-up jump would (correctly) not travel.
 	player.global_position = Vector3(stack_x, top_box.global_position.y + 1.0, stack_z)
 	player.velocity = Vector3.ZERO
 	# Settle onto the stack and wait until the interpreter reports GROUND.
@@ -355,8 +363,11 @@ func _test_chain_b_stack_parkour_triggers_beacon() -> void:
 			break
 	await _step(5)
 	var on_stack_y := player.global_position.y
-	# Hold forward toward the ledge (-X/-Z) and tap jump via the real input pipeline.
+	# Face the ledge and carry forward momentum into the jump (steer-only air control
+	# preserves it). Seed a forward run toward the ledge, then tap jump on the same arc.
 	_aim_at(player, Vector3(-7.5, 3.2, -7.5))   # face the ledge
+	var to_ledge := (Vector3(-7.5, 0.0, -7.5) - Vector3(player.global_position.x, 0.0, player.global_position.z)).normalized()
+	player.velocity = to_ledge * 6.0            # carried approach speed (~walk speed)
 	_send_key(KEY_W, true)
 	_send_key(KEY_SPACE, false)
 	_send_key(KEY_SPACE, true)

@@ -52,8 +52,7 @@ class ToggleHold:
 		_held_prev = false
 
 # --- Params lowered to consts (referenced by name in the kit) ---
-const P_air_acceleration := 20.0
-const P_air_speed_cap := 12.0
+const P_air_steer_rate := 14.0
 const P_bullet_jump_base_up := 6.0
 const P_bullet_jump_buffer_time := 0.15
 const P_bullet_jump_cooldown := 0.6
@@ -384,7 +383,7 @@ func _run_tick(frame: InputFrame, dt: float) -> void:
 		body.host_lerp_camera_roll(P_camera_roll_level, P_camera_roll_lerp_speed, dt)
 	elif active_state == "AIR":
 		_k_apply_gravity(dt, (P_jump_hold_gravity_scale if (frame.is_pressed("jump") and (float(timers.get("jump_hold", 0.0)) < P_jump_hold_max_time) and (body.velocity.y > 0.0)) else P_gravity_scale), false, INF)
-		_k_air_strafe(frame, dt, "wish", P_air_speed_cap, P_air_acceleration)
+		_k_carve(frame, dt, P_air_steer_rate)
 		body.move_and_slide()
 		body.host_lerp_camera_height(P_camera_height_stand, P_camera_height_lerp_speed, dt)
 		body.host_lerp_camera_roll(P_camera_roll_level, P_camera_roll_lerp_speed, dt)

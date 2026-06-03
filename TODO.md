@@ -175,6 +175,40 @@ change, reviewed against "collapse asymmetries to primitives.")
   content-authoring mix weights (ties to content-strategy question); names
   are the lead's to set.
 
+## Semantic layer / world-understanding (foundational R&D direction)
+
+- **Semantic world-understanding layer** — FOUNDATIONAL R&D DIRECTION (open
+  problem, not a frozen spec): see **`docs/decisions/semantic-layer.md`**.
+  Genuine reason-with-concepts knowledge (what an apple is, what an Old
+  Fashioned is, habits/cultures/traditions) that generalizes to the novel
+  case — NOT a finite fact-dump (the copout). Existence proof: humans do this
+  with no lookup table, so it is reachable. The data is not the bottleneck: the
+  cultural-linguistic corpus exists and an LLM's competence proves it carries
+  the associations. Representation: a **prevalence-weighted knowledge graph**
+  (RDF triples, weights are the point — typicality/distribution = the
+  beginnings of judgment); runtime reasoning is deterministic (traverse /
+  compose / query / seeded-sample), no hot-loop black box. The hard part is
+  **build-time extraction & cleaning** (dedup, sense-disambiguation,
+  trustworthy prevalences) — a build-time task, exactly where CLAUDE.md permits
+  inference, so an offline LLM/extractor mining the corpus is NOT a copout and
+  NOT a determinism violation; a clean deterministic graph ships. Same
+  deterministic-surrogate shape as the soft-body / language bets.
+  **Semantic LOD ("mipmaps for meaning"):** most of the world reasoned coarsely
+  and nearly free, real compute only on the focal thing (foveated reasoning,
+  budget-per-tick by attention; ties to the affordance interpreter's resolved
+  frame). Correctness spine: coarse must be a **faithful coarsening** of fine
+  (no "popping" — knowledge changing as you lean in breaks immersion AND
+  determinism); seed-stable projections of one ground truth, like the
+  interpreter↔compiler bit-equivalence. Coarse precomputed/baked; fine
+  traversed on demand. **The deepest, foundational bet** — the NPC brain
+  reasons over it, the NLG speaks from it, the affordance verbs mean something
+  because of it. Open: extraction/cleaning/prevalence-estimation method; the
+  LOD axis (depth/breadth/prevalence-cutoff/abstraction) & coherence mechanism;
+  the grounding binding (concept → concrete rendered/physics instance); how it
+  composes with the brain/NLG/affordance substrates; corpus selection/curation;
+  representation beyond vanilla RDF (defeasible/contextual/prevalence
+  knowledge). Names are the lead's to set — coin none.
+
 ## Open design questions (from DESIGN.md)
 
 - Project name (aeriea is tentative; pronounced "area")

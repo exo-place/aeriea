@@ -593,6 +593,41 @@ General principle: **don't commit to architectures that preclude
 future approaches, don't depend on tech that isn't viable yet.**
 Keep things composable, modal, additive.
 
+### aeriea is a research program (the honest framing)
+
+Stated plainly: **aeriea is candidly a research program as much as it
+is a game.** Its deepest pillars rest on a set of **PEER,
+currently-unsolved, beyond-SOTA bets** — none solved today, each held
+to the same *no-copouts* posture, and each of the **same deterministic-
+surrogate shape**: the hard accuracy is paid for *offline* (offline-
+accurate or build-time-learned), lowered to a **deterministic real-time
+surrogate**, with **online / per-query inference forbidden in the hot
+loop**. The bets:
+
+- **(a) Physically-accurate real-time soft-body / contact deformation /
+  physics-driven transformation** — see *Secondary / soft-body physics*
+  and *the animation/fidelity bet*.
+- **(b) Deterministic, beyond-SOTA grammar-and-semantics language
+  generation** — see `docs/decisions/npc-mind-and-language.md`.
+- **(c) Embodied expression / performance** (intent → expression / gaze
+  / gesture / posture / proxemics / prosody / action) — same doc.
+- **(d) The semantic world-understanding layer** — genuine
+  reason-with-concepts knowledge (a prevalence-weighted knowledge graph,
+  build-time-extracted, deterministic at runtime, with "mipmaps for
+  meaning" semantic LOD). This is the **deepest, foundational** bet —
+  it underlies the other three: the brain reasons over it, the NLG
+  speaks from it, the affordance verbs mean something because of it. See
+  `docs/decisions/semantic-layer.md` (FOUNDATIONAL R&D DIRECTION — open
+  problem, not a frozen spec).
+
+Contrast with what is **shippable now**: movement and interaction stand
+on **proven composable-data substrates** (`docs/decisions/movement-
+substrate.md` — implemented; `docs/decisions/affordance-substrate.md` —
+designed). Those are engineering on solid ground. The four bets above
+are not — they are a **multi-year research endeavor**, not a
+conventional build, and the project is honest that the bulk of its
+fidelity goal lives in them.
+
 ## Sources of change
 
 Experiences without change are finite. Even an active, verb-dense,

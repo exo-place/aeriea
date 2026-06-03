@@ -28,6 +28,23 @@
           godot = pkgs.godot_4;
         };
 
+        # Canonical test runner — runs every test suite under xvfb, detects
+        # truncation (missing RESULTS line = FAIL), and reports aggregate.
+        #   nix run .#test
+        # DO NOT hand-roll per-suite --quit-after invocations: short budgets
+        # truncate before the suite finishes and falsely report low pass counts.
+        apps.test = {
+          type = "app";
+          # `nix run` executes from the caller's cwd; export it as AERIEA_ROOT
+          # so the runner script can `cd` to the project root rather than using
+          # `dirname $0` (which would point into the Nix store, not the project).
+          # `self` is the flake source tree — the committed tests/run.sh.
+          program = "${pkgs.writeShellScript "aeriea-test" ''
+            export AERIEA_ROOT="''${AERIEA_ROOT:-$PWD}"
+            exec bash "${self}/tests/run.sh"
+          ''}";
+        };
+
         devShells.default = pkgs.mkShell rec {
           buildInputs = with pkgs; [
             # Godot 4.x — primary engine

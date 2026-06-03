@@ -47,6 +47,16 @@ See `DESIGN.md` for the full design including the 100% immersion goal, the ~45-s
 
 Godot 4.x is the primary engine. Rust via gdext for hot paths (deep simulation, perf-critical systems) when needed. The `flake.nix` dev shell provides `godot_4`, a Rust toolchain, `clang`, `mold`, `bun` (for docs), and `xvfb-run` + `xvfb` for windowed verification in headless/CI environments (`xvfb-run -a godot4 --path . <scene> --quit-after N` — `--headless` skips real GDScript reload and hides parse errors).
 
+## Tests
+
+**Canonical command:** `nix run .#test` (or `nix develop --command bash tests/run.sh` inside a dev shell).
+
+This runs every suite under xvfb, parses each suite's `=== RESULTS: N passed, M failed ===` line, and exits nonzero if any suite fails or does not print its completion line. A missing RESULTS line is treated as TRUNCATED/FAIL — the anti-truncation guard.
+
+**Do not hand-roll `--quit-after` per suite** — short budgets cause the suite to be killed before it finishes and falsely report low pass counts. The canonical runner uses a generous budget (60000 frames) so the suite always completes via its own `get_tree().quit()` call. The budget is a safety ceiling only.
+
+To add a new suite: add the `.tscn` basename to `SUITES` in `tests/run.sh`, and ensure the test script calls `get_tree().quit(0 if _fail == 0 else 1)` before returning.
+
 ## Architecture principles
 
 - **Simulation underneath, rendering on top** — pattern from `existence`. Deterministic state simulation drives authored/rendered surfaces.

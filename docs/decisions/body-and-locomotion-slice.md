@@ -434,6 +434,65 @@ one-time build step it almost certainly will not matter.
   pinning — research §A1 caveat, §Open questions). **None of this is resolved.**
   It is flagged as the gating open dependency for Slice 4 and tracked in TODO.md.
 
+### 3.5 The aspirational ceiling (deferred, R&D) — full-body physics-SIMULATED control
+
+The rungs above are all **kinematic**: foot-IK and Motion Matching *pose* a
+skeleton to match a target. They are the **usable-now floor** (foot-IK +
+procedural locomotion, Slice 3) and the **usable-now-upgrade rung** (Motion
+Matching / Environment-aware MM / Learned MM, Slice 4 — deferred behind the
+license-clean motion-set dependency, §3.4). This subsection records the
+**aspirational CEILING above both**, and it does **not** change Slices 3–4: the
+ceiling is **full-body physically-SIMULATED control, not kinematic playback.**
+Balance, contact, momentum, and recovery **emerge** because a learned controller
+must satisfy a physics simulation — the **physics-RL family** the lit review
+enumerates (DeepMimic → AMP → DReCon → MaskedMimic;
+`../research/animation-morphing-procgen-bodies.md` §A6), realized as a
+**build-time-trained, deterministic-eval surrogate** over a **bit-deterministic
+fixed-step physics solver** (the **same deterministic-surrogate shape** and the
+**same physics-determinism caveat** the research doc already records — research
+§A6, §Open questions; the fixed-step solver is itself the open dependency). This
+is **R&D / open**, not a slice — it is the procgen-body/animation pillar's
+animation ceiling (`procedural-body-and-animation.md` §D.1).
+
+**Generalization is the crux, on two axes treated differently:**
+
+- **Body PLAN** (humanoid, taur / 6-limb, nonhuman) — a small **DISCRETE** set
+  of plan-specific controllers is acceptable; separate models per plan are fine.
+- **Body BUILD** (chest size, weight / BMI, height, proportions — the
+  **CONTINUOUS** morph axes, i.e. the `BodyState` macro/detail axes of §2.1) —
+  must **NOT** explode into per-config models. The approach is a
+  **morphology-CONDITIONED controller**: the policy takes the body's morph /
+  build parameters as **INPUT** and generalizes across the continuous build
+  manifold (trained with **morphology randomization**), so **one conditioned
+  controller per plan covers the whole build space** rather than one model per
+  body. "We shouldn't need a million approximators" is satisfied by **amortizing
+  over the parameter space** — the build axes are an input to one controller,
+  not a key into a table of controllers.
+
+**The interlock with the body system (the elegant part).** The controller's
+conditioning vector is the **SAME parametric morph vector this slice's body
+system already exposes** — the **`BodyState` morph parameters** of §2.1 (the
+`procedural-body-and-animation.md` §F one-shared-substrate principle). The
+**parametric body and the parametric controller share ONE morphology
+parameterization**: the body system hands the controller its conditioning
+directly. The same `BodyState` vector that drives the blendshape weights (the
+§2.1 `BodyState → weights` projection) drives the policy's body-awareness — no
+separate adapter, no re-encoding. A parametric body is automatically a body the
+conditioned controller can already drive.
+
+**The open research gap + the next lever (honest).** The lit review
+(`../research/animation-morphing-procgen-bodies.md`) covered MM / PFNN /
+physics-RL but **NOT** the **morphology-GENERALIZING control** sub-area
+specifically — body-agnostic / morphology-conditioned policies (graph- or
+transformer-structured policies over morphology, "one policy to control them
+all"-style controllers, morphology domain-randomization, metamorph-style
+approaches). That is a **distinct, real research literature** and the **concrete
+next research lever** for this ceiling; a **targeted follow-up lit review is
+needed** (flagged; no paper citations invented here — the cited survey is a
+future task; tracked in TODO.md). It remains a **PEER deterministic-surrogate
+bet** alongside soft-body, language, expression, and the semantic layer — same
+shape, same no-copouts posture (DESIGN.md, *aeriea is a research program*).
+
 ---
 
 ## 4. Incremental slice plan
@@ -532,10 +591,12 @@ until that dependency is closed. Do **not** treat MM as free; the procedural flo
 (MakeHuman CC0 + blendshape stack + LBS + foot-IK + procedural locomotion) on the
 proven movement/affordance substrates, with the NSFW gate wired from the first
 body-state slice. The aspirational tiers — generative bodies as a build-time
-oracle, Motion Matching / Learned MM / physics-RL animation, topology-changing
-metamorphosis, soft-body — stay exactly where `procedural-body-and-animation.md`,
-`future-directions.md`, and the research doc place them, in the aspirational tier,
-degrading gracefully to this floor. The forbidden copouts (scope reduction,
+oracle, Motion Matching / Learned MM as the kinematic upgrade rung and
+**full-body physics-simulated, morphology-conditioned control** as the animation
+ceiling above it (§3.5; `procedural-body-and-animation.md` §D.1),
+topology-changing metamorphosis, soft-body — stay exactly where
+`procedural-body-and-animation.md`, `future-directions.md`, and the research doc
+place them, in the aspirational tier, degrading gracefully to this floor. The forbidden copouts (scope reduction,
 stylization-as-escape, redefining a hard requirement away) are not taken: the
 body is real-scale and real-topology, the gate is the exact body-state
 intersection, and the motion-data dependency is named, not wished away.
@@ -544,6 +605,11 @@ intersection, and the motion-data dependency is named, not wished away.
 
 - **Motion dataset sourcing + commercial licensing + nix-reproducibility** —
   the gating open dependency for Slice 4 Motion Matching (§3.4).
+- **Morphology-conditioned control lit review** — the morphology-generalizing
+  control sub-area (§3.5; `procedural-body-and-animation.md` §D.1) is the next
+  research lever for the physics-sim ceiling and was **not** covered by the
+  existing lit review; a targeted follow-up review is needed (TODO.md). This is
+  R&D, above the slice plan — it does not gate Slices 1–4.
 - **Skin-weight import** from the MakeHuman rig (§1.5, due in Slice 3).
 - **Converter language** — GDScript (no flake change, default) vs Python/Rust
   (§1.4); a Slice-1 implementation choice.

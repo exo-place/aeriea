@@ -178,6 +178,22 @@ Status: **R&D direction; literature review landed.** Two-tier split is clean
   ceiling. **Gated on a bit-deterministic fixed-step physics solver + a
   mean-action policy** — the hardest determinism case in the survey, and that
   solver is itself an open dependency (research §A6, §Open questions).
+  - **The ceiling, stated precisely:** **full-body physically-SIMULATED control,
+    not kinematic playback** (foot-IK / MM are the kinematic floor; balance,
+    contact, momentum, recovery *emerge* from satisfying physics). Generalization
+    is the crux on two axes: **body PLAN** (humanoid / taur / nonhuman) allows a
+    small **discrete** set of plan-specific controllers, but **body BUILD** (the
+    continuous chest/weight/height/proportion morph axes) must **not** explode
+    into per-config models — use **one morphology-CONDITIONED controller per
+    plan**, taking the body's morph parameters as input and trained with
+    morphology randomization to amortize over the continuous build manifold. The
+    **interlock:** that conditioning vector is the **same `BodyState` morph
+    vector** the procgen-body system exposes — body and controller share one
+    morphology parameterization (`decisions/procedural-body-and-animation.md`
+    §D.1, §F; `decisions/body-and-locomotion-slice.md` §3.5). **Open / next
+    lever:** the **morphology-generalizing-control** sub-area (body-agnostic /
+    morphology-conditioned policies, metamorph-style) was **not** in the
+    2026-06-03 lit review; a **targeted follow-up review is needed** (TODO.md).
 - **Diffusion motion models: build-time only** — generate/author motion
   offline, bake to clips or into the MM database; never in the hot loop
   (research §A7).

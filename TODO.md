@@ -143,6 +143,19 @@ change, reviewed against "collapse asymmetries to primitives.")
     foot-IK; procgen-body floor = canonical quad topology + morph stack + LBS
     (MakeHuman CC0 base, SMPL-X as reference). Several citations flagged
     unverified/low-confidence + SMPL/Meshcapade licence to verify before relying.
+  - [ ] **Follow-up lit review — morphology-generalizing / morphology-conditioned
+    control** (the next research lever for the animation aspirational *ceiling*):
+    body-agnostic / morphology-conditioned physics-control policies, graph- or
+    transformer-structured policies over morphology, morphology
+    domain-randomization, metamorph-style "one policy to control them all"
+    controllers. The 2026-06-03 review covered MM / PFNN / physics-RL but **not**
+    this sub-area. It grounds the ceiling decided in
+    `docs/decisions/procedural-body-and-animation.md` §D.1 and
+    `docs/decisions/body-and-locomotion-slice.md` §3.5: **full-body
+    physically-simulated control** (not kinematic playback) where the policy is
+    conditioned on the body's **`BodyState` morph vector** (one conditioned
+    controller per body-PLAN over the continuous build manifold, not a model per
+    body-BUILD). No paper citations yet — the cited survey is this task.
   - **Body + locomotion usable-now slice (DESIGN + SLICE PLAN)** —
     `docs/decisions/body-and-locomotion-slice.md`. Nix-reproducible asset
     pipeline: a derivation fetches the **pinned MakeHuman CC0 source** (v1.3.0,

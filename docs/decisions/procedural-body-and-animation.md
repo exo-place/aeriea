@@ -119,6 +119,68 @@ DESIGN.md *aeriea is a research program*; cf. the primary-motion ML bet in
   walk cycles, motion that reacts to terrain and context), trained offline,
   deterministic at runtime.
 
+### D.1 The aspirational ceiling — full-body physically-SIMULATED control
+
+The aspirational ceiling is **full-body physically-simulated control, not
+kinematic playback.** Foot-IK and Motion Matching are the *kinematic* floor —
+they pose a skeleton to match a target; this is the *ceiling*, where balance,
+contact, momentum, and recovery **emerge** because a learned controller must
+satisfy a physics simulation rather than being authored or matched. This is the
+physics-RL family the literature review enumerates (DeepMimic → AMP → DReCon →
+MaskedMimic; `../research/animation-morphing-procgen-bodies.md` §A6), realized in
+the only sanctioned shape: a **build-time-trained, deterministic-eval surrogate**
+over a **bit-deterministic fixed-step physics solver**. It is the **same
+deterministic-surrogate shape** as D's neural-walk-cycle note and the same
+**physics-determinism caveat** the research doc already records (physics-based
+control is the hardest determinism case in the survey, gated on a
+bit-deterministic fixed-step solver + a mean-action policy; research §A6, §Open
+questions). That gate is the open dependency, not a hand-wave.
+
+**Generalization is the crux**, and it splits into two axes treated differently:
+
+- **Body PLAN** (humanoid, taur / 6-limb, nonhuman) — a small **DISCRETE** set
+  of plan-specific controllers is acceptable. Separate models / approximators
+  per plan are fine; the plan space is small and discrete.
+- **Body BUILD** (chest size, weight / BMI, height, proportions — the
+  **CONTINUOUS** morph axes) — must **NOT** explode into per-config models. The
+  approach is a **morphology-CONDITIONED controller**: the policy takes the
+  body's morph / build parameters as **INPUT** and generalizes across the
+  continuous build manifold (trained with **morphology randomization**), so
+  **one conditioned controller per plan covers the whole build space** rather
+  than one model per body. "We shouldn't need a million approximators" is
+  satisfied by **amortizing over the parameter space** — the build axes are an
+  input to one controller, not a key into a table of controllers.
+
+**The interlock (the elegant part).** The controller's conditioning vector is
+the **SAME parametric morph vector the procgen-body system already exposes** —
+the `BodyState` morph parameters (`body-and-locomotion-slice.md` §2.1; the §F
+one-shared-substrate principle of this doc). The **parametric body and the
+parametric controller share ONE morphology parameterization**: the body system
+hands the controller its conditioning directly, with no separate adapter or
+re-encoding. The same vector that drives the blendshape weights drives the
+policy's body-awareness. This is the §F interlock extended from
+mesh/morph/soft-body/animation to *control*: the morphology parameterization is
+the common ground, so a parametric body is automatically a body the conditioned
+controller can already drive.
+
+**The open research gap + the next lever (honest).** The existing literature
+review (`../research/animation-morphing-procgen-bodies.md`) covered Motion
+Matching / PFNN / physics-RL, but it did **NOT** cover the
+**morphology-GENERALIZING control** sub-area specifically — body-agnostic /
+morphology-conditioned policies (graph- or transformer-structured policies over
+morphology, "one policy to control them all"-style controllers, morphology
+domain-randomization, metamorph-style approaches). This is a **distinct, real
+research literature** and it is the **concrete next research lever** for this
+tier — the thing that makes "one conditioned controller per plan over a
+continuous build manifold" a grounded bet rather than an aspiration. A
+**targeted follow-up lit review of this sub-area is needed** (flagged; the
+specific cited survey is a future task — no paper citations are invented here).
+
+This ceiling remains a **PEER deterministic-surrogate bet** alongside soft-body,
+language, embodied expression, and the semantic layer — same shape, same
+no-copouts posture (DESIGN.md, *aeriea is a research program*; the four/five peer
+bets).
+
 ## E. Literature review needed (a concrete next action)
 
 Genuinely flagged as a real next step: the team needs to **read the
@@ -127,6 +189,12 @@ minimum:
 
 - **Neural motion synthesis / environment-responsive & physics-based
   animation** (the D aspirational tier).
+- **Morphology-generalizing / morphology-conditioned physics control** (the
+  D.1 ceiling) — body-agnostic policies, morphology-conditioned controllers,
+  graph- / transformer-structured policies over morphology, morphology
+  domain-randomization, metamorph-style approaches. The 2026-06-03 review
+  (below) did **not** cover this sub-area; it is the concrete next lever for
+  D.1 and a **targeted follow-up lit review is still needed** (open).
 - **Topology-changing mesh metamorphosis** (the C across-form tier).
 - **Deformation-aligned procgen body topology** (the B topology philosophy
   — where loops go and why, pinch-free morph envelopes).
@@ -199,6 +267,11 @@ across-form metamorphosis and neural animation are aspirational).
   literature review, E).
 - **The neural-animation approach** — concrete method for environment-
   responsive / neural-walk-cycle synthesis (pending E).
+- **The morphology-conditioned control method** (D.1) — the concrete
+  body-agnostic / morphology-conditioned policy approach for full-body physics
+  control that generalizes across the continuous build manifold; pending the
+  targeted follow-up lit review of the morphology-generalizing-control
+  sub-area (E).
 - **The F↔M homology mapping detail** — the actual map of which structures
   morph into which (clitoris↔glans, labia↔scrotum named; the rest TBD).
 - **What the usable-now tier concretely is for each part** — the proven,

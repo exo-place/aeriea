@@ -418,37 +418,74 @@ SFW-first with NSFW bolted on.
 Distribution constrained accordingly: Itch.io, direct download, the
 adult section on Steam if eligible.
 
-#### Child-range body-age: categorical exclusion from all NSFW systems
+#### Age × NSFW: gate the configuration, not the primitives
 
-The body-age parameter includes a child / minor range (anchored to the
-baby and child morphs in the procedural-body system — see
+**Principle.** The engine represents — fully and orthogonally — all of:
+child-range bodies (legitimate; NPCs of every age exist in the world,
+anchored to the baby and child morphs in the procedural-body system, see
 `docs/decisions/procedural-body-and-animation.md` and the MakeHuman
-age-morph research). That range is **categorically excluded from every
-sexual / intimate / NSFW system** in the shipped game: scenes, intimacy
-mechanics, NSFW affordances, and NSFW rendering — all of it. This is not
-a content setting and not an optional toggle; it is enforced **by
-construction** in the shipped substrate.
+age-morph research), the NSFW / intimate systems (legitimate; aeriea is
+NSFW-first), and the mind/body decoupling from the worldbuilding
+(legitimate and load-bearing). **None of these primitives is crippled.**
+Crippling a primitive to forbid one combination would bleed
+discontinuities into every adjacent legitimate configuration — the
+age-morph axis must stay continuous for ordinary NPCs, the morph space
+smooth, the decoupling general. A complete, orthogonal primitive space
+*is* the fidelity. This is the project's composable-orthogonal-primitives
+ethos applied consistently: prohibitions are **layered policy, not
+amputation**. What is forbidden is a *configuration*, gated above a
+general engine — not a hole carved into the engine.
 
-The enforcement point is the **affordance substrate's guard layer** (see
-`docs/decisions/affordance-substrate.md`): every NSFW or intimate verb
-carries a guard requiring adult body-state. A child-range body makes
-those verbs structurally unavailable — they simply do not appear in the
-prompt, cannot be triggered, and cannot be reached without modifying
-source. The gate lives at the verb / guard layer, not at a surface
-filter, so it cannot be bypassed by any in-game setting or patch.
+**Layer 1 — hard structural gate (the body / legal line).** The forbidden
+thing is the **intersection**: child-range body-state × any NSFW /
+intimate verb or system. It is enforced at the **affordance substrate's
+guard layer** (see `docs/decisions/affordance-substrate.md`) — every NSFW
+/ intimate verb guards on adult body-state — as a robust, **non-optional,
+non-toggle** gate in the shipped / official product. It is not a settings
+filter, not a content option. The gate forbids the *combination*; it does
+**not** remove the engine's ability to represent child bodies or NSFW
+systems separately. (Correcting earlier framing: the engine is *general*;
+this is a robust enforced layer the shipped/official artifact never ships
+without and never exposes as a toggle — not "the engine cannot represent
+it by construction.") Honest caveat: because the engine is general and the
+software is open / self-hostable, this rests on the gate's robustness and
+on the official artifact never producing the intersection. It does not
+pretend determined source-level modification is preventable; the
+commitment is that the official product never ships, enables, or toggles
+it. The rationale is **overdetermined and explicitly not consent-based**:
 
-Because aeriea is NSFW-first — NSFW is the default-designed layer, not
-a bolt-on — the age axis and the NSFW systems intersect by default. That
-is exactly why this exclusion must be an architectural invariant built in
-from the start, not an afterthought. Rationale: CSAM law applies to
-fictional and rendered content in essentially all jurisdictions,
-regardless of being fiction; and the ethical and reputational stakes are
-unambiguous. The commitment governs the shipped game and all official
-content and systems, where the exclusion is impossible-by-construction.
-It does not pretend that determined source-level modification of open /
-self-hosted software is preventable; the project's commitment is that
-the shipped game never ships it, never enables it, and never makes it a
-toggle.
+- **(a) Legal risk** — many jurisdictions criminalize fictional / rendered
+  child sexual content regardless of any real victim; wide variance across
+  jurisdictions plus catastrophic downside.
+- **(b) Platform / distribution reality** — storefronts, payment
+  processors, app stores, and hosts hard-ban it; commercially fatal even
+  where legal.
+- **(c) Values / optics.**
+
+A consent / "no real victim" rationale is *deliberately not* used for this
+layer: it would logically imply fiction is fine and undercut the rule.
+
+**Layer 2 — curation / authoring stance (the mind / values line).**
+Separately, the project declines to author or foreground sexual content
+framed around a child-coded / non-consenting-capable **mind**, regardless
+of body. This is **not** a structural gate. "Mind age" is interiority and
+fiction, not a checkable body-state parameter — and in a world of
+malleable, decoupled minds, "mind-age / consent-capacity" is itself a
+fuzzy fictional construct with no crisp boundary to mechanize. Trying to
+gate it structurally would re-open exactly the un-checkable-interiority
+over-reach that the body gate deliberately avoids. So it is an
+authoring / curation policy, enforced as **content judgment, not code**.
+Its justification *is* consent-ethics — an entity that genuinely cannot
+consent — which makes it a values stance, not mere optics. The engine
+theoretically supports the broad configuration space (including this);
+the project gates it out at the content layer, deliberately leaving the
+primitive space general so the fidelity of nearby legitimate concepts,
+systems, and configurations is not degraded.
+
+**Spirit.** aeriea is a **"have fun" sandbox, not a "questionable values"
+sandbox** — general and high-fidelity by default, with these prohibitions
+as deliberate gates motivated by fun-not-harm values plus legal / platform
+reality, **not** by amputating the engine's generality.
 
 ### Movement that doesn't waste your time
 

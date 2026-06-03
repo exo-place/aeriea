@@ -418,6 +418,38 @@ SFW-first with NSFW bolted on.
 Distribution constrained accordingly: Itch.io, direct download, the
 adult section on Steam if eligible.
 
+#### Child-range body-age: categorical exclusion from all NSFW systems
+
+The body-age parameter includes a child / minor range (anchored to the
+baby and child morphs in the procedural-body system — see
+`docs/decisions/procedural-body-and-animation.md` and the MakeHuman
+age-morph research). That range is **categorically excluded from every
+sexual / intimate / NSFW system** in the shipped game: scenes, intimacy
+mechanics, NSFW affordances, and NSFW rendering — all of it. This is not
+a content setting and not an optional toggle; it is enforced **by
+construction** in the shipped substrate.
+
+The enforcement point is the **affordance substrate's guard layer** (see
+`docs/decisions/affordance-substrate.md`): every NSFW or intimate verb
+carries a guard requiring adult body-state. A child-range body makes
+those verbs structurally unavailable — they simply do not appear in the
+prompt, cannot be triggered, and cannot be reached without modifying
+source. The gate lives at the verb / guard layer, not at a surface
+filter, so it cannot be bypassed by any in-game setting or patch.
+
+Because aeriea is NSFW-first — NSFW is the default-designed layer, not
+a bolt-on — the age axis and the NSFW systems intersect by default. That
+is exactly why this exclusion must be an architectural invariant built in
+from the start, not an afterthought. Rationale: CSAM law applies to
+fictional and rendered content in essentially all jurisdictions,
+regardless of being fiction; and the ethical and reputational stakes are
+unambiguous. The commitment governs the shipped game and all official
+content and systems, where the exclusion is impossible-by-construction.
+It does not pretend that determined source-level modification of open /
+self-hosted software is preventable; the project's commitment is that
+the shipped game never ships it, never enables it, and never makes it a
+toggle.
+
 ### Movement that doesn't waste your time
 
 Palia's failure: cozy life-sim activities are fine, but the player is

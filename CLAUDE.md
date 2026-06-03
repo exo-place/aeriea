@@ -18,6 +18,7 @@ Cross-cutting principles distilled from the ecosystem's own decisions (synthesiz
 
 ## Hard Constraints
 
+- **Child-range body-age is categorically excluded from all NSFW systems — by construction, not by setting.** The affordance substrate's guard layer is the enforcement point: every NSFW/intimate/scene verb requires adult body-state as a guard; a child-range body makes those verbs structurally unavailable. This is not a content toggle, not a patch surface, not a filter — it is an architectural invariant in the shipped substrate and in all official systems. Rationale: CSAM law applies to fictional/rendered content in essentially all jurisdictions; and aeriea is NSFW-first by design, so the age axis and NSFW systems intersect by default — the exclusion must be built in from the start. The commitment governs the shipped game and its systems (impossible-by-construction there); it does not pretend that determined source-level modification of open/self-hosted software is preventable, but the shipped game never ships it and never makes it a toggle.
 - No `--no-verify`. Fix the issue or fix the hook.
 - No path dependencies in `Cargo.toml` — they couple repos and break independent publishing.
 - No interactive git (no `git rebase -i`, no `git add -i`, no `--no-edit` on rebase).

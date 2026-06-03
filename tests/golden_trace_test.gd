@@ -87,6 +87,15 @@ func _input_logs() -> Array:
 				+ _hold_vp(["move_forward", "sprint", "crouch"], 4, 0.0, 0.6)
 				+ _hold_vp(["move_forward", "crouch", "jump"], 3, 0.0, 0.6)
 				+ _hold_vp(["move_forward"], 30, 0.0, 0.6)},
+		{"name": "wall-cling: airborne beside a wall holding cling latches, suppresses gravity, then releases (pure-data verb)", "spawn": Vector3(2.6, 3.5, 4.0), "with_walls": true,
+			"log": _hold([], 6)
+				+ _hold(["cling"], 40)
+				+ _hold([], 25)},
+		{"name": "aim-glide: jump then hold aim on descent slows the fall (pure-data verb)", "spawn": Vector3(0, 1.2, 0), "with_walls": false,
+			"log": _hold([], 6)
+				+ _hold(["jump"], 2)
+				+ _hold([], 14)
+				+ _hold(["aim"], 60)},
 	]
 
 
@@ -217,7 +226,7 @@ func _max_delta(a: Dictionary, b: Dictionary) -> float:
 # ---------------------------------------------------------------------------
 
 func _all_actions() -> Array:
-	return ["move_forward", "move_backward", "move_left", "move_right", "sprint", "crouch", "jump"]
+	return ["move_forward", "move_backward", "move_left", "move_right", "sprint", "crouch", "jump", "cling", "aim"]
 
 
 func _apply_input(entry: Dictionary, p: InterpretedPlayer) -> void:

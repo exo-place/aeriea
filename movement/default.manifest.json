@@ -1,8 +1,10 @@
 {
   "$manifest": "aeriea-movement-manifest/1",
-  "comment": "The playable movement kit: the base state machine ⊕ enabled verb overlays. A designer assembles a kit by editing this file (which base, which verbs). Composition is kit overlay (docs/decisions/movement-substrate.md §2, §5); both the interpreter (live) and the compiler (regen) consume the SAME composed kit. Adding a verb here is the entire wiring — no engine code change. The remaining backlog verbs (air burst, charge, wormhole, teleport, aim, wall-cling) are authorable the same way: drop a movement/verbs/<verb>.kit.json and add it to this list.",
+  "comment": "The playable movement kit: the base state machine ⊕ enabled verb overlays. A designer assembles a kit by editing this file (which base, which verbs). Composition is kit overlay (docs/decisions/movement-substrate.md §2, §5); both the interpreter (live) and the compiler (regen) consume the SAME composed kit. Adding a verb here is the entire wiring — no engine code change. aim_glide and wall_cling are PURE-DATA verbs (new GLIDE / WALL_CLING states + AIR entry transitions, gated behind the new `aim` / `cling` inputs); they are INERT for existing play (nobody presses those inputs in the base/parity tests) so the existing 20 behavioral assertions are unaffected — they only add new reachable behavior. The `warframe.manifest.json` preset bundles the same three verbs as a named loadout (§5 named presets). Remaining backlog verbs (air burst, charge, wormhole, teleport) are authorable the same way: drop a movement/verbs/<verb>.kit.json and add it here.",
   "base": "res://movement/base.kit.json",
   "verbs": [
-    "res://movement/verbs/bullet_jump.kit.json"
+    "res://movement/verbs/bullet_jump.kit.json",
+    "res://movement/verbs/aim_glide.kit.json",
+    "res://movement/verbs/wall_cling.kit.json"
   ]
 }

@@ -23,11 +23,16 @@ extends CharacterBody3D
 # behavioral suite's `== PlayerController.State.SLIDE` comparisons hold when it
 # reads our `_state`. Kept as data: the interpreter works in string state names;
 # this maps the active kit state name to the parity ordinal.
-enum State { GROUND, AIR, SLIDE, CROUCH, WALL_RUN, VAULT }
+## The first six ordinals mirror PlayerController.State EXACTLY (the parity oracle
+## only has those). WALL_CLING / GLIDE are appended for the data-only verbs
+## (wall-cling, aim-glide); the imperative oracle never reports them, so the
+## shared parity comparisons over the first six are unaffected.
+enum State { GROUND, AIR, SLIDE, CROUCH, WALL_RUN, VAULT, WALL_CLING, GLIDE }
 
 const _STATE_NAME_TO_ENUM := {
 	"GROUND": State.GROUND, "AIR": State.AIR, "SLIDE": State.SLIDE,
 	"CROUCH": State.CROUCH, "WALL_RUN": State.WALL_RUN, "VAULT": State.VAULT,
+	"WALL_CLING": State.WALL_CLING, "GLIDE": State.GLIDE,
 }
 
 ## The movement kit source. A `.manifest.json` is composed (base ⊕ verb overlays,

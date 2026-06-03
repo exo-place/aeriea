@@ -1,0 +1,93 @@
+{
+  "$patch": "aeriea-movement-verb/1",
+  "comment": "Wall-cling / wall-latch (cf. Warframe, Titanfall, Ghostrunner): while airborne and beside a wall, HOLD the `cling` input to LATCH onto the wall — gravity suppressed, position held — for a limited window. INTENT-GATED (you must hold cling beside a wall; it never auto-snaps), so it feels deliberate. PURE DATA: composed onto base.kit.json via kit overlay, no engine code change. It adds ONE new state WALL_CLING and ONE entry transition into AIR (priority 75, between wall-run 70 and wall-jump 85 — never collides). Entry zeroes velocity (set_velocity_y 0 + clamp_speed_h 0) so the body sticks; the tick suppresses gravity to ~0 (apply_gravity scale wall_cling_gravity_scale, with a fall clamp via min_vy) and commits via move_and_slide. A wall_cling timer (stamina/time budget) drains and forces release. EXITS: (1) cling RELEASED → AIR; (2) wall LOST (wall_still_near false) → AIR; (3) timer drained → AIR; (4) JUMP → AIR with the wall-jump grace armed, so the EXISTING base AIR wall-jump transition (input_buffered jump + wall_jump_grace>0, priority 85) launches you off the wall on the same/next tick — wall-jump is reused, not duplicated. All conditions/effects/ordering/tuning are existing primitives; the ONLY composition seam is the new state + transition (data). See docs/decisions/movement-substrate.md §2, §5 (named presets).",
+
+  "params": {
+    "wall_cling_gravity_scale": 0.0,
+    "wall_cling_max_time": 1.2,
+    "wall_cling_min_vy": -0.5
+  },
+
+  "comment_inputs": "Declare the `cling` action so the interpreter samples it each tick (input_pressed reads the sampled frame). No buffer/hold — a plain held button.",
+  "inputs": {
+    "cling": {}
+  },
+
+  "add_transitions": {
+    "AIR": [
+      {
+        "comment": "Enter WALL_CLING: airborne, a wall is detected on either side, AND the player is HOLDING cling (intent). Priority 75 — above wall-run entry (70) so a held cling latches rather than starts a run, below wall-jump (85)/coyote (90) so a buffered jump still wins. On entry: stick to the wall (zero vertical + horizontal velocity) and arm the cling time budget. wall_detected records wall_normal/wall_side for the tick + wall-jump exit.",
+        "when": { "op": "all", "of": [
+          { "op": "airborne" },
+          { "op": "input_pressed", "action": "cling" },
+          { "op": "wall_detected", "side": "any" }
+        ] },
+        "to": "WALL_CLING",
+        "priority": 75,
+        "do": [
+          { "do": "set_velocity_y", "value": 0 },
+          { "do": "clamp_speed_h", "max": 0 },
+          { "do": "set_timer", "name": "wall_cling", "value": "wall_cling_max_time" }
+        ]
+      }
+    ]
+  },
+
+  "states": [
+    {
+      "name": "WALL_CLING",
+      "on_enter": [],
+      "transitions": [
+        {
+          "comment": "JUMP off the wall: arm the wall-jump grace and hand to AIR. The EXISTING base AIR wall-jump transition (input_buffered jump AND wall_jump_grace>0, priority 85) then fires and launches off wall_normal — we reuse it, no duplicate wall-jump here. Highest priority so a jump always beats the release/timeout exits.",
+          "when": { "op": "input_buffered", "action": "jump" },
+          "to": "AIR",
+          "priority": 90,
+          "reenter": true,
+          "do": [ { "do": "set_timer", "name": "wall_jump_grace", "value": "wall_jump_grace" } ]
+        },
+        {
+          "comment": "Cling RELEASED → drop off the wall into AIR. Arm coyote so a jump immediately after release still works (parity with leaving any surface).",
+          "when": { "op": "not", "of": [ { "op": "input_pressed", "action": "cling" } ] },
+          "to": "AIR",
+          "priority": 70,
+          "reenter": true,
+          "do": [ { "do": "set_timer", "name": "coyote", "value": "coyote_time" } ]
+        },
+        {
+          "comment": "Wall LOST (no longer near the tracked wall) → AIR.",
+          "when": { "op": "not", "of": [ { "op": "wall_still_near" } ] },
+          "to": "AIR",
+          "priority": 60
+        },
+        {
+          "comment": "Cling time budget drained → forced release into AIR.",
+          "when": { "op": "timer", "name": "wall_cling", "cmp": "le", "value": 0 },
+          "to": "AIR",
+          "priority": 50
+        },
+        {
+          "comment": "Landed while clinging (e.g. slid down to the floor) → GROUND.",
+          "when": { "op": "on_ground" },
+          "to": "GROUND",
+          "priority": 40
+        }
+      ],
+      "tick": [
+        {
+          "comment": "Suppress gravity (scale ~0) so the body holds on the wall; min_vy clamps any residual fall to a slow controlled creep rather than a hard freeze.",
+          "do": "apply_gravity",
+          "scale": "wall_cling_gravity_scale",
+          "min_vy": "wall_cling_min_vy"
+        },
+        { "do": "move_and_slide" },
+        {
+          "comment": "Hold the wall-facing camera roll (deliberate latch feel), signed by the tracked wall side. Render-only.",
+          "do": "lerp_camera_roll", "target": "wall_run_camera_tilt",
+          "from_wall_side": true, "rate": "camera_roll_lerp_speed"
+        }
+      ],
+      "on_exit": []
+    }
+  ]
+}

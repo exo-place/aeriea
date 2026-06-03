@@ -66,6 +66,11 @@ const P_camera_roll_level := 0.0
 const P_coyote_time := 0.12
 const P_crouch_height := 0.6
 const P_crouch_walk_speed := 2.8
+const P_glide_fall_cap := -2.5
+const P_glide_gravity_scale := 0.18
+const P_glide_max_time := 2.5
+const P_glide_strafe_accel := 22.0
+const P_glide_strafe_cap := 9.0
 const P_gravity_scale := 2.2
 const P_ground_acceleration := 60.0
 const P_ground_friction := 30.0
@@ -89,6 +94,9 @@ const P_stand_height := 0.9
 const P_vault_duration := 0.28
 const P_vault_min_speed := 2.5
 const P_walk_speed := 5.5
+const P_wall_cling_gravity_scale := 0.0
+const P_wall_cling_max_time := 1.2
+const P_wall_cling_min_vy := -0.5
 const P_wall_detect_distance := 0.65
 const P_wall_jump_grace := 0.12
 const P_wall_jump_lateral := 6.5
@@ -227,6 +235,12 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			timers["jump_buffer"] = 0.0
 			active_state = "AIR"
 			return true
+		elif ((not body.is_on_floor()) and frame.is_pressed("cling") and _probe_walls("any")):
+			body.velocity.y = 0.0
+			_k_clamp_speed_h(0.0)
+			timers["wall_cling"] = P_wall_cling_max_time
+			active_state = "WALL_CLING"
+			return false
 		elif ((_speed_h() >= P_wall_run_min_speed) and (not body.is_on_floor()) and _probe_walls("any") and (frame.wish_dir.length_squared() >= 0.001)):
 			body.velocity.y = maxf(body.velocity.y, P_wall_run_vertical_boost)
 			timers["wall_run"] = P_wall_run_max_time
@@ -235,6 +249,10 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 		elif ((_speed_h() > P_vault_min_speed) and body.host_check_vault()):
 			timers["vault"] = P_vault_duration
 			active_state = "VAULT"
+			return false
+		elif ((not body.is_on_floor()) and frame.is_pressed("aim") and (body.velocity.y < 0.0)):
+			timers["glide"] = P_glide_max_time
+			active_state = "GLIDE"
 			return false
 		elif (body.is_on_floor() and (body.velocity.y <= 0.0)):
 			active_state = "GROUND"
@@ -318,6 +336,42 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			active_state = "GROUND"
 			return false
 		return false
+	elif active_state == "GLIDE":
+		if ((float(timers.get("jump", 0.0)) > 0.0) and (float(timers.get("coyote", 0.0)) > 0.0)):
+			body.velocity.y = P_jump_velocity
+			timers["coyote"] = 0.0
+			timers["jump_buffer"] = 0.0
+			active_state = "AIR"
+			return true
+		elif (not frame.is_pressed("aim")):
+			active_state = "AIR"
+			return true
+		elif (float(timers.get("glide", 0.0)) <= 0.0):
+			active_state = "AIR"
+			return false
+		elif (body.is_on_floor() and (body.velocity.y <= 0.0)):
+			active_state = "GROUND"
+			return true
+		return false
+	elif active_state == "WALL_CLING":
+		if (float(timers.get("jump", 0.0)) > 0.0):
+			timers["wall_jump_grace"] = P_wall_jump_grace
+			active_state = "AIR"
+			return true
+		elif (not frame.is_pressed("cling")):
+			timers["coyote"] = P_coyote_time
+			active_state = "AIR"
+			return true
+		elif (not _wall_still_near()):
+			active_state = "AIR"
+			return false
+		elif (float(timers.get("wall_cling", 0.0)) <= 0.0):
+			active_state = "AIR"
+			return false
+		elif body.is_on_floor():
+			active_state = "GROUND"
+			return false
+		return false
 	return false
 
 func _run_tick(frame: InputFrame, dt: float) -> void:
@@ -361,6 +415,15 @@ func _run_tick(frame: InputFrame, dt: float) -> void:
 		body.host_lerp_camera_roll(-wall_side * P_wall_run_camera_tilt, P_camera_roll_lerp_speed, dt)
 	elif active_state == "VAULT":
 		_k_tween_position("vault", P_vault_duration)
+	elif active_state == "GLIDE":
+		_k_apply_gravity(dt, P_glide_gravity_scale, true, P_glide_fall_cap)
+		_k_air_strafe(frame, dt, "wish", P_glide_strafe_cap, P_glide_strafe_accel)
+		body.move_and_slide()
+		body.host_lerp_camera_roll(P_camera_roll_level, P_camera_roll_lerp_speed, dt)
+	elif active_state == "WALL_CLING":
+		_k_apply_gravity(dt, P_wall_cling_gravity_scale, true, P_wall_cling_min_vy)
+		body.move_and_slide()
+		body.host_lerp_camera_roll(-wall_side * P_wall_run_camera_tilt, P_camera_roll_lerp_speed, dt)
 
 
 func _speed_h() -> float:

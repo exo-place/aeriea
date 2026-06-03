@@ -1,0 +1,98 @@
+{
+  "$patch": "aeriea-movement-verb/1",
+  "comment": "Aim-glide (cf. Warframe glide, Titanfall, AER): while airborne and DESCENDING, HOLD the `aim` input to enter a controlled float — gravity reduced and downward speed CAPPED to a slow glide, while you steer along the move/wish direction. INTENT-GATED (only while aim is held and you are falling), time-limited by a budget so it cannot float forever. PURE DATA: composed onto base.kit.json via kit overlay, no engine code change. Adds ONE new state GLIDE plus ONE entry transition into AIR (priority 45 — below wall-run 70 / vault 60 / wall-cling 75, above the land exit 10 — never collides). The descent is slowed by apply_gravity at a small scale clamped at min_vy (the hard glide fall cap); steering is the EXISTING air_strafe along the wish space; the budget is a wall-/glide timer. All conditions, effects, ordering and tuning are existing primitives; the only seam is the new state + transition (data). See docs/decisions/movement-substrate.md §2, §5 (named presets).",
+
+  "params": {
+    "glide_gravity_scale": 0.18,
+    "glide_fall_cap": -2.5,
+    "glide_strafe_accel": 22.0,
+    "glide_strafe_cap": 9.0,
+    "glide_max_time": 2.5
+  },
+
+  "comment_inputs": "Declare the `aim` action so the interpreter samples it each tick (input_pressed reads the sampled frame). No buffer/hold — a plain held button.",
+  "inputs": {
+    "aim": {}
+  },
+
+  "add_transitions": {
+    "AIR": [
+      {
+        "comment": "Enter GLIDE: airborne, holding aim, and DESCENDING (speed_v < 0) so it engages a controlled float on the way down — never cancels the rise of a fresh jump. Priority 45 (below wall-cling 75 / wall-run 70 / vault 60, above land 10). Arms the glide time budget.",
+        "when": { "op": "all", "of": [
+          { "op": "airborne" },
+          { "op": "input_pressed", "action": "aim" },
+          { "op": "speed_v", "cmp": "lt", "value": 0 }
+        ] },
+        "to": "GLIDE",
+        "priority": 45,
+        "do": [ { "do": "set_timer", "name": "glide", "value": "glide_max_time" } ]
+      }
+    ]
+  },
+
+  "states": [
+    {
+      "name": "GLIDE",
+      "on_enter": [],
+      "transitions": [
+        {
+          "comment": "Coyote/buffered jump out of a glide (reuse the air-jump idiom): a buffered jump while gliding cancels the float into a normal jump. Highest priority.",
+          "when": { "op": "all", "of": [
+            { "op": "input_buffered", "action": "jump" },
+            { "op": "timer", "name": "coyote", "cmp": "gt", "value": 0 }
+          ] },
+          "to": "AIR",
+          "priority": 90,
+          "reenter": true,
+          "do": [
+            { "do": "set_velocity_y", "value": "jump_velocity" },
+            { "do": "set_timer", "name": "coyote", "value": 0 },
+            { "do": "set_timer", "name": "jump_buffer", "value": 0 }
+          ]
+        },
+        {
+          "comment": "aim RELEASED → resume normal fall (back to AIR).",
+          "when": { "op": "not", "of": [ { "op": "input_pressed", "action": "aim" } ] },
+          "to": "AIR",
+          "priority": 70,
+          "reenter": true
+        },
+        {
+          "comment": "Glide budget drained → resume normal fall.",
+          "when": { "op": "timer", "name": "glide", "cmp": "le", "value": 0 },
+          "to": "AIR",
+          "priority": 60
+        },
+        {
+          "comment": "Landed → GROUND (a buffered crouch/jump then fires on the landing frame via the base GROUND transitions).",
+          "when": { "op": "all", "of": [
+            { "op": "on_ground" },
+            { "op": "speed_v", "cmp": "le", "value": 0 }
+          ] },
+          "to": "GROUND",
+          "priority": 10,
+          "reenter": true
+        }
+      ],
+      "tick": [
+        {
+          "comment": "Reduced gravity, with the downward speed HARD-CAPPED to glide_fall_cap (the slow controlled descent). apply_gravity scale glide_gravity_scale, min_vy glide_fall_cap.",
+          "do": "apply_gravity",
+          "scale": "glide_gravity_scale",
+          "min_vy": "glide_fall_cap"
+        },
+        {
+          "comment": "Steer along the wish direction while gliding (controlled float), additive up to glide_strafe_cap — the existing air_strafe primitive.",
+          "do": "air_strafe", "space": "wish", "rate": "glide_strafe_accel", "cap": "glide_strafe_cap"
+        },
+        { "do": "move_and_slide" },
+        {
+          "comment": "Level the camera while gliding (render-only).",
+          "do": "lerp_camera_roll", "target": "camera_roll_level", "rate": "camera_roll_lerp_speed"
+        }
+      ],
+      "on_exit": []
+    }
+  ]
+}

@@ -97,6 +97,8 @@ func _run_suite() -> void:
 	await _test_slide_is_steerable_and_cancelable()
 	await _test_bullet_jump_forward_up_burst()
 	await _test_bullet_jump_tracks_aim_pitch()
+	await _test_wall_cling_latches_and_suppresses_gravity()
+	await _test_aim_glide_slows_descent()
 	await _test_slope_holds_position_without_crouch()
 	await _test_crouchwalk_no_vertical_jitter()
 	await _test_slide_speed_does_not_compound()
@@ -743,6 +745,138 @@ func _bullet_jump_vy_at_pitch(pitch_rad: float) -> float:
 	ctx["level"].queue_free()
 	await get_tree().process_frame
 	return vy
+
+
+## WALL-CLING as a PURE-DATA verb (movement/verbs/wall_cling.kit.json, composed
+## via the manifest overlay; NO engine code change). Place the body airborne beside
+## the right wall (WallB x=3.5, surface ~x=3.0) and HOLD `cling`: assert it LATCHES
+## (enters WALL_CLING), gravity is SUPPRESSED (it does not fall like a free body over
+## the hold window — vy stays ~0 and Y barely drops), and it RELEASES on letting go
+## (leaves WALL_CLING). Data paths only (interpreter/compiled); the imperative oracle
+## has no such verb. State ordinal WALL_CLING is appended in InterpretedPlayer.State.
+const S_WALL_CLING := 6
+const S_GLIDE := 7
+
+func _test_wall_cling_latches_and_suppresses_gravity() -> void:
+	if _target_label == "imperative":
+		return
+	var ctx := await _spawn_level()
+	var player: CharacterBody3D = ctx["player"]
+
+	# Drop the body in airborne, right next to WallB (surface ~x=3.0). Capsule radius
+	# 0.35 → centre x≈2.6 is within wall_detect_distance (0.65). Face +Z, no h-velocity.
+	player.global_position = Vector3(2.6, 3.0, 4.0)
+	player._yaw = 0.0
+	player.rotation.y = 0.0
+	player.velocity = Vector3(0.0, -1.0, 0.0)
+	await get_tree().physics_frame
+
+	# Hold cling and let it latch.
+	Input.action_press("cling")
+	Input.flush_buffered_events()
+	var latched := false
+	for _i in 12:
+		await get_tree().physics_frame
+		if player._state == S_WALL_CLING:
+			latched = true
+			break
+
+	# Measure fall over a hold window while clinging vs a free-fall baseline.
+	var y_at_latch := player.global_position.y
+	var vy_samples_ok := true
+	for _i in 25:
+		await get_tree().physics_frame
+		if absf(player.velocity.y) > 1.5:   # gravity suppressed: vy must stay near 0
+			vy_samples_ok = false
+	var y_drop := y_at_latch - player.global_position.y   # positive = fell
+	var still_clinging: bool = player._state == S_WALL_CLING
+
+	# Now RELEASE cling and confirm it drops off the wall (leaves WALL_CLING).
+	Input.action_release("cling")
+	Input.flush_buffered_events()
+	var released := false
+	for _i in 10:
+		await get_tree().physics_frame
+		if player._state != S_WALL_CLING:
+			released = true
+			break
+
+	# Free-fall baseline over the same number of frames (no cling), same start.
+	var fall_drop := await _free_fall_drop_over(25)
+
+	_assert(
+		"wall-cling latches, suppresses gravity (vy~0, Y barely drops vs free-fall), and releases on letting go (pure-data verb)",
+		latched and still_clinging and vy_samples_ok and y_drop < fall_drop * 0.5 and released,
+		"latched=%s, clinging_after_hold=%s, vy_suppressed=%s, cling_drop=%.3fm vs free_fall=%.3fm (cling < half), released_on_let_go=%s" % [
+			str(latched), str(still_clinging), str(vy_samples_ok), y_drop, fall_drop, str(released)]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## Free-fall Y drop over `frames` physics ticks from the same airborne start, with no
+## input — the gravity baseline the cling/glide assertions compare against.
+func _free_fall_drop_over(frames: int) -> float:
+	var ctx := await _spawn_level()
+	var player: CharacterBody3D = ctx["player"]
+	player.global_position = Vector3(0.0, 12.0, 0.0)   # high up, clear air
+	player.velocity = Vector3.ZERO
+	await get_tree().physics_frame
+	var y0 := player.global_position.y
+	for _i in frames:
+		await get_tree().physics_frame
+	var drop := y0 - player.global_position.y
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+	return drop
+
+
+## AIM-GLIDE as a PURE-DATA verb (movement/verbs/aim_glide.kit.json). While airborne
+## and DESCENDING, holding `aim` enters GLIDE and the descent is SLOWED (downward
+## speed capped) vs a free fall over the same window. Assert: enters GLIDE, and the
+## glide Y-drop is markedly less than free-fall. Data paths only.
+func _test_aim_glide_slows_descent() -> void:
+	if _target_label == "imperative":
+		return
+	var ctx := await _spawn_level()
+	var player: CharacterBody3D = ctx["player"]
+
+	# High in clear air, already descending slightly so the glide entry guard
+	# (airborne + aim held + speed_v<0) is satisfied immediately.
+	player.global_position = Vector3(0.0, 12.0, 0.0)
+	player.velocity = Vector3(0.0, -1.0, 0.0)
+	await get_tree().physics_frame
+
+	Input.action_press("aim")
+	Input.flush_buffered_events()
+	var glided := false
+	for _i in 12:
+		await get_tree().physics_frame
+		if player._state == S_GLIDE:
+			glided = true
+			break
+
+	var y_start := player.global_position.y
+	var max_fall_speed := 0.0
+	for _i in 40:
+		await get_tree().physics_frame
+		max_fall_speed = maxf(max_fall_speed, -player.velocity.y)  # downward speed
+	var glide_drop := y_start - player.global_position.y
+	var in_glide_after: bool = player._state == S_GLIDE
+	var glide_cap: float = absf(player.kit.params.get("glide_fall_cap", -2.5))
+	Input.action_release("aim")
+	Input.flush_buffered_events()
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+	var fall_drop := await _free_fall_drop_over(40)
+
+	_assert(
+		"aim-glide enters GLIDE and slows the descent (fall capped near glide_fall_cap, drop << free-fall) (pure-data verb)",
+		glided and in_glide_after and max_fall_speed <= glide_cap + 0.5 and glide_drop < fall_drop * 0.6,
+		"glided=%s, in_glide_after=%s, max_fall_speed=%.3f (cap=%.2f), glide_drop=%.3fm vs free_fall=%.3fm (glide < 60%%)" % [
+			str(glided), str(in_glide_after), max_fall_speed, glide_cap, glide_drop, fall_drop]
+	)
 
 
 ## (d) Standing on the slope with NO crouch input → horizontal position is stable

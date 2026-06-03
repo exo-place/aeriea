@@ -1,0 +1,10 @@
+{
+  "$manifest": "aeriea-movement-manifest/1",
+  "comment": "The \"Warframe\" PRESET: the base state machine ⊕ the Warframe-idiom traversal verb set — bullet jump, aim-glide, and wall-cling — bundled as a named, selectable kit. Wall-JUMP is already in base.kit.json (it is automatic, not a verb), so it is not listed; the preset adds the three player-intent verbs that complete the Warframe movement fantasy on top of base's slide / wall-run / vault / coyote-jump. This is the named-presets seam from docs/decisions/movement-substrate.md §5: a preset is just a manifest selecting a named set of verb kits — NO schema change, NO engine code. Select this by pointing InterpretedPlayer.kit_path (or a scene) at this file instead of default.manifest.json. default.manifest.json stays the live/default kit.",
+  "base": "res://movement/base.kit.json",
+  "verbs": [
+    "res://movement/verbs/bullet_jump.kit.json",
+    "res://movement/verbs/aim_glide.kit.json",
+    "res://movement/verbs/wall_cling.kit.json"
+  ]
+}

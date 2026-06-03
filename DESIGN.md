@@ -744,6 +744,11 @@ pillar **degrading gracefully** from aspirational to usable. Both framings
 sit together: aeriea is a research program AND a rapidly-prototyped usable
 game, at once.
 
+The **per-pillar** breakdown of both tiers — the usable-now (pragmatic) path
+and the aspirational (SOTA / research) path for each pillar, the near-term
+shippable critical path, and the open research agenda — is synthesized as a
+living roadmap in **`docs/future-directions.md`**.
+
 ## Sources of change
 
 Experiences without change are finite. Even an active, verb-dense,

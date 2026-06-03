@@ -244,6 +244,16 @@ change, reviewed against "collapse asymmetries to primitives.")
   representation beyond vanilla RDF (defeasible/contextual/prevalence
   knowledge). Names are the lead's to set — coin none.
 
+## Future directions / roadmap
+
+- **Per-pillar pragmatic (usable-now) + aspirational (SOTA) roadmap** —
+  `docs/future-directions.md` (LIVING ROADMAP). Synthesizes the two-tier
+  split per pillar (movement, affordances, procgen bodies, animation,
+  transformation/morphing, soft-body, NPC mind/language, semantic layer,
+  environment authoring, determinism/persistence/multiplayer), the near-term
+  shippable critical path, and the open research agenda. Faithful synthesis of
+  decisions already recorded; invents no new commitments.
+
 ## Open design questions (from DESIGN.md)
 
 - Project name (aeriea is tentative; pronounced "area")

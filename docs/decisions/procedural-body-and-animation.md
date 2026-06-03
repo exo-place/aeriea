@@ -133,6 +133,24 @@ minimum:
 
 This is a literature-review item, not a solved plan.
 
+**Update (2026-06-03): the literature review landed** —
+`../research/animation-morphing-procgen-bodies.md` (a dated snapshot
+covering all three areas: procedural / learned / physics-based animation;
+topology-changing mesh metamorphosis; parametric procgen bodies +
+deformation topology). It carries per-method maturity / real-time /
+determinism verdicts, a determinism scorecard, and two-tier recommendations
+mapped onto this doc. Headline findings: animation usable-now = Motion
+Matching + foot-IK (deterministic), neural-but-deterministic upgrade =
+Learned Motion Matching, physics-RL aspirational (gated on a
+bit-deterministic fixed-step solver); the across-form (C) topology-changing
+morph tier is confirmed an **honest gap** — seamless real-time *skinned*
+topology metamorphosis is genuinely unsolved (skinning discontinuity is the
+blocker), so it sits correctly in the aspirational tier with a
+baked-offline-deterministic + modular-swap usable-now floor; procgen bodies
+usable-now = one canonical quad topology + morph stack + LBS (the SMPL-X =
+Daz = MetaHuman pattern), with MakeHuman CC0 exports as the license-clean
+Godot base. Citation/licence caveats are flagged in the doc.
+
 ## F. The interlock (one shared substrate)
 
 Procgen-mesh generation, morph / transformation, the soft-body deformation

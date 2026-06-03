@@ -132,10 +132,17 @@ change, reviewed against "collapse asymmetries to primitives.")
   deformation-aligned topology. Prior art (lighter touch, sim side):
   `~/git/paragarden/existence`. Cross-ref `transformation-lore.md` and the
   soft-body / physics-driven-transformation R&D in DESIGN.md.
-  - [ ] **Literature review** (concrete next step, blocks method choices for
-    the aspirational tiers): neural motion synthesis / environment-responsive
+  - [x] **Literature review** (was: concrete next step, blocked method choices
+    for the aspirational tiers): neural motion synthesis / environment-responsive
     & physics-based animation; topology-changing mesh metamorphosis;
-    deformation-aligned procgen body topology.
+    deformation-aligned procgen body topology. **Landed (2026-06-03):**
+    `docs/research/animation-morphing-procgen-bodies.md` — per-method
+    real-time/determinism verdicts, determinism scorecard, two-tier
+    recommendations. Confirms across-form topology morph is an honest unsolved
+    gap (skinning discontinuity); animation usable-now = Motion Matching +
+    foot-IK; procgen-body floor = canonical quad topology + morph stack + LBS
+    (MakeHuman CC0 base, SMPL-X as reference). Several citations flagged
+    unverified/low-confidence + SMPL/Meshcapade licence to verify before relying.
 
 ## Transformation lore (sketch, WIP)
 

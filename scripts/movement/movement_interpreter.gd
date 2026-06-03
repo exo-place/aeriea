@@ -377,6 +377,14 @@ func _run_effect(e: Dictionary, frame: InputFrame, dt: float) -> void:
 			_eff_slope_accelerate(e, frame, dt)
 		"clamp_speed_h":
 			_eff_clamp_speed_h(e, frame)
+		"zero_velocity_h":
+			# Hard-zero horizontal velocity on this frame (vertical untouched). Used on
+			# the plain-ground landing transition so post-landing momentum is 0 instantly
+			# (a dead landing), NOT decayed over many frames by ground friction. The
+			# slide-on-landing path is a SEPARATE, higher-priority AIR→SLIDE transition
+			# that carries momentum, so it never reaches this effect.
+			body.velocity.x = 0.0
+			body.velocity.z = 0.0
 		"set_collider_height":
 			body.host_set_collider_height(_resolve_value(e.get("value"), frame), bool(e.get("require_headroom", false)))
 		"lerp_camera_height":

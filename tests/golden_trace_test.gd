@@ -87,6 +87,12 @@ func _input_logs() -> Array:
 				+ _hold_vp(["move_forward", "sprint", "crouch"], 4, 0.0, 0.6)
 				+ _hold_vp(["move_forward", "crouch", "jump"], 3, 0.0, 0.6)
 				+ _hold_vp(["move_forward"], 30, 0.0, 0.6)},
+		{"name": "land with no input: plain-ground landing hard-zeros horizontal momentum", "spawn": Vector3(0, 4.0, 0), "with_walls": false,
+			"log": _hold(["move_forward"], 20) + _hold(["jump"], 2)
+				+ _hold([], 70)},
+		{"name": "slide-on-landing: fast + crouch held across the landing carries momentum into SLIDE", "spawn": Vector3(0, 4.0, 0), "with_walls": false,
+			"log": _hold(["move_forward", "sprint"], 30) + _hold(["move_forward", "sprint", "jump"], 2)
+				+ _hold(["move_forward", "sprint", "crouch"], 60)},
 		{"name": "wall-cling: airborne beside a wall holding cling latches, suppresses gravity, then releases (pure-data verb)", "spawn": Vector3(2.6, 3.5, 4.0), "with_walls": true,
 			"log": _hold([], 6)
 				+ _hold(["cling"], 40)

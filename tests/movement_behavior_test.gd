@@ -98,7 +98,9 @@ func _run_suite() -> void:
 	await _test_air_control_steers_without_adding_speed()
 	await _test_jump_from_standstill_stays_horizontal_zero()
 	await _test_moving_jump_preserves_horizontal_speed()
-	await _test_landing_no_input_bleeds_momentum()
+	await _test_landing_no_input_hard_zeros_momentum()
+	await _test_landing_with_input_walks()
+	await _test_landing_crouch_fast_slides_carrying_momentum()
 	await _test_bullet_jump_forward_up_burst()
 	await _test_bullet_jump_tracks_aim_pitch()
 	await _test_wall_cling_latches_and_suppresses_gravity()
@@ -747,10 +749,11 @@ func _test_moving_jump_preserves_horizontal_speed() -> void:
 	await get_tree().process_frame
 
 
-## (d) Landing with NO input bleeds horizontal momentum to rest (no persistent
-## post-landing slide). Build air speed, land, release all input, and confirm the
-## horizontal speed decays to ~0 within a sensible window via ground friction.
-func _test_landing_no_input_bleeds_momentum() -> void:
+## (d) Landing with NO input HARD-ZEROS horizontal momentum ON the landing frame
+## (a dead landing — not a slow friction decay). Build air speed, fall, land into
+## the normal GROUND state with no input held, and confirm horizontal speed is 0
+## on the landing frame itself and the next frame (it does not drift).
+func _test_landing_no_input_hard_zeros_momentum() -> void:
 	if _target_label == "imperative":
 		return
 	var ctx := await _spawn_level()
@@ -759,34 +762,116 @@ func _test_landing_no_input_bleeds_momentum() -> void:
 
 	# Put the body airborne in clear air, moving forward at a real speed, with NO
 	# input held — the post-jump airborne state carrying horizontal momentum. It will
-	# fall, land, and (with the fix) ground friction must bleed the carried momentum to
-	# rest. Deterministic (no shared-Input buffered-jump timing).
+	# fall, land, and (with the fix) the plain-ground landing transition HARD-ZEROS
+	# horizontal velocity on the landing frame. Deterministic (no shared-Input timing).
 	player.global_position = Vector3(0.0, 4.0, 10.0)
 	player._yaw = 0.0
 	player.rotation.y = 0.0
 	player.velocity = Vector3(0.0, 0.5, -6.0)   # ~6 m/s forward, slightly rising
 	await get_tree().physics_frame
+	var speed_before_land := Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+	var landed := false
+	for _i in 120:
+		# Track the largest horizontal speed seen WHILE STILL AIRBORNE (the carried
+		# momentum is intact in the air — only the landing frame zeros it).
+		if not player.is_on_floor():
+			speed_before_land = maxf(speed_before_land, Vector3(player.velocity.x, 0.0, player.velocity.z).length())
+		await get_tree().physics_frame
+		if player.is_on_floor() and player._state == S_GROUND:
+			landed = true
+			break
+	# Speed on the landing frame itself (post-tick): must be ~0 already, not the
+	# carried air speed slowly bleeding.
+	var speed_on_land := Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+	await get_tree().physics_frame
+	var speed_next := Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+
+	_assert(
+		"landing with no input HARD-ZEROS horizontal momentum on the landing frame (dead landing, not a decay)",
+		landed and speed_before_land > 4.0 and speed_on_land < 0.1 and speed_next < 0.1,
+		"landed=%s, air_speed=%.3f -> landing_frame=%.4f, next_frame=%.4f (both must be < 0.10)" % [
+			str(landed), speed_before_land, speed_on_land, speed_next]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## (d2) Landing while HOLDING a direction → the player WALKS (input-driven), starting
+## immediately on landing: horizontal speed goes 0 → walk speed via ground accel. This
+## proves the hard-zero is not a freeze — held input drives normal ground locomotion.
+func _test_landing_with_input_walks() -> void:
+	if _target_label == "imperative":
+		return
+	var ctx := await _spawn_level()
+	var player: CharacterBody3D = ctx["player"]
+	await _settle_on_floor(player)
+
+	player.global_position = Vector3(0.0, 4.0, 10.0)
+	player._yaw = 0.0
+	player.rotation.y = 0.0
+	player.velocity = Vector3(0.0, 0.5, -6.0)   # ~6 m/s forward, slightly rising
+	await get_tree().physics_frame
+	# Hold forward (W = -Z, aligned with motion) THROUGH the landing.
+	_send_key(KEY_W, true)
 	var landed := false
 	for _i in 120:
 		await get_tree().physics_frame
 		if player.is_on_floor() and player._state == S_GROUND:
 			landed = true
 			break
-	var speed_on_land := Vector3(player.velocity.x, 0.0, player.velocity.z).length()
-
-	# With no input, ground friction must bleed it to rest within ~1 s (60 frames).
-	var speed_after := speed_on_land
-	for _i in 60:
+	# After landing, with W held, ground accel brings speed up to walk speed from 0.
+	var walk_speed := float(player.kit.params.get("walk_speed", 5.5))
+	var speed_settled := 0.0
+	for _i in 30:
 		await get_tree().physics_frame
-		speed_after = Vector3(player.velocity.x, 0.0, player.velocity.z).length()
-		if speed_after < 0.1:
-			break
+		speed_settled = Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+	_send_key(KEY_W, false)
 
 	_assert(
-		"landing with no input bleeds horizontal momentum to rest (no lingering slide)",
-		landed and speed_after < 0.1,
-		"landed=%s, speed_on_land=%.3f -> speed_after_60f=%.4f (must be < 0.10)" % [
-			str(landed), speed_on_land, speed_after]
+		"landing while holding a direction walks (input-driven accel to walk speed, not a freeze)",
+		landed and is_equal_approx(snappedf(speed_settled, 0.01), snappedf(walk_speed, 0.01)),
+		"landed=%s, settled walk speed=%.3f (expected ~walk_speed=%.3f)" % [
+			str(landed), speed_settled, walk_speed]
+	)
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+
+## (d3) Slide-on-landing regression: land FAST with crouch held → enter SLIDE,
+## CARRYING horizontal momentum (the hard-zero must NOT apply to the slide path).
+func _test_landing_crouch_fast_slides_carrying_momentum() -> void:
+	if _target_label == "imperative":
+		return
+	var ctx := await _spawn_level()
+	var player: CharacterBody3D = ctx["player"]
+	await _settle_on_floor(player)
+
+	# Airborne, descending, moving fast forward (above slide_entry_speed) with crouch
+	# held — the slide-on-landing case. yaw=0 so -Z motion aligns with W/forward.
+	var entry: float = player.slide_entry_speed
+	# Hold crouch from the very first tick so it is unambiguously held across the
+	# landing (the slide-on-landing guard reads crouch on the landing frame).
+	_send_key(KEY_CTRL, true)
+	player.global_position = Vector3(0.0, 4.0, 10.0)
+	player._yaw = 0.0
+	player.rotation.y = 0.0
+	player.velocity = Vector3(0.0, 0.5, -(entry + 1.5))   # above slide-entry, near-level approach
+	await get_tree().physics_frame
+	var entered_slide := false
+	var speed_on_slide := 0.0
+	for _i in 120:
+		await get_tree().physics_frame
+		if player._state == S_SLIDE:
+			entered_slide = true
+			speed_on_slide = Vector3(player.velocity.x, 0.0, player.velocity.z).length()
+			break
+	_send_key(KEY_CTRL, false)
+
+	_assert(
+		"slide-on-landing carries momentum (fast + crouch held at landing → SLIDE, not zeroed)",
+		entered_slide and speed_on_slide >= entry,
+		"entered_slide=%s, speed_in_slide=%.3f (>= entry=%.2f; carried, not zeroed)" % [
+			str(entered_slide), speed_on_slide, entry]
 	)
 	ctx["level"].queue_free()
 	await get_tree().process_frame

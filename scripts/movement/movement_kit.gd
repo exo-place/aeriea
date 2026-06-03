@@ -38,7 +38,7 @@ const COND_OPS := [
 const EFFECT_OPS := [
 	"accelerate_toward", "air_strafe", "apply_friction", "apply_gravity",
 	"set_velocity_y", "set_velocity_y_max", "add_velocity", "carve",
-	"slope_accelerate", "clamp_speed_h", "set_collider_height",
+	"slope_accelerate", "clamp_speed_h", "zero_velocity_h", "set_collider_height",
 	"set_timer", "add_timer",
 	"lerp_camera_height", "lerp_fov", "lerp_camera_roll",
 	"tween_position", "respawn", "move_and_slide",

@@ -208,14 +208,33 @@
           "do": [ { "do": "set_timer", "name": "vault", "value": "vault_duration" } ]
         },
         {
-          "comment": "Landed: hand off to GROUND this same frame so a buffered jump/slide fires on the landing frame. Guarded by speed_v<=0 (not rising) so a FRESH jump (vy>0, is_on_floor() still stale-true at tick-top before move_and_slide) does NOT immediately bounce back to GROUND and get its impulse clobbered. You land when descending, not when launching.",
+          "comment": "Slide-on-landing: land FAST with crouch held → enter SLIDE directly, CARRYING horizontal momentum (do NOT zero it). This is a DEDICATED landing→slide path (priority 15, above the plain-ground landing at 10) so the momentum-carry case is decided BEFORE the plain-landing zero, never reaching it. The do-block mirrors the GROUND→SLIDE entry exactly (guarded entry boost, cap, crouch collider, slide timers) so a running-crouch landing slides identically whether the crouch was held across the landing or pressed once grounded. Guarded by speed_v<=0 like the plain landing (you land descending, not launching).",
+          "when": { "op": "all", "of": [
+            { "op": "on_ground" },
+            { "op": "speed_v", "cmp": "le", "value": 0 },
+            { "op": "input_pressed", "action": "crouch" },
+            { "op": "speed_h", "cmp": "ge", "value": "slide_entry_speed" }
+          ] },
+          "to": "SLIDE",
+          "priority": 15,
+          "do": [
+            { "do": "add_velocity", "space": "velocity", "vector": "slide_boost", "guard_not_in": "SLIDE" },
+            { "do": "clamp_speed_h", "max": "max_slide_speed" },
+            { "do": "set_collider_height", "value": "crouch_height" },
+            { "do": "set_timer", "name": "slide", "value": "slide_max_time" },
+            { "do": "set_timer", "name": "slide_steer", "value": 0 }
+          ]
+        },
+        {
+          "comment": "Landed into the normal ground state: hand off to GROUND this same frame so a buffered jump fires on the landing frame, and HARD-ZERO horizontal velocity on the landing frame (a dead landing — post-landing momentum is 0 instantly, not decayed over ~60 frames by ground friction). After landing the player walks ONLY if holding a direction (GROUND tick's input-driven accelerate_toward from 0 — that's locomotion, not carried momentum); releasing input stays put. The slide-on-landing case is the higher-priority AIR→SLIDE transition above, so this zero never touches a carried slide. Guarded by speed_v<=0 (not rising) so a FRESH jump (vy>0, is_on_floor() still stale-true at tick-top before move_and_slide) does NOT bounce back to GROUND and get clobbered. You land when descending, not when launching.",
           "when": { "op": "all", "of": [
             { "op": "on_ground" },
             { "op": "speed_v", "cmp": "le", "value": 0 }
           ] },
           "to": "GROUND",
           "priority": 10,
-          "reenter": true
+          "reenter": true,
+          "do": [ { "do": "zero_velocity_h" } ]
         }
       ],
       "tick": [

@@ -253,7 +253,17 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			timers["glide"] = P_glide_max_time
 			active_state = "GLIDE"
 			return false
+		elif (body.is_on_floor() and (body.velocity.y <= 0.0) and frame.is_pressed("crouch") and (_speed_h() >= P_slide_entry_speed)):
+			_k_add_velocity(frame, P_slide_boost, "velocity", "SLIDE", false, false)
+			_k_clamp_speed_h(P_max_slide_speed)
+			body.host_set_collider_height(P_crouch_height, false)
+			timers["slide"] = P_slide_max_time
+			timers["slide_steer"] = 0.0
+			active_state = "SLIDE"
+			return false
 		elif (body.is_on_floor() and (body.velocity.y <= 0.0)):
+			body.velocity.x = 0.0
+			body.velocity.z = 0.0
 			active_state = "GROUND"
 			return true
 		return false

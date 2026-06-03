@@ -470,6 +470,9 @@ func _emit_effect(e: Dictionary, indent: String) -> void:
 				indent, _lower_value(e.get("rate")), _lower_value(e.get("ref_angle"))])
 		"clamp_speed_h":
 			_line("%s_k_clamp_speed_h(%s)" % [indent, _lower_value(e.get("max"))])
+		"zero_velocity_h":
+			_line("%sbody.velocity.x = 0.0" % indent)
+			_line("%sbody.velocity.z = 0.0" % indent)
 		"set_collider_height":
 			_line("%sbody.host_set_collider_height(%s, %s)" % [
 				indent, _lower_value(e.get("value")), str(bool(e.get("require_headroom", false))).to_lower()])

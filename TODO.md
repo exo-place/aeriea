@@ -156,17 +156,24 @@ change, reviewed against "collapse asymmetries to primitives.")
   inner life — `fuwafuwa`/`ashwren`/`existence` patterns, seeded-
   deterministic); (2) text generation with authored / procedural / hybrid
   / beyond-SOTA-generated all first-class (mad-libs and hot-loop LLM ruled
-  out). The spine: brain → communicative intent (meaning, not words) →
-  NLG → surface text. Player's half of a conversation = composable social
-  affordances (`affordance-substrate.md`); NPC's half = the brain→intent→
-  NLG pipeline. Peer R&D bet with the soft-body surrogate (offline-
-  accurate / build-time-trained → deterministic real-time surrogate;
-  online inference forbidden). Open: brain architecture/fields/update
-  rules; generator's concrete approach (semantic formalism, realization
-  grammar, learned components); whether conversation reuses vs extends the
-  affordance substrate; memory/relationship representation; KIM async
-  text-presence; content-authoring mix weights (ties to content-strategy
-  question); names are the lead's to set.
+  out). The spine: brain → communicative intent (meaning, modality-
+  independent) → multi-channel realization (text/NLG is ONE channel;
+  embodied channels = facial expression, gaze, gesture, posture, proxemics,
+  prosody, in-world action — all deterministic projections of the same
+  intent). Text = unit test / lower bound; embodied 3D/VR performance =
+  release build (esp. load-bearing in VR). Player's half of a conversation
+  = composable social affordances (`affordance-substrate.md`); NPC's half =
+  the brain→intent→realization pipeline. THREE peer R&D bets, same shape
+  (offline-accurate / build-time-trained → deterministic real-time
+  surrogate; online inference forbidden): language generator, soft-body
+  sim, embodied-expression realizer — the realizer consumes the
+  animation/soft-body pillar. Open: brain architecture/fields/update rules;
+  generator's concrete approach (semantic formalism, realization grammar,
+  learned components); intent→embodied-channel mapping; cross-channel
+  coherence/timing; whether conversation reuses vs extends the affordance
+  substrate; memory/relationship representation; KIM async text-presence;
+  content-authoring mix weights (ties to content-strategy question); names
+  are the lead's to set.
 
 ## Open design questions (from DESIGN.md)
 

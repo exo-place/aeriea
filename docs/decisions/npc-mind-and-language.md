@@ -1,12 +1,15 @@
-# NPC mind, dialogue, and language generation
+# NPC mind & expression (language + embodied performance)
 
 Status: **R&D DIRECTION / PILLAR — not a frozen spec** (2026-06-03)
 
 Scope: the architecture *direction* for how aeriea's NPCs think and how
-they speak — the cognitive/personality simulation underneath, and the
-language generation on top. This is an R&D pillar: it records the two
-demands decided this session, the load-bearing spine that resolves them,
-and the framing that makes it one consistent project stance. It is
+they *express* — the cognitive/personality simulation underneath, and the
+multi-channel realization of communicative intent on top. Language /
+text generation is **one channel** among several; the same intent also
+renders as embodied performance (expression, gaze, gesture, posture,
+proxemics, prosody, in-world action). This is an R&D pillar: it records
+the two demands decided this session, the load-bearing spine that resolves
+them, and the framing that makes it one consistent project stance. It is
 **not** an implementation, and it is **not** a frozen spec. Genuinely
 open pieces are marked open; no specifics are invented beyond what was
 decided.
@@ -80,37 +83,73 @@ generator is the R&D frontier (below). Both are honest; both are in.
 
 ---
 
-## The spine — "simulation underneath, rendering on top" applied to LANGUAGE
+## The spine — "simulation underneath, rendering on top" applied to EXPRESSION
 
 The load-bearing pipeline:
 
 > **Brain** (the deterministic cognition / personality simulation)
-> **→ communicative intent** (a language-INDEPENDENT semantic act:
+> **→ communicative intent** (a modality-INDEPENDENT semantic act:
 > speech-act type + propositional content + stance / affect + register +
 > memory references)
-> **→ NLG engine** (grammar + semantics + authored fragments + procedural
-> + hybrid, deterministic)
-> **→ surface text**.
+> **→ multi-channel realization** (a set of *deterministic projections* of
+> the one intent — text/NLG, facial expression, gaze, gesture, posture,
+> proxemics, prosody, in-world action)
+> **→ surface performance** (the utterance plus the embodied behavior).
 
 The load-bearing abstraction is the **middle seam**: communicative intent
-is **MEANING, not words**. The NPC decides *what it means to convey* —
-the speech act (assert / ask / tease / reassure / refuse / confide …),
-the propositional content, the stance and affect behind it, the register
-it intends, and which memories / facts it is referencing — entirely
-*before* any words exist. The NLG engine is what turns that meaning into
-a surface utterance.
+is **MEANING, not a particular channel's output** — not words, not a
+keyframe, not a viseme. The NPC decides *what it means to convey* — the
+speech act (assert / ask / tease / reassure / refuse / confide …), the
+propositional content, the stance and affect behind it, the register it
+intends, and which memories / facts it is referencing — entirely *before*
+any channel realizes it. Each realizer turns that one meaning into its
+own surface: the NLG engine into a surface utterance, the embodied
+realizer into expression / gaze / gesture / posture / proxemics / prosody
+/ action. **Text / NLG is one realizer among several**, not the
+privileged one.
 
-This seam is what makes the brain and the prose **separable**: the brain
-is responsible for meaning; the NLG engine is responsible for words;
-neither needs to know the other's internals. It is also what makes "the
-same NPC reads differently across moods" *fall out for free* — one
+This seam is what makes the brain and its realizers **separable**: the
+brain is responsible for meaning; each realizer is responsible for its
+channel; none needs to know the others' internals. It is also what makes
+"the same NPC reads differently across moods" *fall out for free* — one
 communicative intent, realized differently as the brain's affect /
-register vary, is one intent with mood-varied realization, not a separate
-authored branch per mood (`DESIGN.md` → *Platform for depth*: "Same NPC
-reads differently across moods"). And it is **where determinism lives**:
-both the brain state and the communicative intent are deterministic
-functions of `seed + event log`, and the NLG is deterministic given
-(intent, brain state, seed) — so the whole chain is reproducible.
+register vary, is one intent with mood-varied realization across *every*
+channel, not a separate authored branch per mood (`DESIGN.md` → *Platform
+for depth*: "Same NPC reads differently across moods"). And it is **where
+determinism lives**: both the brain state and the communicative intent
+are deterministic functions of `seed + event log`, and each realizer is
+deterministic given (intent, brain state, seed) — so the whole chain is
+reproducible.
+
+### Realization channels (the projections of one intent)
+
+The same (intent, brain state, seed) projects onto multiple channels,
+each a deterministic realizer:
+
+- **Text / NLG** — the surface utterance (the language channel; detailed
+  throughout this doc).
+- **Facial expression** — affect and emphasis on the face.
+- **Gaze / eye-contact** — where the NPC looks, and at whom.
+- **Gesture** — hand/arm motion that carries or punctuates meaning.
+- **Body posture** — the whole-body stance behind the affect.
+- **Proxemics** — orientation, approach, and spacing in the world (how the
+  NPC positions itself relative to the player and others).
+- **Prosody / voice** — the vocal realization (timing, intonation, affect).
+- **In-world action** — doing something, as an expressive act.
+
+All are **deterministic projections of the same (intent, brain state,
+seed)** — exactly like the text realization, and replayable on one runtime
+under the same cross-platform-float caveat.
+
+**Text = unit test; embodied 3D/VR performance = release build.** This is
+the same relationship `reference-analysis.md` §6 draws for the world —
+"the text MUD is the unit test for the interaction graph; the 3D client is
+the release build" — now applied to NPC *expression*: the text rendering
+is the litmus / lower bound (and keeps the pure-text-standalone bar intact,
+below), and the embodied performance is the full rendering of the same
+intent. This is **especially load-bearing in VR**, where gaze,
+micro-expression, and proxemics *are* the immersion test — a correct
+utterance with dead eyes and wrong spacing fails it.
 
 ---
 
@@ -137,11 +176,12 @@ conversation passes the pure-text litmus by construction (see below).
 > social verbs gated by and mutating brain state. Recorded as open; the
 > shape is decided, the substrate-identity is not.
 
-### The NPC's half — the brain→intent→NLG pipeline
+### The NPC's half — the brain→intent→realization pipeline
 
 The **NPC's half is its expression**: the brain → communicative intent →
-NLG → surface text pipeline above. The NPC does not read a dialogue tree;
-it generates an utterance from what it means to say.
+multi-channel realization pipeline above (text being one channel). The
+NPC does not read a dialogue tree; it generates an utterance — and an
+embodied performance — from what it means to say.
 
 So: **the player never walks a dialogue tree; the NPC never reads one.**
 The player's half is an affordance graph; the NPC's half is generated
@@ -158,8 +198,9 @@ the thing.
 ## Determinism & the LLM line
 
 NPC brain state and communicative intent are **deterministic functions of
-`seed + event log`**. The NLG is **deterministic given (intent, brain
-state, seed)**. The entire chain therefore replays bit-for-bit on one
+`seed + event log`**. Each realizer (text/NLG and every embodied channel)
+is **deterministic given (intent, brain state, seed)**. The entire chain
+therefore replays bit-for-bit on one
 runtime, consistent with the seeded-sim commitment and the same
 cross-platform-float caveat the movement / affordance substrates carry.
 
@@ -182,10 +223,11 @@ realizer.
 
 ---
 
-## Peer R&D bet with the soft-body surrogate
+## Peer R&D bets — language, physics, and embodied performance
 
-The beyond-SOTA grammar-and-semantics generator and the physically-accurate
-real-time soft-body sim are **PEER moonshots with the SAME shape**:
+The beyond-SOTA grammar-and-semantics generator, the physically-accurate
+real-time soft-body sim, and the **embodied expression realizer** are
+**PEER moonshots with the SAME shape**:
 
 - a capability current real-time tech **cannot deliver online**;
 - resolved by an **offline-accurate or build-time-trained model**, lowered
@@ -193,17 +235,30 @@ real-time soft-body sim are **PEER moonshots with the SAME shape**:
 - with **online / per-query inference forbidden**.
 
 This is one consistent project stance for "beyond-SOTA yet deterministic,"
-spanning **physics** (soft-body / contact deformation / physics-driven
-transformation) and **language** (semantic→surface generation). Neither is
-a copout: in both cases the hard accuracy is paid for offline and the
-runtime evaluates a deterministic surrogate, rather than either shipping a
-cheap fake or calling an online black box in the hot loop.
+spanning **language** (semantic→surface generation), **physics**
+(soft-body / contact deformation / physics-driven transformation), and
+**embodied performance** (intent→expression / gaze / gesture / posture /
+proxemics / prosody / action). None is a copout: in every case the hard
+accuracy is paid for offline and the runtime evaluates a deterministic
+surrogate, rather than either shipping a cheap fake or calling an online
+black box in the hot loop. The embodied realizer specifically is **not**
+canned / hand-keyed emotes-as-the-only-vocabulary, and **not** a runtime
+black box — the same deterministic-surrogate shape as its two peers.
+
+**The embodied realizer consumes the animation / soft-body pillar.**
+Expression is partly *rendered through the same deformation surrogate*:
+facial soft-tissue, secondary motion, and contact deformation are how
+the affect on a face or in a posture actually shows. So the systems
+interlock — the embodied realizer decides *what* to express from intent,
+and the soft-body sim is part of *how* that expression is physically
+realized.
 
 Cross-link: the soft-body physics R&D direction in `DESIGN.md` →
 *Secondary / soft-body physics* (and the *animation/fidelity bet*
 framing) and the body/animation backlog in `TODO.md`. The language
-generator is the linguistic instance of the same bet the soft-body sim is
-the secondary-motion instance of.
+generator, the soft-body sim, and the embodied realizer are three
+instances of one bet — the linguistic, the secondary-motion, and the
+expressive-performance instances respectively.
 
 ---
 
@@ -215,10 +270,15 @@ At **every layer**, the honest construction is mandatory:
   emotion, relationships, theory-of-mind, personality — **not a mood
   scalar**.
 - **Communicative intent** must be a genuine semantic representation —
-  meaning, not words — **not a label that maps 1:1 to a canned line**.
-- **Realization** must be real grammar + semantics, with authored /
+  meaning, not a particular channel's output — **not a label that maps
+  1:1 to a canned line (or a canned emote)**.
+- **Text realization** must be real grammar + semantics, with authored /
   procedural / hybrid all first-class — **not mad-libs, and not an LLM
   call in the loop.**
+- **Embodied realization** must be a deterministic surrogate over the
+  expression channels (face / gaze / gesture / posture / proxemics /
+  prosody / action) — **not a fixed library of hand-keyed emotes as the
+  only vocabulary, and not a runtime black box.**
 
 This is the governing constraint on the whole pillar, and it is the
 direct descendant of `DESIGN.md`'s 100%-immersion north star ("NPC
@@ -235,6 +295,14 @@ that runs through the design.
 - **The generator's concrete approach.** The semantic-representation
   formalism for communicative intent, the realization grammar, and which
   components are build-time-learned (vs hand-built / procedural) are open.
+- **The intent→embodied-channel mapping.** How one communicative intent
+  projects onto facial expression / gaze / gesture / posture / proxemics /
+  prosody / action — the per-channel realizers and their formalisms — is
+  open (the embodied analogue of the generator's concrete approach).
+- **Cross-channel coherence & timing.** How the channels stay mutually
+  consistent and synchronized (utterance vs gesture vs gaze vs prosody —
+  e.g. beat alignment, turn-taking, who-looks-when) so the performance
+  reads as one coherent act rather than independent streams, is open.
 - **Substrate identity for the player's half.** Whether conversation
   reuses vs extends the affordance substrate (above) is open.
 - **NPC memory representation / storage** in the sim record; the concrete
@@ -245,5 +313,6 @@ that runs through the design.
   procedural : hybrid : generated. Ties directly to the open
   *content-authoring strategy* question (`DESIGN.md` → *Open questions*;
   TODO.md).
-- **Names.** Names for the brain, the intent representation, and the NLG
-  engine are the lead's to set; none are coined here.
+- **Names.** Names for the brain, the intent representation, and the
+  realizers (the NLG engine and the embodied-performance realizer) are the
+  lead's to set; none are coined here.

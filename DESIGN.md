@@ -468,6 +468,14 @@ the player's. Weather, time, seasons drive their own changes.
 `existence`-style state simulation extended to inhabitants, plus
 `fuwafuwa`/`ashwren` patterns for autonomous-presence behavior.
 
+How rich NPCs and *conversational presence* (System 25) are actually
+realized — a real cognitive/personality brain underneath, and a
+deterministic semantic→surface language pipeline on top (brain →
+communicative intent → NLG → text), with the player's half of a
+conversation built as composable social affordances — is captured as an
+R&D pillar in **`docs/decisions/npc-mind-and-language.md`** (R&D
+direction, not a frozen spec).
+
 ### Density of available content, not forced cadence
 
 The design property is **how much there is to encounter in the

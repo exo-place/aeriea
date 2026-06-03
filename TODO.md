@@ -147,6 +147,27 @@ change, reviewed against "collapse asymmetries to primitives.")
   boring text reduction as a strong negative signal (caveat: genuinely
   spatial/embodied composition may under-credit in text — see the doc).
 
+## NPC mind + dialogue + language (R&D pillar)
+
+- **NPC mind, dialogue, and language generation** — R&D pillar (not a
+  frozen spec): see **`docs/decisions/npc-mind-and-language.md`**. Two
+  demands: (1) a real cognitive/personality brain (memory, beliefs,
+  drives, emotion, relationships, theory-of-mind, personality, autonomous
+  inner life — `fuwafuwa`/`ashwren`/`existence` patterns, seeded-
+  deterministic); (2) text generation with authored / procedural / hybrid
+  / beyond-SOTA-generated all first-class (mad-libs and hot-loop LLM ruled
+  out). The spine: brain → communicative intent (meaning, not words) →
+  NLG → surface text. Player's half of a conversation = composable social
+  affordances (`affordance-substrate.md`); NPC's half = the brain→intent→
+  NLG pipeline. Peer R&D bet with the soft-body surrogate (offline-
+  accurate / build-time-trained → deterministic real-time surrogate;
+  online inference forbidden). Open: brain architecture/fields/update
+  rules; generator's concrete approach (semantic formalism, realization
+  grammar, learned components); whether conversation reuses vs extends the
+  affordance substrate; memory/relationship representation; KIM async
+  text-presence; content-authoring mix weights (ties to content-strategy
+  question); names are the lead's to set.
+
 ## Open design questions (from DESIGN.md)
 
 - Project name (aeriea is tentative; pronounced "area")

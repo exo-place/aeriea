@@ -424,15 +424,54 @@ one-time build step it almost certainly will not matter.
   pose-curve blends are pure functions of `MovementState`. It fits seed +
   action-log with no extra work, and contributes nothing to the sim hash
   (render-side).
-- **Open dependency (explicit, do not pretend it's free):** the **mocap-data
-  sourcing + licensing + nix-reproducibility** for Slice 4's Motion Matching.
-  A motion database must be (a) license-clean for commercial shipping (CMU
-  mocap, license-clean motion sets, or self-recorded — each with its own terms),
-  (b) **nix-reproducible** (pinned fetch + deterministic preprocessing into the
-  MM feature database, same posture as §1), and (c) cross-platform
-  bit-deterministic in its search (float-order / tie-break / cross-platform
-  pinning — research §A1 caveat, §Open questions). **None of this is resolved.**
-  It is flagged as the gating open dependency for Slice 4 and tracked in TODO.md.
+- **Open dependency — RESOLVED (2026-06-04).** The **mocap-data sourcing +
+  licensing + nix-reproducibility** for Slice 4's Motion Matching is closed. A
+  motion database must be (a) license-clean for commercial shipping, (b)
+  **nix-reproducible** (pinned fetch + deterministic preprocessing into the MM
+  feature database, same posture as §1), and (c) cross-platform bit-deterministic
+  in its search. The chosen datasets:
+
+  - **100STYLE** — Ian Mason, Sebastian Starke, Taku Komura; **Zenodo record
+    8127870**, DOI `10.1145/3522618`, **CC BY 4.0**. `100STYLE.zip` is the raw
+    60 fps BVH (1.47 GB; md5 `3cf627852fd8192024c04a8d0ef49583`; nix SRI
+    `sha256-LDtAF/jiOX7mkEybn0NVHYtCbTndw1WNEh/unlXLLVg=`). Purpose-built stylized
+    locomotion; the locomotion subset (`Neutral`/`StartStop`/`March` styles ×
+    idle/walk/run/back/strafe/turn) is curated at build time. **Required
+    attribution:** *"The 100STYLE Dataset - Ian Mason"*. This is the **shipping
+    MM source** — ingested fully (BVH is ASCII).
+  - **CMU Motion Capture Library** — liberal CMU license (copy / modify /
+    redistribute / commercial OK; must NOT resell the raw data directly).
+    **Pinned mirror:** HuggingFace `gbionics/cmu-fbx` @ commit
+    `d18e9d3d14c08318eaa6c0602a6ead7fac40e58c` (2 548 FBX, `animations/<subj>_<mot>.fbx`).
+    **Required attribution:** *"data from mocap.cs.cmu.edu, NSF EIA-0196217"*.
+    **SOURCING + PINNING RESOLVED, but ingest DEFERRED-WITH-REASON:** the mirror
+    ships Kaydara **binary** FBX, and Godot has **no runtime FBX parser** (FBX is
+    imported via fbx2gltf at *editor* time only); a pure-GDScript binary-FBX
+    parser for retargeting is disproportionate. CMU drops in at the *same BVH
+    ingest seam* once a CMU **BVH** mirror or an editor-side FBX→BVH conversion
+    lands (`tools/motion_ingest.gd` is dataset-agnostic at the BVH boundary).
+    Walk/run/turn subjects to curate when it lands: 02, 07, 08, 09, 16, 35, 38, 69.
+
+  - **DISQUALIFIED** (verified, do not use): **LAFAN1** (Ubisoft, CC-BY-**NC**-ND —
+    NonCommercial + NoDerivatives), **Bandai-Namco** (CC-BY-**NC** — NonCommercial),
+    **AMASS / ACCAD / SFU** and the SMPL/AMASS family (academic / research-only
+    terms; commercial use needs separate licensing). NonCommercial / academic
+    terms are incompatible with shipping aeriea.
+
+  **Verification gaps (carry as open):** confirm the CMU live-FAQ wording (the
+  "no reselling raw data" clause) at ship time; the CMU HF commit is pinned but
+  its precise license text should be re-read when CMU ingest is implemented. The
+  100STYLE pin (DOI + md5 + SRI) is fully verified against a live fetch
+  (md5 matches Zenodo's published checksum).
+
+  The pipeline is **nix-reproducible** (`nix/motion-assets.nix` → `nix build
+  .#motion-assets`, pinned `fetchurl` → unzip → ingest → committed feature DB,
+  byte-deterministic — fresh rebuilds are byte-identical to the committed
+  `assets/body/locomotion_mm.res`) and the search is **deterministic by
+  construction** (weighted-squared-distance argmin, lowest-index tie-break,
+  fixed float path; `scripts/body/motion_matcher.gd`). Cross-link:
+  `../research/animation-morphing-procgen-bodies.md` §A1 (MM), §A2 (Learned MM
+  upgrade), §A8 (environment-aware), and the determinism scorecard.
 
 ### 3.5 The aspirational ceiling (deferred, R&D) — full-body physics-SIMULATED control
 
@@ -548,21 +587,58 @@ accel); the **movement behavioral suite + golden traces still pass unchanged**
 due); the body-origin-at-feet VR seam (`units-and-scale.md`) becomes relevant
 once a real skeleton is attached — note it, don't necessarily solve it here.
 
-**Slice 4 (DEFERRED) — Motion Matching, gated on a license-clean
-nix-reproducible motion set.**
-Replace/augment the procedural pose layer with Motion Matching (research §A1),
+**Slice 4 (LANDED 2026-06-04, 100STYLE) — Motion Matching, on the now-resolved
+license-clean nix-reproducible motion set (§3.4).**
+The procedural pose layer is *augmented* by Motion Matching (research §A1),
 reading the same `MovementState`, writing the same pose — a fidelity upgrade
-behind the same seam. In-tier upgrades after it: Environment-aware MM (§A8),
-Learned MM (§A2, neural-but-deterministic). Possibly move the per-frame search to
-gdext (§3.3).
-*Verify:* MM database built **nix-reproducibly** from a **pinned** motion set;
-animation reads `MovementState`; determinism preserved (search float-order /
-tie-break / cross-platform pinned — research §A1, §Open questions); behavioral
-suite + golden traces still green.
-*Risks/open deps — the gating one:* **the motion dataset's sourcing + commercial
-licensing + nix-reproducibility is unresolved** (§3.4). This slice does not start
-until that dependency is closed. Do **not** treat MM as free; the procedural floor
-(Slice 3) ships the game without it.
+behind the same Slice-3 seam. Implementation:
+
+- **Reproducible fetch + ingest:** `nix/motion-assets.nix` fetches the pinned
+  100STYLE archive (§3.4), curates the locomotion subset, and runs
+  `tools/motion_ingest.gd` headless: BVH parse → retarget onto the 163-bone
+  MakeHuman rig → per-frame MM feature DB. Output: the committed, compact (~2.9 MB),
+  byte-deterministic `assets/body/locomotion_mm.res` (`MotionDB` resource;
+  `scripts/body/motion_db.gd`) — runtime/end-users need neither the raw dataset
+  nor nix. A trimmed CC BY excerpt (`vendor/100style-cc-by/`, 4 Neutral clips)
+  enables fetch-free dev regen, mirroring the vendored MakeHuman CC0 subset.
+- **Deterministic runtime search:** `scripts/body/motion_matcher.gd` —
+  per-N-ticks argmin over the feature DB for the frame best matching the
+  `MovementState`-derived goal (desired local-frame velocity + turn rate), with a
+  fixed float path and lowest-index tie-break. No stochastic / online inference;
+  fits seed+action-log. `scripts/body/body_rig.gd` drives the pose from the
+  matched frames at the same seam; absent DB ⇒ graceful degradation to the
+  Slice-3 procedural cycle.
+
+*Verified:* MM DB built **nix-reproducibly** from the pinned 100STYLE (fresh
+rebuilds byte-identical to committed); search deterministic (same query → same
+frame, repeat + cross-matcher identical); goal-responsive (idle/walk/run/turn
+select distinct, appropriate frames — idle→idle, run faster than walk, turn
+matches a more-turning frame); movement behavioral suite + golden traces
+**unchanged / green** (MM is render-side, excluded from the sim hash);
+`body_motion_matching_test` (21 asserts) wired into `tests/run.sh`; screenshots
+under xvfb show upright, gait-distinct matched locomotion.
+
+*HONEST scope (what's partial / deferred):*
+- **CMU is deferred** (binary-FBX, no Godot runtime parser — §3.4). 100STYLE
+  alone is fully shipped; the ingest seam is BVH-agnostic so CMU drops in later.
+- **Retargeting quality:** the legs/torso read as plausible upright locomotion
+  (the load-bearing gait), distinct per goal. Cosmetic artifacts remain — arms
+  splay (BVH A-pose vs MakeHuman arm-rest mismatch; the per-clip frame-0 used as
+  the retarget rest is not always a clean neutral) and a slight head/neck offset.
+  These are retargeting-fidelity refinements (use the BVH HIERARCHY T-pose as the
+  rest instead of frame 0; per-bone twist correction), not blockers.
+- **Foot-IK over MM:** the Slice-3 two-bone solver + pelvis-drop were tuned for
+  the procedural cycle and *fight* the MM pose; under MM, foot-IK is skipped (MM
+  ground contact comes from the captured clips). Re-deriving foot-IK as a gentle
+  additive ground-adaptation layer that respects the MM pose is the refinement.
+- **Direction sign / weight tuning:** straight-forward goals can match a *back*
+  clip (the retargeted facing frame has forward = −z; reconciling that with the
+  facing-vs-trajectory weight balance is a tuning pass best done against on-screen
+  motion). The search is already deterministic and speed/idle/turn responsive.
+
+*In-tier upgrades (future):* Environment-aware MM (§A8), Learned MM (§A2,
+neural-but-deterministic); move the per-frame search to gdext if profiling shows
+GDScript is the bottleneck (§3.3).
 
 ### Risks (summary)
 
@@ -603,8 +679,12 @@ intersection, and the motion-data dependency is named, not wished away.
 
 ## Open threads (explicitly unresolved)
 
-- **Motion dataset sourcing + commercial licensing + nix-reproducibility** —
-  the gating open dependency for Slice 4 Motion Matching (§3.4).
+- ~~**Motion dataset sourcing + commercial licensing + nix-reproducibility**~~ —
+  **RESOLVED 2026-06-04** (§3.4): 100STYLE (CC BY 4.0) shipped; CMU (liberal
+  license) pinned but ingest-deferred (binary FBX). Remaining sub-threads:
+  CMU BVH ingest; retargeting-fidelity polish (arm/head, frame-0-rest →
+  T-pose-rest); foot-IK-over-MM as an additive layer; the forward/back sign +
+  facing/trajectory weight tuning. All Slice-4 refinements, not gating.
 - **Morphology-conditioned control lit review** — the morphology-generalizing
   control sub-area (§3.5; `procedural-body-and-animation.md` §D.1) is the next
   research lever for the physics-sim ceiling and was **not** covered by the

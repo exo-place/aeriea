@@ -28,6 +28,17 @@
           godot = pkgs.godot_4;
         };
 
+        # Nix-reproducible Motion-Matching feature DB (Slice 4 of
+        # docs/decisions/body-and-locomotion-slice.md): fetches the PINNED
+        # 100STYLE BVH archive (CC BY 4.0) and runs the in-repo GDScript ingest
+        # tool headless to curate the locomotion subset + build the committed
+        # MotionDB resource, with NO manual step.
+        #   nix build .#motion-assets   →   result/locomotion_mm.res
+        packages.motion-assets = import ./nix/motion-assets.nix {
+          inherit pkgs;
+          godot = pkgs.godot_4;
+        };
+
         # Canonical test runner — runs every test suite under xvfb, detects
         # truncation (missing RESULTS line = FAIL), and reports aggregate.
         #   nix run .#test

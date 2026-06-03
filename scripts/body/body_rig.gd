@@ -29,6 +29,11 @@ extends Node3D
 
 const MESH_PATH := "res://assets/body/base_body.res"
 const RIG_PATH := "res://assets/body/base_body_rig.json"
+## Slice 4 — the committed Motion-Matching feature DB (100STYLE CC BY 4.0). When
+## present, MM drives the gross body pose (replacing the procedural sine cycle);
+## foot-IK stays the ground-adaptation layer on top. When absent, the Slice-3
+## procedural cycle is the graceful-degradation floor (decision doc §3.2).
+const MOTION_DB_PATH := "res://assets/body/locomotion_mm.res"
 
 # Leg chain bone names (MakeHuman default rig). Two-bone IK uses hip/knee/ankle.
 const HIP_L := "upperleg01.L"
@@ -64,6 +69,17 @@ var _smoothed_speed: float = 0.0
 ## Set by the host each frame BEFORE _apply_pose: the current MovementState read.
 var grounded: bool = true
 var horizontal_speed: float = 0.0
+## Slice 4 — desired LOCAL-frame planar velocity (+z forward, +x right; m/s) and
+## desired yaw rate (rad/s), the Motion-Matching goal derived from MovementState.
+## Defaulted from horizontal_speed when the host uses the 2-arg seam (Slice-3
+## callers), so MM still gets a forward-locomotion goal without changes upstream.
+var local_velocity: Vector2 = Vector2.ZERO
+var turn_rate: float = 0.0
+
+## Slice 4 — Motion Matching. Built in build() iff MOTION_DB_PATH loads.
+var motion_db: MotionDB
+var matcher: MotionMatcher
+var use_motion_matching: bool = true
 
 ## The space state used for foot-IK raycasts; the host supplies its world.
 var _space: PhysicsDirectSpaceState3D
@@ -136,6 +152,16 @@ func build() -> bool:
 	mesh_instance.skin = skin
 	mesh_instance.skeleton = mesh_instance.get_path_to(skeleton)
 
+	# Slice 4 — load the committed Motion-Matching DB if present and wire the
+	# deterministic matcher. Absent DB => graceful degradation to the Slice-3
+	# procedural cycle (decision doc §3.2). RENDER-SIDE only.
+	if ResourceLoader.exists(MOTION_DB_PATH):
+		var db = load(MOTION_DB_PATH)
+		if db is MotionDB and db.frame_count > 0:
+			motion_db = db
+			matcher = MotionMatcher.new()
+			matcher.setup(motion_db)
+
 	return true
 
 
@@ -157,9 +183,18 @@ func _load_rig_json() -> Dictionary:
 
 ## Host feeds the sim read. grounded + horizontal speed are the locomotion
 ## drivers; this is the entire seam (movement-substrate §3.1).
-func set_movement_state(p_grounded: bool, p_horizontal_speed: float) -> void:
+func set_movement_state(p_grounded: bool, p_horizontal_speed: float,
+		p_local_velocity: Vector2 = Vector2.INF, p_turn_rate: float = 0.0) -> void:
 	grounded = p_grounded
 	horizontal_speed = p_horizontal_speed
+	# If the host supplies a local velocity vector (Slice-4 seam), use it as the MM
+	# goal; otherwise synthesize a forward-locomotion goal from the scalar speed so
+	# Slice-3 callers (2-arg) still drive MM with a sensible forward intent.
+	if p_local_velocity == Vector2.INF:
+		local_velocity = Vector2(0.0, p_horizontal_speed)   # +z forward
+	else:
+		local_velocity = p_local_velocity
+	turn_rate = p_turn_rate
 
 
 ## Set the world + the bodies to exclude from foot-IK rays (typically the player
@@ -175,6 +210,19 @@ func apply_pose(delta: float) -> void:
 	if skeleton == null:
 		return
 	_smoothed_speed = lerpf(_smoothed_speed, horizontal_speed, clampf(delta * 12.0, 0.0, 1.0))
+
+	# Slice 4 — Motion Matching drives the gross body when a DB is loaded; foot-IK
+	# (below) stays the ground-adaptation layer on top. Falls through to the
+	# Slice-3 procedural cycle when no DB is present (graceful degradation).
+	if matcher != null and use_motion_matching:
+		_apply_motion_matching()
+		# Foot-IK over MM: the Slice-3 two-bone solver + pelvis-drop were tuned for
+		# the procedural cycle and FIGHT the MM pose (they collapse the pelvis when
+		# layered on captured poses). Re-deriving foot-IK as a gentle additive
+		# ground-adaptation layer that respects the MM pose is the documented
+		# Slice-4 refinement (decision doc §3.2); until then MM ground contact comes
+		# from the captured clips themselves, so IK is skipped under MM.
+		return
 
 	# Reset the layered bones to rest before re-posing (so the pose is a pure
 	# function of state, not an accumulation).
@@ -208,6 +256,43 @@ func apply_pose(delta: float) -> void:
 
 	if grounded and foot_ik_enabled and _space != null:
 		_apply_foot_ik()
+
+
+# --- Slice 4: Motion-Matching pose ------------------------------------------
+# Deterministically search the feature DB for the frame best matching the current
+# MovementState-derived goal, then apply that frame's per-bone local rotations to
+# the skeleton. RENDER-SIDE; pure function of (goal, DB). Resets the MM-driven
+# bones to rest first so the pose is a pure function of the matched frame.
+var _mm_frame: int = 0
+
+func _apply_motion_matching() -> void:
+	# Step the matcher (deterministic argmin / clip-advance) with the goal.
+	var vel := local_velocity
+	if not grounded:
+		# Airborne: the locomotion DB has no fall clips; freeze the goal at idle so
+		# MM holds a neutral pose (foot-IK is also skipped while airborne).
+		vel = Vector2.ZERO
+	_mm_frame = matcher.step(vel, turn_rate)
+
+	# Reset every MM-driven bone to rest, then stamp the matched local rotations.
+	var nb := motion_db.bone_count
+	for bi in nb:
+		var bname := motion_db.bone_names[bi]
+		if not _bone_index.has(bname):
+			continue
+		var rest: Transform3D = _rest_local.get(bname, Transform3D.IDENTITY)
+		var q := motion_db.pose_quat(_mm_frame, bi)
+		# The DB quats are BVH-joint local rotations. Apply as the bone's local
+		# rotation, keeping the rest position. The root keeps its rest position
+		# (sim owns translation); MM supplies only orientation.
+		var idx: int = _bone_index[bname]
+		skeleton.set_bone_pose_position(idx, rest.origin)
+		skeleton.set_bone_pose_rotation(idx, q)
+
+
+## Expose the matched frame for tests (which DB frame the MM search chose).
+func motion_matched_frame() -> int:
+	return _mm_frame
 
 
 # --- analytic two-bone foot-IK ----------------------------------------------

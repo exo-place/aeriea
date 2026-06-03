@@ -108,6 +108,12 @@ func _ready() -> void:
 			"n=%s" % str(n))
 
 	# --- 4. PROCEDURAL LOCOMOTION responds to MovementState ------------------
+	# Slice 4 added Motion Matching, which apply_pose() prefers when a MotionDB is
+	# loaded. This section tests the Slice-3 PROCEDURAL floor (the graceful-
+	# degradation path that still ships when no MM DB is present), so disable MM
+	# here and drive the analytic cycle directly. (MM itself is covered by
+	# body_motion_matching_test.)
+	rig.use_motion_matching = false
 	rig.foot_ik_enabled = false   # isolate the cycle from IK for this assertion
 	# At REST: phase must not advance, leg returns to rest.
 	rig.set_movement_state(true, 0.0)

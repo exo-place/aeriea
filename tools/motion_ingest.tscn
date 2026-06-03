@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://motion_ingest_v1"]
+
+[ext_resource type="Script" path="res://tools/motion_ingest.gd" id="1_motioningest"]
+
+[node name="MotionIngest" type="Node"]
+script = ExtResource("1_motioningest")

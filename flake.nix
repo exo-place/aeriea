@@ -33,17 +33,35 @@
         #   nix run .#test
         # DO NOT hand-roll per-suite --quit-after invocations: short budgets
         # truncate before the suite finishes and falsely report low pass counts.
-        apps.test = {
-          type = "app";
-          # `nix run` executes from the caller's cwd; export it as AERIEA_ROOT
-          # so the runner script can `cd` to the project root rather than using
-          # `dirname $0` (which would point into the Nix store, not the project).
-          # `self` is the flake source tree — the committed tests/run.sh.
-          program = "${pkgs.writeShellScript "aeriea-test" ''
-            export AERIEA_ROOT="''${AERIEA_ROOT:-$PWD}"
-            exec bash "${self}/tests/run.sh"
-          ''}";
-        };
+        apps.test =
+          let
+            # Runtime dependencies needed by tests/run.sh:
+            #   - godot_4       → the `godot4` binary
+            #   - xvfb-run      → the `xvfb-run` wrapper
+            #   - xvfb          → `Xvfb` binary (xvfb-run spawns it)
+            #   - bash          → the shell that runs the script
+            #   - coreutils     → cd, printf, echo, etc.
+            #   - gnugrep       → grep -E / -oP used in run.sh
+            testDeps = with pkgs; [ godot_4 xvfb-run xvfb bash coreutils gnugrep ];
+            wrapper = pkgs.writeShellApplication {
+              name = "aeriea-test";
+              # writeShellApplication prepends all runtimeInputs to PATH
+              # automatically, so godot4 and xvfb-run are always found whether
+              # invoked via `nix run .#test` or any other entry point.
+              runtimeInputs = testDeps;
+              text = ''
+                # `nix run` executes from the caller's cwd; export it as
+                # AERIEA_ROOT so the runner can `cd` to the project root rather
+                # than using `dirname $0` (which points into the Nix store).
+                export AERIEA_ROOT="''${AERIEA_ROOT:-$PWD}"
+                exec bash "${self}/tests/run.sh"
+              '';
+            };
+          in
+          {
+            type = "app";
+            program = "${wrapper}/bin/aeriea-test";
+          };
 
         devShells.default = pkgs.mkShell rec {
           buildInputs = with pkgs; [

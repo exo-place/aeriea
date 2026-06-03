@@ -1,0 +1,168 @@
+{
+  "$schema": "aeriea-interaction-kit/1",
+  "comment": "Sandbox interaction kit — the valve->spout->jug->pedestal->beacon chain plus grab/drop/throw + the box-stack reach, expressed entirely as DATA. This is the reference semantics consumed by InteractionInterpreter; it reproduces the hand-wired scripts/interaction/*.gd exactly (parity gate: tests/interaction_behavior_test.gd, 6/6). See docs/decisions/affordance-substrate.md. PROMPT GRAMMAR (pinned, closed): a prompt is EITHER a literal string with {field} / {pct field} interpolation over readable state, OR a list of guarded variants [{when?, text}] resolved first-match (absent when = default). NO inline ternary expressions. {field} reads a state field on the verb's prompt scope (self for command/grab; held for place verbs read held.<field>); {pct field} renders round(field*100). See InteractionInterpreter._render_prompt.",
+
+  "params": {
+    "fill_rate": 1.5,
+    "full_threshold": 0.95,
+    "throw_impulse": 8.0
+  },
+
+  "interactables": [
+    {
+      "id": "box",
+      "tags": ["grabbable_box"],
+      "state": {},
+      "verbs": [
+        {
+          "name": "grab", "kind": "grab", "target": "self",
+          "when": { "op": "not", "of": [ { "op": "is_held" } ] },
+          "prompt": "[E] Pick up    (stack boxes to climb)",
+          "do": [ { "do": "grab_body" } ]
+        },
+        {
+          "name": "drop", "kind": "carry_release", "target": "held",
+          "when": { "op": "is_held" },
+          "prompt": "[E] Drop    [F] Throw",
+          "do": [ { "do": "release", "mode": "drop" } ]
+        },
+        {
+          "name": "throw", "kind": "carry_release", "target": "held",
+          "when": { "op": "is_held" },
+          "prompt": "",
+          "do": [
+            { "do": "release", "mode": "throw" },
+            { "do": "apply_impulse", "space": "look", "magnitude": "throw_impulse" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "valve",
+      "tags": ["valve"],
+      "state": { "flowing": { "type": "bool", "init": false } },
+      "verbs": [
+        {
+          "name": "toggle", "kind": "command", "target": "self",
+          "when": {},
+          "prompt": [
+            { "when": { "op": "state_bool", "scope": "self", "field": "flowing", "value": true }, "text": "[E] Close valve" },
+            { "text": "[E] Open valve" }
+          ],
+          "do": [
+            { "do": "toggle_state", "scope": "self", "field": "flowing" },
+            { "do": "emit", "signal": "flow_changed" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "spout",
+      "tags": ["spout"],
+      "refs": { "valve": "@valve" },
+      "regions": [ { "name": "stream", "kind": "area" } ],
+      "tick": [
+        {
+          "comment": "While the valve flows AND a jug overlaps the stream, fill it a deterministic fill_rate*dt. No bespoke _physics_process; a tick effect gated by a while guard.",
+          "while": { "op": "all", "of": [
+            { "op": "state_bool", "scope": "ref:valve", "field": "flowing", "value": true },
+            { "op": "in_region", "region": "stream", "tag": "jug" }
+          ] },
+          "do": [ { "do": "add_fill", "scope": "region:stream:jug", "field": "fill", "rate": "fill_rate" } ]
+        }
+      ]
+    },
+
+    {
+      "id": "jug",
+      "tags": ["jug"],
+      "state": { "fill": { "type": "number", "init": 0.0, "lo": 0.0, "hi": 1.0 } },
+      "verbs": [
+        {
+          "name": "grab", "kind": "grab", "target": "self",
+          "when": { "op": "not", "of": [ { "op": "is_held" } ] },
+          "prompt": [
+            { "when": { "op": "state_cmp", "scope": "self", "field": "fill", "cmp": "ge", "value": "full_threshold" }, "text": "[E] Pick up full jug    ({pct fill}%)" },
+            { "text": "[E] Pick up jug    ({pct fill}% — fill at spout)" }
+          ],
+          "do": [ { "do": "grab_body" } ]
+        },
+        {
+          "name": "drop", "kind": "carry_release", "target": "held",
+          "when": { "op": "is_held" },
+          "prompt": "[E] Drop    [F] Throw",
+          "do": [ { "do": "release", "mode": "drop" } ]
+        },
+        {
+          "name": "throw", "kind": "carry_release", "target": "held",
+          "when": { "op": "is_held" },
+          "prompt": "",
+          "do": [
+            { "do": "release", "mode": "throw" },
+            { "do": "apply_impulse", "space": "look", "magnitude": "throw_impulse" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "pedestal",
+      "tags": ["pedestal"],
+      "state": {
+        "active": { "type": "bool", "init": false },
+        "socketed": { "type": "socket", "init": "empty" }
+      },
+      "verbs": [
+        {
+          "name": "place", "kind": "place", "target": "self",
+          "when": { "op": "all", "of": [
+            { "op": "socket_empty", "scope": "self", "field": "socketed" },
+            { "op": "is_held" },
+            { "op": "held_is", "tag": "jug" }
+          ] },
+          "prompt": [
+            { "when": { "op": "state_cmp", "scope": "held", "field": "fill", "cmp": "ge", "value": "full_threshold" }, "text": "[E] Place full jug    (activates)" },
+            { "text": "[E] Place jug    (jug is not full)" }
+          ],
+          "do": [
+            { "do": "consume_into_socket", "scope": "self", "field": "socketed" },
+            { "do": "set_state", "scope": "self", "field": "active", "value": true,
+              "when": { "op": "state_cmp", "scope": "held", "field": "fill", "cmp": "ge", "value": "full_threshold" } },
+            { "do": "emit", "signal": "activated",
+              "when": { "op": "state_bool", "scope": "self", "field": "active", "value": true } }
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "beacon",
+      "tags": ["beacon"],
+      "refs": { "pedestal": "@pedestal" },
+      "regions": [ { "name": "reach", "kind": "area" } ],
+      "state": {
+        "armed": { "type": "bool", "init": false },
+        "triggered": { "type": "bool", "init": false }
+      },
+      "reactions": [
+        {
+          "comment": "Arm on the pedestal's activation event (replaces signal activated/connect).",
+          "on": { "from": "ref:pedestal", "event": "activated" },
+          "do": [ { "do": "arm", "scope": "self", "field": "armed" } ]
+        }
+      ],
+      "tick": [
+        {
+          "comment": "Convergence AND-gate as data: armed (interaction chain) AND the player body reached the beacon region (movement chain). Unarmed reach is inert because the guard is false. Idempotent trigger.",
+          "while": { "op": "all", "of": [
+            { "op": "state_bool", "scope": "self", "field": "armed", "value": true },
+            { "op": "reached_by_player", "region": "reach" }
+          ] },
+          "do": [ { "do": "trigger", "scope": "self", "field": "triggered" } ]
+        }
+      ]
+    }
+  ]
+}

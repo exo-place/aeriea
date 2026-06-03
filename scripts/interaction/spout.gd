@@ -1,54 +1,46 @@
-## Spout — an Area3D under the valve that, while the valve is flowing, fills any
-## Jug whose body is inside it. This is the seam where the valve's STATE (flowing)
-## and the jug's STATE (fill level) compose: neither edge alone fills the jug —
-## the valve must be open AND the jug must be carried into the stream. The fill is
-## continuous (rate × delta) so "hold the jug under the running spout" is a real,
-## legible action with a visible result (the jug's fill rises).
+## Spout — a thin scene shim over the data-driven `spout` interactable in
+## interaction/sandbox.kit.json. SLICE 1: the "while the valve flows AND a jug
+## overlaps the stream, fill it fill_rate*dt" behavior is now a kit `tick` effect
+## gated by a `while` guard (no bespoke _physics_process, no signal connect). This
+## node only registers its `stream` Area3D as the spout's region with the
+## InteractionWorld (the physics seam: the interpreter reads region overlaps from
+## the once-per-tick frame) and drives the diegetic stream visibility off the
+## valve's data state.
 class_name Spout
 extends Area3D
 
-@export var valve_path: NodePath
-## Litres-equivalent filled per second while a jug sits in the stream.
-@export var fill_rate: float = 1.5
+const KIT_ID := "spout"
+
+@export var valve_path: NodePath   # kept for the diegetic stream cue
 @export var stream_path: NodePath
 
-var _flowing: bool = false
+var _world: InteractionWorld
 var _stream: Node3D
+var _last_flowing := false
 
 
 func _ready() -> void:
-	var valve := get_node_or_null(valve_path)
-	if valve and valve.has_signal("flow_changed"):
-		valve.flow_changed.connect(_on_flow_changed)
-		_flowing = valve.is_flowing
 	_stream = get_node_or_null(stream_path) as Node3D
+	_world = _find_world()
+	if _world != null:
+		# Register the stream region (this Area3D itself is the stream overlap test).
+		_world.register(KIT_ID, self, { "stream": self })
 	_refresh_stream()
 
 
-func _on_flow_changed(flowing: bool) -> void:
-	_flowing = flowing
-	_refresh_stream()
+func _process(_dt: float) -> void:
+	if _world == null:
+		return
+	var flowing := bool(_world.get_state("valve", "flowing", false))
+	if flowing != _last_flowing:
+		_last_flowing = flowing
+		_refresh_stream()
+
+
+func _find_world() -> InteractionWorld:
+	return InteractionWorld.find_in_scene(self)
 
 
 func _refresh_stream() -> void:
-	# Diegetic water-stream cue: show the stream mesh only while flowing.
 	if _stream:
-		_stream.visible = _flowing
-
-
-func _physics_process(delta: float) -> void:
-	if not _flowing:
-		return
-	for body in get_overlapping_bodies():
-		var jug := _jug_of(body)
-		if jug != null:
-			jug.add_fill(fill_rate * delta)
-
-
-func _jug_of(node: Node) -> Node:
-	var n := node
-	while n != null:
-		if n.is_in_group("jug") and n.has_method("add_fill"):
-			return n
-		n = n.get_parent()
-	return null
+		_stream.visible = bool(_world.get_state("valve", "flowing", false)) if _world != null else false

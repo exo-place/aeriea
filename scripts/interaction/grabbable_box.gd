@@ -1,40 +1,31 @@
-## GrabbableBox — a portable physics prop (the stack-and-parkour primitive).
+## GrabbableBox — a thin scene shim over the data-driven `box` interactable
+## DEFINITION in interaction/sandbox.kit.json. SLICE 1: the grab verb lives in
+## DATA + the InteractionInterpreter. There are several box INSTANCES in the
+## sandbox (the stack-and-parkour primitive) all sharing the one `box` definition,
+## so each registers under a UNIQUE instance id (its node name) bound to the `box`
+## definition — the interpreter holds a per-instance state record (empty here) and
+## a shared verb set. This node carries no verb/guard/effect logic.
 ##
-## This is the simplest interactable: a RigidBody3D the player can GRAB, carry,
-## DROP, STACK, and THROW. Its whole point in the slice is the MOVEMENT × INTERACTION
-## composition: grab boxes → stack them under the high ledge → parkour off the
-## stack to reach an otherwise-unreachable ledge. Movement and interaction compose
-## into a reach the player could not achieve with either alone — the strongest
-## anti-barren-node demonstration (reference-analysis.md §6).
-##
-## Affordance surface (the duck-typed interactable contract): affordance_prompt +
-## interact + grab_body. It is grabbable, so the interactor's primary verb takes
-## the body rather than calling interact().
+## Composition role unchanged: grab boxes -> stack under the high ledge -> parkour
+## off the stack to reach an otherwise-unreachable ledge (movement × interaction).
 class_name GrabbableBox
 extends RigidBody3D
+
+const DEF_ID := "box"
+
+var _world: InteractionWorld
 
 
 func _ready() -> void:
 	add_to_group("interactable")
 	add_to_group("grabbable_box")
-	# Boxes should rest stably when stacked: moderate mass, some damping so a
-	# placed box settles instead of sliding off the stack.
 	mass = 1.5
 	can_sleep = true
+	_world = _find_world()
+	if _world != null:
+		# Unique instance id (node name) bound to the shared `box` definition.
+		_world.register_instance(name, DEF_ID, self)
 
 
-## Diegetic prompt shown when the reticle is on this box. Minimal, contextual.
-func affordance_prompt(_interactor) -> String:
-	return "[E] Pick up    (stack boxes to climb)"
-
-
-## Grabbable: hand the interactor THIS body to carry.
-func grab_body(_interactor) -> RigidBody3D:
-	return self
-
-
-## interact() is the fallback verb; for a box, primary already routes through
-## grab_body, so interact is a no-op. Present so it satisfies the interactable
-## contract uniformly.
-func interact(_interactor) -> void:
-	pass
+func _find_world() -> InteractionWorld:
+	return InteractionWorld.find_in_scene(self)

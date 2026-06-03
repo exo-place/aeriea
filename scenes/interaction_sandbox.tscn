@@ -10,6 +10,7 @@
 [ext_resource type="Script" path="res://scripts/interaction/pedestal.gd" id="8_pedestal"]
 [ext_resource type="Script" path="res://scripts/interaction/goal_beacon.gd" id="9_beacon"]
 [ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="10_pause"]
+[ext_resource type="Script" path="res://scripts/interaction/interaction_world.gd" id="11_world"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_mat"]
 
@@ -108,6 +109,9 @@ size = Vector3(0.5, 1.2, 0.5)
 size = Vector3(2, 2, 2)
 
 [node name="InteractionSandbox" type="Node3D"]
+
+[node name="InteractionWorld" type="Node" parent="."]
+script = ExtResource("11_world")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Env_1")

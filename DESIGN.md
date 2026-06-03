@@ -466,21 +466,41 @@ A consent / "no real victim" rationale is *deliberately not* used for this
 layer: it would logically imply fiction is fine and undercut the rule.
 
 **Layer 2 — curation / authoring stance (the mind / values line).**
-Separately, the project declines to author or foreground sexual content
-framed around a child-coded / non-consenting-capable **mind**, regardless
-of body. This is **not** a structural gate. "Mind age" is interiority and
-fiction, not a checkable body-state parameter — and in a world of
-malleable, decoupled minds, "mind-age / consent-capacity" is itself a
-fuzzy fictional construct with no crisp boundary to mechanize. Trying to
-gate it structurally would re-open exactly the un-checkable-interiority
-over-reach that the body gate deliberately avoids. So it is an
+Separately, the project declines to author, seed, or aim its generative
+substrate toward sexual content framed around a child-coded /
+non-consenting-capable **mind**, regardless of body. This is **not** a
+structural gate, and cannot be one — for two reasons that compound each
+other. First: "mind age" is interiority and fiction, not a checkable
+body-state parameter; in a world of malleable, decoupled minds,
+"mind-age / consent-capacity" is a fuzzy fictional construct with no
+crisp boundary to mechanize. Second and more fundamental: NPCs in aeriea
+are **procedurally constructed and varied** — a core design commitment
+(characters that feel like real individuals, not preset-parrots). A
+generative system that is not crippled to prevent a configuration cannot
+guarantee that configuration is provably unreachable; "the project does
+not author toward it" is therefore inherently a **soft line**, not a
+mechanizable hard gate. Crippling the generative substrate to force the
+hard property would degrade the procedural fidelity that makes characters
+feel real — an unacceptable trade.
+
+The actual stance is **low-surface-by-neglect**: the project does not
+author, seed, or aim the generative substrate toward child-coded-mind
+sexual framing, so such framing is unlikely to be well-formed or common
+in practice. The engine is simply not pointed that way; absence is mostly
+inherent to not pursuing it, not to active suppression. This is an
 authoring / curation policy, enforced as **content judgment, not code**.
 Its justification *is* consent-ethics — an entity that genuinely cannot
-consent — which makes it a values stance, not mere optics. The engine
-theoretically supports the broad configuration space (including this);
-the project gates it out at the content layer, deliberately leaving the
-primitive space general so the fidelity of nearby legitimate concepts,
-systems, and configurations is not degraded.
+consent — which makes it a values stance, not mere optics.
+
+It is also a **living curation line**: periodically evaluate whether
+emergent instances warrant being soft-patched out, and do so as found —
+an ongoing review process, not a one-time declaration. The generative
+substrate evolves; the curation process stays active with it.
+
+**Layer 1 remains the hard, generation-proof backstop regardless.**
+The body-state guard holds no matter how content is generated — the
+legal and platform risk never rests on this soft Layer-2 process.
+The structural gate cannot be bypassed by any generative path.
 
 **Spirit.** aeriea is a **"have fun" sandbox, not a "questionable values"
 sandbox** — general and high-fidelity by default, with these prohibitions

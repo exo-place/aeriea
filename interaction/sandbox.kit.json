@@ -231,6 +231,24 @@
           "do": [ { "do": "set_state", "scope": "self", "field": "open", "value": false } ]
         }
       ]
+    },
+
+    {
+      "comment": "SLICE 2 — LAYER-1 NSFW GATE PROOF (NOT REAL CONTENT). A TEST-ONLY placeholder verb tagged nsfw/intimate, present BEFORE any real NSFW content is authored, to prove by construction that the affordance substrate's guard layer gates the INTERSECTION (child-range body-state × NSFW verb). The verb does nothing but emit a marker event; its sole purpose is to be GUARDED on body_is_adult. At child-range body-state the body_is_adult guard is false -> this verb is NOT in the live verb set and CANNOT fire (structurally unavailable). At adult body-state the guard is true -> it is available. This is the gate hook wired from the first body-state slice (body-and-locomotion-slice.md §2.2; DESIGN.md Layer 1, non-toggle, gate the configuration not the primitive). The body_is_adult guard op is the GENERAL primitive every future NSFW/intimate verb will guard on; the age morph axis is untouched (fully continuous, child bodies still render for ordinary NPCs). When real intimate verbs land they reuse this exact guard.",
+      "id": "intimacy_test_marker",
+      "tags": ["nsfw", "intimate", "test_placeholder"],
+      "state": { "fired": { "type": "bool", "init": false } },
+      "verbs": [
+        {
+          "name": "intimacy_placeholder", "kind": "command", "target": "self",
+          "when": { "op": "body_is_adult" },
+          "prompt": "[E] (TEST) intimate placeholder — adult-body-gated",
+          "do": [
+            { "do": "set_state", "scope": "self", "field": "fired", "value": true },
+            { "do": "emit", "signal": "intimacy_placeholder_fired" }
+          ]
+        }
+      ]
     }
   ]
 }

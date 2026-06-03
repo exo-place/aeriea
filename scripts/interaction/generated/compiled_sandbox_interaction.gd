@@ -78,6 +78,8 @@ func _init_state_for(instance_id: String, def_id: String) -> void:
 		rec["pressed"] = false
 	elif def_id == "gate":
 		rec["open"] = false
+	elif def_id == "intimacy_test_marker":
+		rec["fired"] = false
 	state[instance_id] = rec
 
 func step(dt: float) -> void:
@@ -189,6 +191,12 @@ func _fire_verb(def_id_inst: String, self_id: String, frame: ResolvedFrame, dt: 
 			_e_toggle_state("lever", _self, "self", "thrown", frame)
 			_events.append({ "from": _self, "event": "lever_changed" })
 			return true
+	elif _def == "intimacy_test_marker":
+		var _owner: InteractionKit.Interactable = kit.interactables["intimacy_test_marker"]
+		if kind == "command" and (name_hint == "" or name_hint == "intimacy_placeholder") and (_g_body_is_adult()):
+			_e_set_state("intimacy_test_marker", _self, "self", "fired", frame, true)
+			_events.append({ "from": _self, "event": "intimacy_placeholder_fired" })
+			return true
 	return false
 
 func _propagate_events(frame: ResolvedFrame, dt: float) -> void:
@@ -242,6 +250,13 @@ func _g_state_enum(def_id: String, self_id: String, scope: String, field: String
 func _g_socket_empty(def_id: String, self_id: String, scope: String, field: String) -> bool:
 	var rec := _scope_record(def_id, scope, self_id, _frame)
 	return rec.get(field, null) == null
+
+## LAYER-1 NSFW GATE kernel — reads the actor adult body-state from the host.
+## Identical hook to InteractionInterpreter (host_is_adult_body); fail-closed.
+func _g_body_is_adult() -> bool:
+	if host != null and host.has_method("host_is_adult_body"):
+		return bool(host.host_is_adult_body())
+	return false
 
 func _cmp(lhs: float, op: String, rhs: float) -> bool:
 	match op:
@@ -424,6 +439,8 @@ func _eval_guard_dyn(g: Dictionary, def_id: String, self_id: String, frame: Reso
 			return _g_in_region(frame, self_id, str(g.get("region", "")), str(g.get("tag", "")))
 		"reached_by_player":
 			return frame.player_reached(self_id, str(g.get("region", "")))
+		"body_is_adult":
+			return _g_body_is_adult()
 		"state_bool":
 			var rec := _scope_record(def_id, str(g.get("scope", "self")), self_id, frame)
 			return bool(rec.get(str(g.get("field", "")), false)) == bool(g.get("value", true))

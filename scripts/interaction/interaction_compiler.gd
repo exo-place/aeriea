@@ -397,6 +397,10 @@ func _lower_guard(g: Dictionary, did: String, self_var: String) -> String:
 				self_var, _quote(str(g.get("region", ""))), _quote(str(g.get("tag", "")))]
 		"reached_by_player":
 			return "frame.player_reached(%s, %s)" % [self_var, _quote(str(g.get("region", "")))]
+		"body_is_adult":
+			# LAYER-1 NSFW GATE -- lowered to the SAME host hook the interpreter uses
+			# (host_is_adult_body), so interpreter == compiled by construction.
+			return "_g_body_is_adult()"
 		"state_bool":
 			return "_g_state_bool(%s, %s, %s, %s, %s)" % [
 				_quote(did), self_var, _quote(str(g.get("scope", "self"))), _quote(str(g.get("field", ""))),
@@ -535,6 +539,13 @@ func _g_state_enum(def_id: String, self_id: String, scope: String, field: String
 func _g_socket_empty(def_id: String, self_id: String, scope: String, field: String) -> bool:
 	var rec := _scope_record(def_id, scope, self_id, _frame)
 	return rec.get(field, null) == null
+
+## LAYER-1 NSFW GATE kernel — reads the actor adult body-state from the host.
+## Identical hook to InteractionInterpreter (host_is_adult_body); fail-closed.
+func _g_body_is_adult() -> bool:
+	if host != null and host.has_method("host_is_adult_body"):
+		return bool(host.host_is_adult_body())
+	return false
 
 func _cmp(lhs: float, op: String, rhs: float) -> bool:
 	match op:
@@ -748,6 +759,8 @@ func _eval_guard_dyn(g: Dictionary, def_id: String, self_id: String, frame: Reso
 			return _g_in_region(frame, self_id, str(g.get("region", "")), str(g.get("tag", "")))
 		"reached_by_player":
 			return frame.player_reached(self_id, str(g.get("region", "")))
+		"body_is_adult":
+			return _g_body_is_adult()
 		"state_bool":
 			var rec := _scope_record(def_id, str(g.get("scope", "self")), self_id, frame)
 			return bool(rec.get(str(g.get("field", "")), false)) == bool(g.get("value", true))

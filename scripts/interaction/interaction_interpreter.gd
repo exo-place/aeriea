@@ -297,6 +297,18 @@ func _eval_guard(g: Dictionary, owner: InteractionKit.Interactable, self_id: Str
 			return false
 		"reached_by_player":
 			return frame.player_reached(self_id, str(g.get("region", "")))
+		"body_is_adult":
+			# LAYER-1 NSFW GATE (DESIGN.md Layer 1; body-and-locomotion-slice.md 2.2).
+			# Reads the actor BODY-STATE adult predicate from the host (same shape as
+			# any other world-fact guard; the host supplies the body fact, the
+			# interpreter stays host-agnostic). This is the INTERSECTION predicate:
+			# an NSFW/intimate verb guarding on it is structurally absent from the
+			# live verb set unless the body-state is adult. The age primitive itself
+			# is untouched; only the combination is gated. No body-state -> NON-adult
+			# (fail-closed: the safe direction for a hard legal gate).
+			if host != null and host.has_method("host_is_adult_body"):
+				return bool(host.host_is_adult_body())
+			return false
 		"state_bool":
 			var rec := _scope_record(str(g.get("scope", "self")), owner, self_id, frame)
 			return bool(rec.get(str(g.get("field", "")), false)) == bool(g.get("value", true))

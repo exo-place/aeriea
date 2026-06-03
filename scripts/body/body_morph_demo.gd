@@ -11,6 +11,12 @@ const MESH_PATH := "res://assets/body/base_body.res"
 
 var _mi: MeshInstance3D
 var _sliders: Dictionary = {}
+## SLICE 2 — the BodyState record is the single source of truth for body morph
+## params (body_state.gd; body-and-locomotion-slice.md §2.1). The BodyState section
+## of the panel drives the blendshape weights through BodyState.apply_to(), and shows
+## the derived Layer-1 is_adult_body() predicate live as the continuous age sweeps.
+var _body_state: BodyState = BodyState.new()
+var _adult_label: Label
 
 
 func _ready() -> void:
@@ -80,3 +86,59 @@ func _build_ui(mesh: ArrayMesh) -> void:
 		row.add_child(slider)
 		panel.add_child(row)
 		_sliders[axis] = slider
+
+	_build_body_state_section(panel)
+
+
+## SLICE 2 — a BodyState-driven section: continuous macro-axis sliders that update
+## the BodyState record (the single source of truth), then BodyState.apply_to() drives
+## the blendshape weights. The age slider is CONTINUOUS (baby->child->young->old) and a
+## live label shows the derived is_adult_body() Layer-1 predicate over it.
+func _build_body_state_section(panel: VBoxContainer) -> void:
+	var sep := HSeparator.new()
+	panel.add_child(sep)
+	var heading := Label.new()
+	heading.text = "BodyState (Slice 2 — record drives morphs)"
+	panel.add_child(heading)
+
+	_adult_label = Label.new()
+	panel.add_child(_adult_label)
+
+	# [field, min, max, init] for the macro axes BodyState carries.
+	var axes := [
+		["age", 0.0, 1.0, _body_state.age],
+		["gender", 0.0, 1.0, _body_state.gender],
+		["muscle", 0.0, 1.0, _body_state.muscle],
+		["weight", 0.0, 1.0, _body_state.weight],
+		["height", 0.0, 1.0, _body_state.height],
+	]
+	for spec in axes:
+		var field: String = spec[0]
+		var row := HBoxContainer.new()
+		var lbl := Label.new()
+		lbl.text = "BodyState.%s" % field
+		lbl.custom_minimum_size = Vector2(120, 0)
+		row.add_child(lbl)
+		var slider := HSlider.new()
+		slider.min_value = float(spec[1])
+		slider.max_value = float(spec[2])
+		slider.step = 0.01
+		slider.value = float(spec[3])
+		slider.custom_minimum_size = Vector2(180, 0)
+		slider.value_changed.connect(func(v: float) -> void:
+			_body_state.set(field, v)
+			_body_state.apply_to(_mi)
+			_refresh_adult_label()
+		)
+		row.add_child(slider)
+		panel.add_child(row)
+
+	_body_state.apply_to(_mi)
+	_refresh_adult_label()
+
+
+func _refresh_adult_label() -> void:
+	if _adult_label == null:
+		return
+	_adult_label.text = "age=%.2f -> is_adult_body() = %s  (NSFW gate input)" % [
+		_body_state.age, str(_body_state.is_adult_body())]

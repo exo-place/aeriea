@@ -30,6 +30,7 @@ extends RefCounted
 const GUARD_OPS := [
 	"state_bool", "state_cmp", "state_enum", "socket_empty",
 	"is_held", "held_is", "focus_is", "in_region", "reached_by_player",
+	"body_is_adult",
 	"all", "any", "not",
 ]
 

@@ -54,6 +54,14 @@ var _interactor = null
 ## The player body (excluded from the focus ray; the reach-region overlap subject).
 var _player: CharacterBody3D = null
 
+## The actor BODY-STATE that the Layer-1 NSFW gate reads (DESIGN.md Layer 1;
+## body-and-locomotion-slice.md §2.2). The affordance guard layer consults its
+## is_adult_body() predicate via the body_is_adult guard op -> host_is_adult_body().
+## Default is the neutral young-adult base (BodyState defaults to age = AGE_YOUNG),
+## i.e. ADULT by default; a host/sim that morphs the actor toward the child range
+## flips is_adult_body() false and the gated verb leaves the live set BY CONSTRUCTION.
+var body_state: BodyState = BodyState.new()
+
 
 ## Find the InteractionWorld belonging to `node`'s OWN scene (scene-local). A test
 ## that spawns a fresh level keeps the previous level briefly alive, so a tree-wide
@@ -121,6 +129,22 @@ func get_state(kit_id: String, field: String, default_value = null):
 		return default_value
 	return interp.state.get(kit_id, {}).get(field, default_value)
 
+
+
+# ---------------------------------------------------------------------------
+# Layer-1 NSFW gate host hook (DESIGN.md Layer 1; body-and-locomotion-slice.md
+# §2.2). The interpreter/compiled driver call host_is_adult_body() to evaluate the
+# body_is_adult guard. This is the seam where the affordance substrate consults
+# the actor body-state — gating the INTERSECTION (child-range body × NSFW verb),
+# never the age primitive. set_body_state() lets the sim/demo drive it.
+# ---------------------------------------------------------------------------
+
+func host_is_adult_body() -> bool:
+	return body_state != null and body_state.is_adult_body()
+
+
+func set_body_state(bs: BodyState) -> void:
+	body_state = bs
 
 func held_kit_id() -> String:
 	return _held_id

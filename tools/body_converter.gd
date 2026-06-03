@@ -62,8 +62,10 @@ func _src_root() -> String:
 	var env := OS.get_environment("MAKEHUMAN_SRC")
 	if env != "":
 		return env.path_join("makehuman").path_join("data") if not env.ends_with("data") else env
-	# fallback: repo-root makehuman/ checkout
-	return ProjectSettings.globalize_path("res://").path_join("makehuman/data")
+	# fallback: vendored CC0 subset (vendor/makehuman-cc0/data/) — works on any
+	# platform with only Godot, no fetch, no nix. Same v1.3.0 content as the nix
+	# derivation's pinned fetchFromGitHub source → byte-identical output.
+	return ProjectSettings.globalize_path("res://vendor/makehuman-cc0/data")
 
 
 func _run() -> int:

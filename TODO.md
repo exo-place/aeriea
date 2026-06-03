@@ -97,6 +97,16 @@ change, reviewed against "collapse asymmetries to primitives.")
   read-only rest-state invariant — never updated by the solver, or volume
   drifts by feedback and the guarantee is defeated.
 
+- **Clothing / cloth simulation** (two-tiered direction, very low priority short-term) —
+  usable-now floor: basic skinned/rigged garment meshes on the body rig, no cloth sim
+  (game-standard approach), **very low priority**, not on the body+locomotion critical
+  path. Aspirational: beyond-SOTA real-time cloth sim — peer R&D bet of the same
+  deterministic-surrogate shape as soft-body (PBD/learned offline → deterministic
+  real-time surrogate; no hot-loop inference); cloth must drape/collide against the
+  procgen body and respond to morph/build axes and motion (§F shared-substrate
+  interlock — `docs/decisions/procedural-body-and-animation.md`). See DESIGN.md
+  (*Secondary / soft-body physics*) and `docs/future-directions.md` (Clothing pillar).
+
 - **Physics-driven bodily transformation** (R&D direction) — treat a morph /
   blendshape / shape-parameter change as an *authored moving rest-state target*
   and let the soft-body surrogate track it dynamically, so in-between frames are

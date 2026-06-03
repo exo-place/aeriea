@@ -1705,6 +1705,8 @@ guarantee is defeated — compatible with the seeded-simulation invariant.
 
 The mesh side of this — fully procedural human bodies, the deformation-aligned topology those bodies share, the escalating morph tiers (within-form blendshapes, female↔male, and across-form topology-changing metamorphosis), and full procedural / environment-responsive animation (potentially neural walk cycles) — is captured as its own two-tiered R&D direction in **`docs/decisions/procedural-body-and-animation.md`** (R&D direction, open). It shares one substrate with the soft-body sim above: the mesh + its consistent, deformation-aligned topology.
 
+**Clothing / cloth simulation is the cloth instance of this bet.** Cloth already appears above as a first-class specialized cheap solver (PBD for cloth). The aspirational tier — **beyond-SOTA real-time clothing/cloth sim** — is a peer R&D bet of the same deterministic-surrogate shape: build-time-accurate or learned offline, lowered to a deterministic real-time surrogate, no hot-loop/online inference, no copouts. Cloth must drape and collide against the procgen body and respond to its morph/build axes and motion — the §F shared-mesh/deformation substrate in `docs/decisions/procedural-body-and-animation.md` is the interlock. The usable-now floor is **basic skinned/rigged garment meshes layered on the body** (no real cloth sim — the proven game-standard approach), explicitly **very low priority** and not on the body+locomotion critical path. The two-tier clothing direction is recorded in `docs/future-directions.md`.
+
 ### Perceptual vs physical realism (a useful distinction)
 
 Worth keeping the distinction in mind: **physically accurate**

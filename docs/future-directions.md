@@ -263,6 +263,22 @@ Status: **open R&D bet, multi-year horizon.**
   invariant (DESIGN.md; TODO.md).
 - Cross-reference `~/git/rhizone/playmate` (`frond`) during the refining stage.
 
+### Clothing / cloth simulation — DESIGN.md (*Secondary / soft-body physics*; *the animation/fidelity bet*), `decisions/procedural-body-and-animation.md` (§F)
+
+Status: **two-tiered direction recorded; aspirational = open R&D bet; pragmatic = very low priority.**
+
+Clothing/cloth sim is the **cloth instance of the soft-body bet above** — the same deterministic-surrogate shape, the same no-copouts posture. PBD for cloth already appears in the soft-body usable-now tier (DESIGN.md). The two-tier split:
+
+**Usable-now (pragmatic) — very low priority.**
+- **Basic skinned/rigged garment meshes layered on the body** — no real cloth sim; the proven game-standard approach (skinned mesh driven by the body rig). Good-enough as a floor, fast to implement.
+- **Explicitly very low priority**: not on the body+locomotion critical path; deferred until the body usable-now slice (§3 above) is solid.
+
+**Aspirational (SOTA / research).**
+- **Beyond-SOTA real-time clothing/cloth sim** — a peer R&D bet of the same deterministic-surrogate shape: build-time-accurate or learned offline → deterministic real-time surrogate; no hot-loop/online inference.
+- Cloth must drape and collide against the procgen body, respond to morph/build axes and motion — the **§F one-shared-substrate interlock** (`decisions/procedural-body-and-animation.md`) is the coupling point: the body's deformation-aligned topology is the collision surface cloth responds to, and the morphology-conditioned body state drives cloth adaptation.
+- Cloth-body two-way coupling (shirt straining at flexed arm, bra deforming breast, sock indenting calf) is listed in DESIGN.md *Things historically missing in games* and system 7 (*Cloth simulation — real physics, body-coupled*) in the systems enumeration.
+- Open: concrete surrogate shape for cloth (PBD + learned residuals? reduced-order cloth? contact-aware variants?); literature baseline is PBD (GPU-friendly, scales by garment count, already named); beyond-SOTA targets two-way coupling and body-variation generalization.
+
 ### NPC mind / language / multi-modal expression — `decisions/npc-mind-and-language.md`
 
 Status: **R&D pillar — not a frozen spec.** Three peer bets of the

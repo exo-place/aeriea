@@ -73,6 +73,14 @@ const AXIS_TARGETS := [
 	["muscle_max", "macrodetails/universal-female-young-maxmuscle-averageweight.target"],
 	["weight_max", "macrodetails/universal-female-young-averagemuscle-maxweight.target"],
 	["height_max", "macrodetails/height/female-young-averagemuscle-averageweight-maxheight.target"],
+	# PROPORTIONS is a BIDIRECTIONAL macro in MakeHuman (like height's min/max): the
+	# base mesh is the AVERAGE-proportions anchor and there are two opposite targets,
+	# "idealproportions" and "uncommonproportions", keyed by the same age/muscle/weight
+	# choice as the other macro anchors (female-young-averagemuscle-averageweight). We
+	# import BOTH so the BodyState proportions axis can drive from uncommon(0) through
+	# the average base(0.5) to ideal(1) — see BodyState.to_blend_weights().
+	["proportions_ideal",   "macrodetails/proportions/female-young-averagemuscle-averageweight-idealproportions.target"],
+	["proportions_uncommon", "macrodetails/proportions/female-young-averagemuscle-averageweight-uncommonproportions.target"],
 ]
 
 
@@ -214,24 +222,36 @@ func _run() -> int:
 			morphed[ri] = morphed[ri] + Vector3(d.x * MH_TO_METERS, d.y * MH_TO_METERS, d.z * MH_TO_METERS)
 			moved += 1
 			moved_base[b] = true
-		# Recompute normals from the MORPHED geometry. Godot's RELATIVE blend mode
-		# composes the normal the same way as the vertex (final = base + Σ wᵢ·Δnᵢ), so
-		# the blendshape's ARRAY_NORMAL must also be the DELTA (morphed_normal -
-		# base_normal). Shipping the base (stale) normals lit the morphed surface with
-		# wrong shading; shipping absolute morphed normals (the prior bug) added the
-		# whole normal again at weight 1. Per-morph normal DELTAS keep shading correct
-		# as the body morphs. (The UV path is separate: corner-expansion already gives
-		# the surface correct UVs, and blendshape arrays may only carry Vertex/Normal/
-		# Tangent — never UV — so UVs are NOT and must NOT be stored per blendshape.)
-		# Same deterministic triangle-order accumulation as the base normals.
-		var morphed_normals := _compute_normals(morphed, tris)
+		# NORMALS — why the blendshape normal array is ZERO, and how correct lighting
+		# under morph is actually achieved:
+		#
+		# Godot 4 stores ALL surface (and blendshape) normals OCTAHEDRAL-COMPRESSED.
+		# Octahedral encoding can only represent UNIT directions: it CANNOT carry a
+		# normal DELTA. A stored delta is renormalised to a unit vector on encode, so
+		#   - true deltas (morphed_normal - base_normal): tiny vectors whose direction
+		#     is float noise -> decode to near-random unit vectors -> per-vertex blotchy
+		#     dark/bright shading (the "broken normals / inside-out" report);
+		#   - any nonzero constant delta (e.g. -base): decodes to a unit vector and pulls
+		#     every normal the same way as the weight rises -> blown-out streaks.
+		# Verified empirically (true / -base / zero all rendered): there is NO blendshape
+		# normal array that yields correct shading, because RELATIVE mode composes
+		# final = base + Σ wᵢ·Δnᵢ and octa can't encode the deltas. Godot also REQUIRES
+		# the blendshape format to match the surface (which has normals), so the array
+		# can't be omitted ("Blend shape format must match the main array format").
+		#
+		# Therefore we store a ZERO normal delta (the least-wrong GPU value: keeps the
+		# base normals) and recompute the morphed normals ON THE CPU when morphs change
+		# — see BodyState.bake_morphed_normals() / CharacterCreator. The accurate data
+		# lives in the VERTEX deltas (positions aren't unit-constrained, so they encode
+		# faithfully); from base + Σ wᵢ·Δvᵢ the CPU derives exact per-vertex normals and
+		# writes them back, giving correct lighting at every weight. (UVs are likewise
+		# NOT stored per blendshape — corner-expansion already gave the surface UVs.)
 		var vert_delta := PackedVector3Array()
 		var norm_delta := PackedVector3Array()
 		vert_delta.resize(rn)
-		norm_delta.resize(rn)
+		norm_delta.resize(rn)   # zero-initialised -> zero normal deltas (see note above)
 		for vi in rn:
 			vert_delta[vi] = morphed[vi] - scaled_render[vi]
-			norm_delta[vi] = morphed_normals[vi] - normals[vi]
 		var ba := []
 		ba.resize(Mesh.ARRAY_MAX)
 		ba[Mesh.ARRAY_VERTEX] = vert_delta

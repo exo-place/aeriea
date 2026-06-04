@@ -112,6 +112,14 @@ func _build_body() -> void:
 	_rig.foot_ik_enabled = false
 	add_child(_rig)
 
+	# Use a PER-INSTANCE copy of the mesh: _apply_state bakes recomputed normals into
+	# the surface (the morphed-normal fix), which mutates the ArrayMesh. The rig loads
+	# the SHARED cached asset via load(); mutating that would corrupt every other user
+	# (and persist across runs in the cache). Duplicate so the bake is local to this
+	# viewer. The skin/skeleton binding is unaffected (same vertex/bone arrays).
+	if _rig.mesh_instance != null and _rig.mesh_instance.mesh != null:
+		_rig.mesh_instance.mesh = (_rig.mesh_instance.mesh as ArrayMesh).duplicate(true)
+
 
 func _build_camera() -> void:
 	_camera = Camera3D.new()
@@ -253,9 +261,18 @@ func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float)
 
 
 ## Project the current BodyState onto the body's blendshapes and refresh labels.
+## After driving the GPU blendshape weights (which morph POSITIONS), recompute the
+## per-vertex NORMALS on the CPU for the new morph and bake them into this viewer's
+## per-instance mesh copy. Godot 4 stores blendshape normals octahedral-compressed,
+## which cannot carry normal deltas, so the GPU morph alone leaves stale normals that
+## light the morphed surface wrongly (blotches / inside-out). The CPU bake fixes that
+## (BodyState.bake_morphed_normals). Only runs on slider changes, so it's cheap.
 func _apply_state() -> void:
 	if _rig != null and _rig.mesh_instance != null:
-		_body_state.apply_to(_rig.mesh_instance)
+		# CPU morph (positions + recomputed normals), GPU blend weights zeroed. This is
+		# the correct path for the creator: Godot's octahedral blendshape-normal storage
+		# can't carry normal deltas, so a GPU-only morph is mis-lit (see BodyState).
+		_body_state.apply_morph_cpu(_rig.mesh_instance)
 	for field in _value_labels:
 		(_value_labels[field] as Label).text = "%.2f" % float(_body_state.get(field))
 

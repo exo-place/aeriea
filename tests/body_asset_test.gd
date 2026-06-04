@@ -143,7 +143,8 @@ func _ready() -> void:
 	for i in mesh.get_blend_shape_count():
 		names.append(mesh.get_blend_shape_name(i))
 	print("  blendshapes: %s" % str(names))
-	for required in ["age_old", "age_baby", "age_child", "gender_male", "muscle_max", "weight_max", "height_max"]:
+	for required in ["age_old", "age_baby", "age_child", "gender_male", "muscle_max", "weight_max", "height_max",
+			"proportions_ideal", "proportions_uncommon"]:
 		_assert("blendshape '%s' present" % required, names.has(StringName(required)), str(names))
 
 	# --- morph blendshapes are DELTAS (RELATIVE mode), and they move vertices --
@@ -184,6 +185,29 @@ func _ready() -> void:
 			max_disp < 0.5, "max disp = %.4f m" % max_disp)
 		_assert("age_old array centres on 0 (delta, not absolute; |mean Y| < 0.1 m)",
 			absf(mean_y) < 0.1, "mean Y = %.4f m" % mean_y)
+		# Blendshape NORMAL deltas must be CONSTANT across all vertices. We store a ZERO
+		# normal delta (the correct-lighting fix): Godot 4 stores blendshape normals
+		# OCTAHEDRAL-COMPRESSED, which can't carry a delta, and the morphed-normal
+		# correction is done on the CPU at runtime (BodyState.apply_morph_cpu). Because
+		# octa decode maps the stored (0,0,0) to a single constant unit direction, a
+		# correct zero-delta array reads back as the SAME vector for every vertex. The
+		# BROKEN prior approach (true per-vertex morphed-base deltas) read back as MANY
+		# different noisy directions (octa-amplified float noise) — the blotchy-lighting
+		# bug. So "all normal deltas identical" is the checkable invariant distinguishing
+		# the fix (constant) from the bug (varied). (We can't assert literal zero: octa
+		# readback never returns the zero vector.)
+		var ndelta: PackedVector3Array = bs_arrays[age_old_idx][Mesh.ARRAY_NORMAL]
+		_assert("age_old normal array present (format must match surface)",
+			ndelta != null and ndelta.size() == verts.size(),
+			"got %s" % (ndelta.size() if ndelta != null else -1))
+		if ndelta != null and ndelta.size() > 0:
+			var first := ndelta[0]
+			var distinct_n := 0
+			for i in ndelta.size():
+				if ndelta[i].distance_to(first) > 1e-4:
+					distinct_n += 1
+			_assert("age_old normal deltas are CONSTANT (zero-delta fix; not per-vertex noise)",
+				distinct_n == 0, "%d verts differ from the constant" % distinct_n)
 
 	# --- a SECOND axis morphs differently (sanity: not all the same) ----------
 	var weight_idx := names.find(StringName("weight_max"))

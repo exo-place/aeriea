@@ -42,6 +42,18 @@
 			"blend_shape_index": 6,
 			"moved_vertices": 13380,
 			"source_target": "targets/macrodetails/height/female-young-averagemuscle-averageweight-maxheight.target"
+		},
+		{
+			"axis": "proportions_ideal",
+			"blend_shape_index": 7,
+			"moved_vertices": 13366,
+			"source_target": "targets/macrodetails/proportions/female-young-averagemuscle-averageweight-idealproportions.target"
+		},
+		{
+			"axis": "proportions_uncommon",
+			"blend_shape_index": 8,
+			"moved_vertices": 12718,
+			"source_target": "targets/macrodetails/proportions/female-young-averagemuscle-averageweight-uncommonproportions.target"
 		}
 	],
 	"license": "CC0-1.0 (MakeHuman core base mesh + targets, explicitly CC0 since Sept 2020)",

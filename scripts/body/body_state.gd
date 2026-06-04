@@ -44,9 +44,11 @@ var weight: float = 0.0
 ## 0..1 height (0 = base/average, 1 = max height; maps to real metres per
 ## units-and-scale.md as the height blendshape's range).
 var height: float = 0.0
-## 0..1 proportions axis (within-form proportion envelope). Reserved as a first-class
-## macro axis (§2.1); no dedicated blendshape in the Slice-1 starter set yet, so it is
-## carried in the record (serialized, gated, future-driving) without a weight mapping.
+## 0..1 proportions axis (within-form proportion envelope, §2.1). BIDIRECTIONAL,
+## anchored on the base mesh at the midpoint: 0 = full "uncommon" proportions,
+## 0.5 = the base mesh (average proportions, no weight), 1 = full "ideal" proportions
+## — the two MakeHuman proportions anchors (uncommon/ideal). Maps to the
+## proportions_uncommon / proportions_ideal blendshapes (see to_blend_weights()).
 var proportions: float = 0.5
 
 # ---------------------------------------------------------------------------
@@ -108,7 +110,17 @@ func to_blend_weights() -> Dictionary:
 		"age_baby": 0.0,
 		"age_child": 0.0,
 		"age_old": 0.0,
+		"proportions_ideal": 0.0,
+		"proportions_uncommon": 0.0,
 	}
+	# Proportions is bidirectional about the base (0.5). Below 0.5 fades in the
+	# "uncommon" anchor; above 0.5 fades in the "ideal" anchor; exactly 0.5 = base
+	# (both weights 0). Continuous and orthogonal to the other axes.
+	var pr := clampf(proportions, 0.0, 1.0)
+	if pr < 0.5:
+		w["proportions_uncommon"] = (0.5 - pr) / 0.5
+	elif pr > 0.5:
+		w["proportions_ideal"] = (pr - 0.5) / 0.5
 	var a := clampf(age, 0.0, 1.0)
 	# Piecewise-linear over the anchors: baby(0) -> child(0.1875) -> young(0.5,base) -> old(1).
 	if a <= AGE_CHILD:
@@ -142,6 +154,93 @@ func apply_to(mesh_instance: MeshInstance3D) -> void:
 	for axis in weights:
 		if available.has(axis):
 			mesh_instance.set("blend_shapes/%s" % axis, float(weights[axis]))
+
+## Bake the FULL current morph (positions AND recomputed normals) onto the mesh's
+## base surface on the CPU, and return the per-axis GPU blend weights that must be
+## ZEROED so the GPU does not double-apply the morph.
+##
+## Why CPU, not GPU blendshapes: Godot 4 stores all surface/blendshape normals
+## OCTAHEDRAL-COMPRESSED (unit-direction only), so a blendshape normal array cannot
+## carry a normal DELTA (see tools/body_converter.gd) — the GPU morph leaves normals
+## wrong (blotchy / blown-out / inside-out) no matter what delta is stored. The
+## accurate data is in the VERTEX deltas (positions aren't unit-constrained), so we
+## reconstruct morphed_pos = base + Σ wᵢ·Δvᵢ on the CPU, recompute exact area-weighted
+## normals, and write BOTH back into the base surface. The caller then sets every GPU
+## blend weight to 0 (apply_morph_cpu does this), so the GPU contributes nothing and
+## the lit surface is exactly the CPU-correct morphed body at all weights.
+##
+## Call on each morph change (cheap on a slider move; do NOT call per frame). The
+## ArrayMesh MUST be a per-instance copy — it is rebuilt in place. The mesh's STORED
+## base arrays must be the NEUTRAL base (this reads them fresh each call and re-applies
+## the full current morph from neutral, so repeated calls are stable and not cumulative
+## only if the stored base is neutral — apply_morph_cpu keeps that invariant by always
+## baking from a preserved neutral copy held on the MeshInstance via metadata).
+func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array) -> void:
+	if mesh == null or mesh.get_surface_count() == 0:
+		return
+	var arrays := mesh.surface_get_arrays(0)
+	var tris: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var n := base_pos.size()
+	# Reconstruct the morphed positions on the CPU from the NEUTRAL base + vertex deltas.
+	var weights := to_blend_weights()
+	var morphed := base_pos.duplicate()
+	var bs_arrays := mesh.surface_get_blend_shape_arrays(0)
+	for i in mesh.get_blend_shape_count():
+		var axis := str(mesh.get_blend_shape_name(i))
+		var w := float(weights.get(axis, 0.0))
+		if absf(w) < 1e-6:
+			continue
+		var dv: PackedVector3Array = bs_arrays[i][Mesh.ARRAY_VERTEX]
+		if dv.size() != n:
+			continue
+		for vi in n:
+			morphed[vi] = morphed[vi] + dv[vi] * w
+	# Area-weighted smooth normals over the triangle list (same accumulation as the
+	# converter's _compute_normals, so the neutral case reproduces the baked normals).
+	var normals := PackedVector3Array()
+	normals.resize(n)
+	for i in n:
+		normals[i] = Vector3.ZERO
+	var t := 0
+	while t < tris.size():
+		var a := tris[t]; var b := tris[t + 1]; var c := tris[t + 2]
+		var fn := (morphed[b] - morphed[a]).cross(morphed[c] - morphed[a])
+		normals[a] += fn; normals[b] += fn; normals[c] += fn
+		t += 3
+	for i in n:
+		var ln := normals[i]
+		normals[i] = ln.normalized() if ln.length() > 1e-9 else Vector3.UP
+	# Write morphed POSITIONS and NORMALS into the base surface; keep the blendshapes
+	# attached (their weights are zeroed by the caller so they add nothing) so the
+	# surface still declares them and the skin/format are unchanged.
+	arrays[Mesh.ARRAY_VERTEX] = morphed
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	var blends := mesh.surface_get_blend_shape_arrays(0)
+	var fmt := mesh.surface_get_format(0)
+	mesh.clear_surfaces()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, blends, {}, fmt)
+	mesh.surface_set_name(0, "body")
+
+## CPU-morph driver for static viewers (the character creator): bake the full morph
+## onto a per-instance mesh and zero the GPU blend weights so nothing is double-applied.
+## `mesh_instance.mesh` must be a per-instance ArrayMesh copy. The neutral base
+## positions are captured once into instance metadata so every call bakes from neutral
+## (stable, non-cumulative). Use this INSTEAD of apply_to for a correctly-lit morph.
+func apply_morph_cpu(mesh_instance: MeshInstance3D) -> void:
+	var mesh := mesh_instance.mesh as ArrayMesh
+	if mesh == null or mesh.get_surface_count() == 0:
+		return
+	# Capture the neutral base positions once (before any bake mutates the surface).
+	var base_pos: PackedVector3Array
+	if mesh_instance.has_meta("neutral_base_pos"):
+		base_pos = mesh_instance.get_meta("neutral_base_pos")
+	else:
+		base_pos = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+		mesh_instance.set_meta("neutral_base_pos", base_pos)
+	bake_morphed_normals(mesh, base_pos)
+	# Zero every GPU blend weight: the morph is fully baked on the CPU now.
+	for i in mesh.get_blend_shape_count():
+		mesh_instance.set("blend_shapes/%s" % mesh.get_blend_shape_name(i), 0.0)
 
 # ---------------------------------------------------------------------------
 # Serialization (§2.1 — BodyState is data, part of the seeded sim). Round-trips

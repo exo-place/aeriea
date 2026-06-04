@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://modifier_registry_build_v1"]
+
+[ext_resource type="Script" path="res://tools/modifier_registry_build.gd" id="1_modreg"]
+
+[node name="ModifierRegistryBuild" type="Node"]
+script = ExtResource("1_modreg")

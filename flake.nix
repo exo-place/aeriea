@@ -28,6 +28,17 @@
           godot = pkgs.godot_4;
         };
 
+        # Nix-reproducible modifier registry manifest (Slice B of
+        # docs/decisions/body-parameterization.md §6): parses the PINNED MakeHuman
+        # CC0 modifier JSON into the data-driven modifier registry via the in-repo
+        # GDScript builder, with NO manual step. Separate from body-assets so the
+        # body mesh stays byte-stable.
+        #   nix build .#modifier-registry   →   result/modifier_registry.json
+        packages.modifier-registry = import ./nix/modifier-registry.nix {
+          inherit pkgs;
+          godot = pkgs.godot_4;
+        };
+
         # Nix-reproducible Motion-Matching feature DB (Slice 4 of
         # docs/decisions/body-and-locomotion-slice.md): fetches the PINNED
         # 100STYLE BVH archive (CC BY 4.0) and runs the in-repo GDScript ingest

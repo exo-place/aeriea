@@ -8,7 +8,14 @@ only Godot — no network access, no Nix required.
 
 All files in this directory are licensed under **CC0 1.0 Universal** (Public
 Domain Dedication). MakeHuman's core base mesh and macro targets have been
-explicitly CC0 since September 2020.
+explicitly CC0 since September 2020. The pinned source's `LICENSE.md` §C ("The
+license for the bundled assets") explicitly enumerates "**Targets and
+modifiers**" among the CC0 1.0 Universal bundled assets, with the full legal text
+in `LICENSE.ASSETS.md` (verbatim first line: `# Creative Commons CC0 1.0
+Universal`) — so the vendored `data/modifiers/*.json` (modifier definitions, UI
+slider trees, and tooltip descriptions) are CC0 along with the mesh and targets.
+The JSON files carry no per-file header (JSON has no comment syntax); their CC0
+status is established by `LICENSE.md` §C as above.
 
 See: https://github.com/makehumancommunity/makehuman/blob/master/makehuman/data/3dobjs/README.md
 and: https://www.makehumancommunity.org/wiki/License
@@ -22,7 +29,9 @@ and: https://www.makehumancommunity.org/wiki/License
 Only core CC0 bundled assets are included. No community-DB assets, no non-CC0
 content. The full MakeHuman repository (~200 MB) is NOT vendored here.
 
-## Vendored files (10 files, ~5.0 MB)
+## Vendored files (mesh/rig + modifier-definition JSON)
+
+Mesh, targets and rig (Slice 1 / Slice 3):
 
 ```
 data/3dobjs/base.obj                                               (1.7 MB)  base mesh
@@ -33,8 +42,33 @@ data/targets/macrodetails/caucasian-male-young.target              (388 KB)  gen
 data/targets/macrodetails/universal-female-young-maxmuscle-averageweight.target   (135 KB)  muscle_max blendshape
 data/targets/macrodetails/universal-female-young-averagemuscle-maxweight.target   (122 KB)  weight_max blendshape
 data/targets/macrodetails/height/female-young-averagemuscle-averageweight-maxheight.target  (412 KB)  height_max blendshape
+data/targets/macrodetails/proportions/female-young-averagemuscle-averageweight-idealproportions.target     proportions_ideal
+data/targets/macrodetails/proportions/female-young-averagemuscle-averageweight-uncommonproportions.target  proportions_uncommon
 data/rigs/default.mhskel                                           (116 KB)  skeleton (bone tree + joint cubes)
 data/rigs/default_weights.mhw                                      (898 KB)  per-vertex LBS skin weights (Slice 3)
+```
+
+Modifier-definition JSON (Slice B — the data-driven modifier registry,
+`docs/decisions/body-parameterization.md` §6; parsed by
+`scripts/body/modifier_registry.gd` into `assets/body/modifier_registry.json`).
+These are `data/modifiers/` verbatim from the pinned source (~68 KB total). The
+modifier JSON is fully vendorable even though the full 1,280-target detail set is
+not — so the registry is complete from the subset; only the per-target *presence*
+flags differ between the subset (detail targets absent → flagged "not present",
+Slice C supplies them) and the full pinned tree (all present). Each is
+byte-identical to its counterpart under `makehuman/data/modifiers/` in the pinned
+`v1.3.0` source (verified by `cmp` against the `fetchFromGitHub` store path):
+
+```
+data/modifiers/modeling_modifiers.json        (17 KB)  head/face/torso/limb/breast/genitals/macro defs
+data/modifiers/modeling_sliders.json          (27 KB)  modeling UI tab/group/label tree (+ macro sliders)
+data/modifiers/modeling_modifiers_desc.json   (11 KB)  modeling tooltips
+data/modifiers/measurement_modifiers.json     (1.5 KB) circumference/length measure defs
+data/modifiers/measurement_sliders.json       (2.1 KB) measure UI tree
+data/modifiers/measurement_modifiers_desc.json (1.0 KB) measure tooltips
+data/modifiers/bodyshapes_modifiers.json       (1.2 KB) hormonal/silhouette bodyshape defs
+data/modifiers/bodyshapes_sliders.json         (2.7 KB) bodyshapes UI tree
+data/modifiers/bodyshapes_modifiers_desc.json  (3.4 KB) bodyshapes tooltips
 ```
 
 `default_weights.mhw` (Slice 3) carries the MakeHuman default mesh's per-vertex
@@ -60,3 +94,21 @@ nix build .#body-assets
 
 Both paths consume identical content (same v1.3.0 files) and produce a
 byte-identical `assets/body/base_body.res`.
+
+`tools/modifier_registry_build.gd` (Slice B) uses the same `MAKEHUMAN_SRC`
+fallback to parse `data/modifiers/*.json` into the modifier registry manifest
+`assets/body/modifier_registry.json`:
+
+```sh
+# Fetch-free regen (uses vendored subset):
+xvfb-run -a godot4 --headless --path . res://tools/modifier_registry_build.tscn --quit-after 600
+
+# Nix regen (fetches pinned source):
+nix build .#modifier-registry
+```
+
+The committed manifest is the **vendored-subset** build (the fetch-free dev/test
+path). The registry's 291 modifier entries are identical between the subset and
+the full pinned tree; only the per-target `present` flags differ — subset: detail
+targets flagged not-present (Slice C supplies them); full pinned tree: all 531
+detail target files present. Both builds are byte-deterministic on rebuild.

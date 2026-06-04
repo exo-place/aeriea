@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://body_modifier_registry_test_v1"]
+
+[ext_resource type="Script" path="res://tests/body_modifier_registry_test.gd" id="1_bodymodreg"]
+
+[node name="BodyModifierRegistryTest" type="Node"]
+script = ExtResource("1_bodymodreg")

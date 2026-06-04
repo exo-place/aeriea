@@ -38,6 +38,14 @@
 class_name BodyState
 extends RefCounted
 
+## The data-driven modifier registry (Slice B, body-parameterization.md §6). Parsed from
+## MakeHuman's own modifier JSON, it tells `to_blend_weights()` how each `modifiers` map
+## entry projects to target blendshape(s) — its kind, sign convention, and target
+## file(s) — without hand-listing them in code. Loaded lazily from the built manifest;
+## the runtime never re-parses the MakeHuman source.
+const ModifierRegistry := preload("res://scripts/body/modifier_registry.gd")
+const REGISTRY_MANIFEST := "res://assets/body/modifier_registry.json"
+
 # ---------------------------------------------------------------------------
 # The headline natural-unit macro axes (body-parameterization.md §2/§3). All
 # continuous; all default to the neutral young adult base. The MakeHuman base mesh
@@ -87,6 +95,19 @@ var proportions: float = 0.5
 ## blendshape, exactly as the old `height` axis did, so the render path is unchanged.
 ## Renamed-but-same: see height_macro(). Default 0.0 = average-height base.
 var height: float = 0.0
+
+## The DETAIL ENVELOPE (body-parameterization.md §3, Slice B): a SPARSE generic map,
+## modifier `fullName` -> value. An absent key means NEUTRAL (the base mesh). Keys are the
+## verified MakeHuman `fullName` strings ("breast/BreastSize", "nose/nose-hump-decr|incr",
+## …); values are clamped by the registry-declared range (bidirectional [-1,1], unipolar
+## [0,1]). Default BodyState carries an EMPTY map — a neutral young adult — so it
+## serializes tiny, diffs cleanly, and fits the seed + action-log (CLAUDE.md "serializable
+## over closures"). `to_blend_weights()` projects each non-neutral entry through the
+## data-driven registry (§6). Slice B wires the projection; the detail TARGET FILES are
+## imported in Slice C, so for now non-neutral detail entries project to blendshape names
+## the base mesh does not yet declare — `apply_to` simply skips unknown blendshapes (a
+## registered-but-not-yet-present modifier morphs nothing, by design, until Slice C).
+var modifiers: Dictionary = {}
 
 # ---------------------------------------------------------------------------
 # Age-macro anchors (the MakeHuman age macro 0–1 ships discrete anchors which we read
@@ -228,7 +249,80 @@ func to_blend_weights() -> Dictionary:
 		# young(base)..old: old weight rises 0->1.
 		var t := (a - AGE_YOUNG) / (AGE_OLD - AGE_YOUNG)
 		w["age_old"] = t
+
+	# --- the DETAIL ENVELOPE (Slice B, §6): project the sparse `modifiers` map through
+	# the data-driven registry. Each non-neutral entry resolves via its registered kind
+	# to target blendshape weight(s) keyed by the target FILE PATH (the name Slice C
+	# imports them under). Deterministic: keys iterated in SORTED order for byte-stable
+	# output. The macro modifiers (kind=="macro") are NOT projected here — they flow
+	# through the headline factor-product path above; an entry that names a macro
+	# modifier is ignored (the headline axes own those).
+	_project_modifiers(w)
 	return w
+
+
+# Cached parsed registry (one parse per process; the manifest is small). Static so all
+# BodyState instances share it. `{}` until first loaded; `_registry_loaded` guards a
+# successful-or-attempted load so a missing manifest does not retry every frame.
+static var _registry: Dictionary = {}
+static var _registry_loaded := false
+
+
+## The modifier registry (Slice B, §6), loaded lazily from the built manifest. Returns the
+## parse()-shaped Dictionary ({modifiers, by_full_name, counts}); empty if the manifest is
+## absent (then detail projection is a no-op — the headline axes still work).
+static func registry() -> Dictionary:
+	if not _registry_loaded:
+		_registry_loaded = true
+		var f := FileAccess.open(REGISTRY_MANIFEST, FileAccess.READ)
+		if f != null:
+			var data = JSON.parse_string(f.get_as_text())
+			f.close()
+			if typeof(data) == TYPE_DICTIONARY and data.has("modifiers"):
+				var by := {}
+				for e in data["modifiers"]:
+					by[String(e["full_name"])] = e
+				_registry = {"modifiers": data["modifiers"], "by_full_name": by, "counts": data.get("counts", {})}
+	return _registry
+
+
+## Project the sparse `modifiers` map onto the blendshape-weight map `w`, per the registry
+## (§6). Bidirectional: v<0 drives the min/neg target by -v, v>0 drives the max/pos target
+## by v (verbatim UniversalModifier.getFactors). Unipolar: v drives the single target by v.
+## Blendshape name = the target file path (Slice C imports detail targets under that name).
+## Sorted-key iteration -> byte-stable. Macro entries are skipped (headline axes own them);
+## unknown fullNames are skipped (the map stays forgiving for forward/back-compat data).
+func _project_modifiers(w: Dictionary) -> void:
+	if modifiers.is_empty():
+		return
+	var reg := registry()
+	var by_full_name: Dictionary = reg.get("by_full_name", {})
+	if by_full_name.is_empty():
+		return
+	var keys := modifiers.keys()
+	keys.sort()
+	for full_name in keys:
+		var entry = by_full_name.get(full_name, null)
+		if entry == null:
+			continue
+		var v := float(modifiers[full_name])
+		var kind := String(entry["kind"])
+		var targets: Array = entry["targets"]
+		if kind == ModifierRegistry.KIND_MACRO:
+			continue  # macro axes flow through the headline factor-product path
+		elif kind == ModifierRegistry.KIND_BIDIRECTIONAL:
+			v = clampf(v, -1.0, 1.0)
+			for t in targets:
+				var pole := String(t["which"])
+				var bs_name := String(t["path"])
+				if pole == "min" and v < 0.0:
+					w[bs_name] = -v
+				elif pole == "max" and v > 0.0:
+					w[bs_name] = v
+		else:  # unipolar
+			v = clampf(v, 0.0, 1.0)
+			if v > 0.0 and targets.size() > 0:
+				w[String(targets[0]["path"])] = v
 
 ## Drive the blendshape weights on a MeshInstance3D whose mesh is the base body.
 ## Sets only the blendshapes the mesh actually declares (by name) — unknown axes in
@@ -349,7 +443,7 @@ func apply_morph_cpu(mesh_instance: MeshInstance3D, weights_override: Dictionary
 # ---------------------------------------------------------------------------
 
 func to_dict() -> Dictionary:
-	return {
+	var d := {
 		"age_years": age_years,
 		"masculinity": masculinity,
 		"muscle": muscle,
@@ -357,6 +451,16 @@ func to_dict() -> Dictionary:
 		"proportions": proportions,
 		"height": height,
 	}
+	# The detail envelope (Slice B): only serialized when NON-EMPTY, so a neutral body
+	# stays a tiny dict. Sorted-key copy for byte-stable diffs / replay.
+	if not modifiers.is_empty():
+		var m := {}
+		var keys := modifiers.keys()
+		keys.sort()
+		for k in keys:
+			m[k] = float(modifiers[k])
+		d["modifiers"] = m
+	return d
 
 static func from_dict(d: Dictionary) -> BodyState:
 	var bs := BodyState.new()
@@ -366,6 +470,10 @@ static func from_dict(d: Dictionary) -> BodyState:
 	bs.weight = float(d.get("weight", 100.0))
 	bs.proportions = float(d.get("proportions", 0.5))
 	bs.height = float(d.get("height", 0.0))
+	var m = d.get("modifiers", {})
+	if typeof(m) == TYPE_DICTIONARY:
+		for k in m:
+			bs.modifiers[String(k)] = float(m[k])
 	return bs
 
 func duplicate_state() -> BodyState:

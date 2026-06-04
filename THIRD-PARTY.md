@@ -11,13 +11,22 @@ external asset is added (see `docs/decisions/body-and-locomotion-slice.md`).
 - **What:** the base mesh (`base.obj`), macro morph `.target` files, default
   skeleton (`default.mhskel`) and skin weights (`default_weights.mhw`) that the
   body pipeline (`tools/body_converter.gd`, `nix/body-assets.nix`) compiles into
-  `assets/body/base_body.res` + rig.
+  `assets/body/base_body.res` + rig; and the **modifier-definition JSON**
+  (`data/modifiers/{modeling,measurement,bodyshapes}_modifiers.json` + their
+  `*_sliders.json` UI trees and `*_modifiers_desc.json` tooltip maps) that the
+  data-driven modifier registry (`scripts/body/modifier_registry.gd`,
+  `tools/modifier_registry_build.gd`, `nix/modifier-registry.nix`) parses into
+  `assets/body/modifier_registry.json` (Slice B,
+  `docs/decisions/body-parameterization.md` §6).
 - **Source:** MakeHuman — <https://github.com/makehumancommunity/makehuman>,
   tag `v1.3.0` (pinned `fetchFromGitHub` hash
   `sha256-x0v/SkwtOl1lkVi2TRuIgx2Xgz4JcWD3He7NhU44Js4=`). A minimal CC0 subset is
   vendored under `vendor/makehuman-cc0/` for fetch-free regeneration.
 - **License:** **CC0 1.0 Universal** (Public Domain Dedication). MakeHuman's core
-  base mesh and macro targets have been explicitly CC0 since September 2020. No
+  base mesh and macro targets have been explicitly CC0 since September 2020. The
+  pinned source's `LICENSE.md` §C explicitly lists "**Targets and modifiers**"
+  among the CC0 bundled assets (full text in `LICENSE.ASSETS.md`), so the
+  vendored modifier-definition JSON is CC0 alongside the mesh/targets. No
   attribution is legally required; recorded here for provenance.
 - **Scope caveat:** only *core bundled* MakeHuman assets are CC0. Community-DB
   assets (user-contributed clothes/hair/morphs) are **not** uniformly CC0 and are

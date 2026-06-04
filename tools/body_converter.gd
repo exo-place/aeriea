@@ -64,6 +64,22 @@ const MAX_INFLUENCES := 4
 ## is the caucasian, ~50%-gender, young, average-everything anchor — so the age
 ## and gender axes are anchored on the caucasian young/old/baby/child + male
 ## targets, which is the documented MakeHuman macro layout.)
+## SLICE B NOTE (data-driven modifier registry, body-parameterization.md §6;
+## scripts/body/modifier_registry.gd). This hand-listed 9-entry table is the Slice-1
+## shortcut the registry is designed to REPLACE: the registry parses MakeHuman's own
+## modifier JSON into 291 modifiers (251 bidirectional, 29 unipolar, 11 macro) with
+## kind/range/default/target-paths all derived from data, not retyped here. In Slice C
+## this table is SUBSUMED — the macro axes (gender/age/muscle/weight/height/proportions)
+## become the registry's `kind=="macro"` entries driving the §1.3 factor-product cube,
+## and the detail axes become the registry's bidirectional/unipolar entries imported as
+## blendshapes keyed by their target file path (the same names BodyState._project_modifiers
+## already emits). Slice B does NOT touch this path: base_body.res stays byte-unchanged and
+## the registry is built into a SEPARATE artifact (assets/body/modifier_registry.json) by
+## tools/modifier_registry_build.gd. The macro registry entries reconcile with these axes
+## thus: macrodetails/Gender -> gender_male, macrodetails/Age -> age_baby/child/old fan-out,
+## macrodetails-universal/{Muscle,Weight} -> muscle_max/weight_max,
+## macrodetails-height/Height -> height_max, macrodetails-proportions/BodyProportions ->
+## proportions_ideal/uncommon (BodyState.to_blend_weights() already owns this projection).
 const AXIS_TARGETS := [
 	# axis name           # .target path under data/targets/
 	["age_old",    "macrodetails/caucasian-female-old.target"],

@@ -243,16 +243,17 @@ func _build_ui() -> void:
 	# dimensionless 0..1-about-0.5 bidirectional envelope; height is the Slice A
 	# provisional normalized macro-height amount (Slice C makes it metric cm, §4).
 	#
-	# muscle/weight slider ranges are restricted to the functional half (50–100 /
-	# 100–150) because the below-average blend targets don't exist until Slice C.
-	# Slice C's min-anchor import restores the full 0–100 / 50–150 ranges here.
+	# Slice C restores the FULL muscle/weight ranges (0–100 / 50–150): the below-average
+	# (minmuscle / minweight) anchors are now imported in the sparse macro factor-cube, so
+	# the lean/light half is functional. height is now a METRIC cm axis (§4), driving a
+	# uniform stature scale orthogonal to proportions.
 	var axes := [
 		["age_years",   1.0, 90.0,  0.5,  "age",         "young",    "old"],
 		["masculinity", 0.0, 100.0, 1.0,  "masculinity",  "feminine", "masculine"],
-		["muscle",      50.0, 100.0, 1.0, "muscle",       "average",  "muscular"],
-		["weight",      100.0, 150.0, 1.0, "weight",      "average",  "heavy"],
+		["muscle",      0.0, 100.0, 1.0,  "muscle",       "lean",     "muscular"],
+		["weight",      50.0, 150.0, 1.0, "weight",       "light",    "heavy"],
 		["proportions", 0.0, 1.0,   0.01, "proportions",  "uncommon", "idealized"],
-		["height",      0.0, 1.0,   0.01, "height",       "shorter",  "taller"],
+		["height_cm",   50.0, 230.0, 0.5, "height",       "shorter",  "taller"],
 	]
 	for spec in axes:
 		_build_axis_row(vbox, spec[0], spec[1], spec[2], spec[3], spec[4], spec[5], spec[6])
@@ -418,6 +419,8 @@ func _format_value(field: String) -> String:
 		"age_years":
 			# Floor display only — the stored value and gate stay continuous.
 			return "%d" % int(floor(v))
+		"height_cm":
+			return "%dcm" % int(round(v))
 		"masculinity", "muscle", "weight":
 			return "%.0f%%" % v
 		_:

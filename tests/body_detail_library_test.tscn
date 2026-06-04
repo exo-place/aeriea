@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://body_detail_library_test_v1"]
+
+[ext_resource type="Script" path="res://tests/body_detail_library_test.gd" id="1_detlibtest"]
+
+[node name="BodyDetailLibraryTest" type="Node"]
+script = ExtResource("1_detlibtest")

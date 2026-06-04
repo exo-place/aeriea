@@ -39,6 +39,17 @@
           godot = pkgs.godot_4;
         };
 
+        # Nix-reproducible SPARSE CPU DELTA LIBRARY (Slice C of
+        # docs/decisions/body-parameterization.md): from the PINNED MakeHuman source it
+        # builds the full ~531-target detail envelope + macro factor-cube as a compact
+        # sparse delta artifact (NOT ~531 GPU blendshapes). Separate from body-assets so
+        # the base mesh stays byte-stable.
+        #   nix build .#body-detail-library   →   result/base_body_detail.{bin,index.json}
+        packages.body-detail-library = import ./nix/body-detail-library.nix {
+          inherit pkgs;
+          godot = pkgs.godot_4;
+        };
+
         # Nix-reproducible Motion-Matching feature DB (Slice 4 of
         # docs/decisions/body-and-locomotion-slice.md): fetches the PINNED
         # 100STYLE BVH archive (CC BY 4.0) and runs the in-repo GDScript ingest

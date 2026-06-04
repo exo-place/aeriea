@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://detail_library_build_v1"]
+
+[ext_resource type="Script" path="res://tools/detail_library_build.gd" id="1_detlib"]
+
+[node name="DetailLibraryBuild" type="Node"]
+script = ExtResource("1_detlib")

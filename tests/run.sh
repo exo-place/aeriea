@@ -48,6 +48,7 @@ SUITES=(
   body_asset_test
   body_gate_test
   body_modifier_registry_test
+  body_detail_library_test
   body_locomotion_test
   body_motion_matching_test
   interpreter_slice1_test

@@ -46,59 +46,62 @@ func _ready() -> void:
 # ---------------------------------------------------------------------------
 
 func _test_bodystate_drives_morphs() -> void:
-	print("--- (a) BodyState -> blendshape weights ---")
+	print("--- (a) BodyState -> sparse macro factor-cube weights (Slice C) ---")
 	var mesh: ArrayMesh = load(MESH_PATH)
 	_assert("base body mesh loads", mesh != null, MESH_PATH)
 	if mesh == null:
 		return
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
-	add_child(mi)
-	await_nothing()
 
-	# Neutral young-adult default: all age weights ~0 (base mesh = young, 25yr), and
-	# every other axis at its neutral base value.
-	var neutral := BodyState.new()  # defaults: age_years=25 (macro 0.5), masculinity=50 (androgynous), etc.
-	neutral.apply_to(mi)
-	var w_age_old := float(mi.get("blend_shapes/age_old"))
-	var w_age_child := float(mi.get("blend_shapes/age_child"))
-	var w_age_baby := float(mi.get("blend_shapes/age_baby"))
-	_assert(
-		"neutral young-adult default drives ALL age blendshapes to ~0 (base mesh = young)",
-		absf(w_age_old) < 1e-4 and absf(w_age_child) < 1e-4 and absf(w_age_baby) < 1e-4,
-		"old=%.4f child=%.4f baby=%.4f" % [w_age_old, w_age_child, w_age_baby])
+	# Slice C: the macro morph is the §1.3 factor-PRODUCT over the universal gender×age×
+	# muscle×weight cube, keyed by target FILE PATH (the sparse-library names), NOT the
+	# old 9 GPU-blendshape names. Assert the factor-product weights directly.
 
-	# Drive age toward OLD (90yr): age_old weight must rise to 1.0.
+	# Neutral young-adult default: average everything -> the only nonzero universal-cube
+	# weights are the (averagemuscle-averageweight) anchors, which are EMPTY targets (the
+	# base), so the body is the neutral base. No non-average anchor gets weight.
+	var neutral := BodyState.new()
+	var nw := neutral.to_blend_weights()
+	var any_nonavg := false
+	for k in nw:
+		var ks := String(k)
+		if ks.contains("maxmuscle") or ks.contains("minmuscle") or ks.contains("maxweight") or ks.contains("minweight"):
+			if float(nw[k]) > 1e-4:
+				any_nonavg = true
+	_assert("neutral default drives no non-average macro anchor (base = neutral young adult)",
+		not any_nonavg, "no max/min muscle/weight anchor weighted at neutral")
+
+	# Age toward OLD (90yr): macro 1.0 -> oldVal 1.0, youngVal 0. The universal '-old-'
+	# anchors carry full weight (× the gender/build factors), the '-young-' anchors 0.
 	var old_bs := BodyState.new()
 	old_bs.age_years = 90.0
-	old_bs.apply_to(mi)
-	var old_w := float(mi.get("blend_shapes/age_old"))
-	_assert("BodyState.age_years=90 drives age_old blendshape weight to 1.0",
-		absf(old_w - 1.0) < 1e-4, "age_old weight = %.4f" % old_w)
+	var ow := old_bs.to_blend_weights()
+	# female-old-averagemuscle-averageweight = femaleVal(0.5)*oldVal(1)*avg*avg = 0.5
+	var old_anchor := "macrodetails/universal-female-old-averagemuscle-averageweight.target"
+	var young_anchor := "macrodetails/universal-female-young-averagemuscle-averageweight.target"
+	_assert("age_years=90 -> female-old anchor weight ~0.5 (femaleVal*oldVal), young anchor absent",
+		absf(float(ow.get(old_anchor, 0.0)) - 0.5) < 1e-4 and float(ow.get(young_anchor, 0.0)) < 1e-4,
+		"old=%.4f young=%.4f" % [float(ow.get(old_anchor, 0.0)), float(ow.get(young_anchor, 0.0))])
 
-	# Drive age to the CHILD anchor (10yr): age_child weight must be ~1.0.
-	var child_bs := BodyState.new()
-	child_bs.age_years = 10.0
-	child_bs.apply_to(mi)
-	var child_w := float(mi.get("blend_shapes/age_child"))
-	_assert("BodyState.age_years=10 (child anchor) drives age_child blendshape weight to ~1.0",
-		absf(child_w - 1.0) < 1e-4, "age_child weight = %.4f" % child_w)
-
-	# Drive the masculinity axis — single macro sex axis (0–100, maps to gender_male).
-	var masc := BodyState.new()
-	masc.masculinity = 80.0
-	masc.apply_to(mi)
-	var gender_w := float(mi.get("blend_shapes/gender_male"))
-	_assert("BodyState.masculinity=80 drives gender_male blendshape weight to 0.8 (masculinity/100 = macro_gender)",
-		absf(gender_w - 0.8) < 1e-4, "gender_male weight = %.4f" % gender_w)
-
-	# Weight is 50..150% where 100 = average (base, weight 0); 150 = full max anchor.
-	var heavy := BodyState.new()
-	heavy.weight = 150.0
-	heavy.apply_to(mi)
-	var weight_w := float(mi.get("blend_shapes/weight_max"))
-	_assert("BodyState.weight=150%% drives weight_max blendshape weight to 1.0",
-		absf(weight_w - 1.0) < 1e-4, "weight_max weight = %.4f" % weight_w)
+	# FACTOR-PRODUCT (the load-bearing Slice C correctness): old + muscular + heavy + male
+	# composes as a PRODUCT, not a linear sum. masculinity 100 (maleVal 1), age 90
+	# (oldVal 1), muscle 100 (maxmuscleVal 1), weight 150 (maxweightVal 1) -> the single
+	# target male-old-maxmuscle-maxweight gets weight 1*1*1*1 = 1.0; a linear approximation
+	# could never put full weight on that combined cross-term.
+	var combo := BodyState.new()
+	combo.masculinity = 100.0; combo.age_years = 90.0; combo.muscle = 100.0; combo.weight = 150.0
+	var cw2 := combo.to_blend_weights()
+	var cross := "macrodetails/universal-male-old-maxmuscle-maxweight.target"
+	_assert("FACTOR-PRODUCT: male+old+maxmuscle+maxweight -> cross-term anchor weight = 1.0 (product, not linear)",
+		absf(float(cw2.get(cross, 0.0)) - 1.0) < 1e-4, "cross weight = %.4f" % float(cw2.get(cross, 0.0)))
+	# and a half-male / mid build splits the product correctly: masc 50 -> maleVal 0.5,
+	# femaleVal 0.5; so male-old-maxmuscle-maxweight = 0.5 and female-old-... = 0.5.
+	var half := BodyState.new()
+	half.masculinity = 50.0; half.age_years = 90.0; half.muscle = 100.0; half.weight = 150.0
+	var hw := half.to_blend_weights()
+	_assert("FACTOR-PRODUCT: masc 50 splits the cross-term 0.5 male / 0.5 female",
+		absf(float(hw.get(cross, 0.0)) - 0.5) < 1e-4
+		and absf(float(hw.get("macrodetails/universal-female-old-maxmuscle-maxweight.target", 0.0)) - 0.5) < 1e-4,
+		"male=%.4f female=%.4f" % [float(hw.get(cross, 0.0)), float(hw.get("macrodetails/universal-female-old-maxmuscle-maxweight.target", 0.0))])
 
 	# The age_years<->macro map is the verified MakeHuman piecewise (§1.4).
 	_assert("age_years 18 -> macro ~0.354 (the gate's macro position, verified)",
@@ -109,22 +112,20 @@ func _test_bodystate_drives_morphs() -> void:
 		and absf(BodyState.age_macro_to_years(1.0) - 90.0) < 1e-4,
 		"yr(0.5)=%.2f yr(1.0)=%.2f" % [BodyState.age_macro_to_years(0.5), BodyState.age_macro_to_years(1.0)])
 
-	# And prove the morph weight actually changes the rendered VERTICES: read the
-	# age_old morph array vs base and confirm a nonzero displacement (the weight we
-	# set above would interpolate the mesh toward that displaced surface).
-	var base_arrays := mesh.surface_get_arrays(0)
-	var base_verts: PackedVector3Array = base_arrays[Mesh.ARRAY_VERTEX]
-	var names := []
-	for i in mesh.get_blend_shape_count():
-		names.append(str(mesh.get_blend_shape_name(i)))
-	var idx := names.find("age_old")
+	# Prove the morph actually changes the rendered VERTICES through the CPU bake + sparse
+	# library: bake the OLD morph onto a per-instance mesh and confirm vertices moved.
+	var morph_mesh := (mesh.duplicate(true) as ArrayMesh)
+	var mi := MeshInstance3D.new()
+	mi.mesh = morph_mesh
+	add_child(mi)
+	var base_verts: PackedVector3Array = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	old_bs.apply_morph_cpu(mi)
+	var morphed: PackedVector3Array = morph_mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 	var max_disp := 0.0
-	if idx >= 0:
-		var morphed: PackedVector3Array = mesh.surface_get_blend_shape_arrays(0)[idx][Mesh.ARRAY_VERTEX]
-		for i in base_verts.size():
-			max_disp = max(max_disp, (morphed[i] - base_verts[i]).length())
-	_assert("age axis -> age_old blendshape -> nonzero vertex displacement (mesh actually morphs)",
-		max_disp > 0.001, "max age_old displacement = %.4f m" % max_disp)
+	for i in base_verts.size():
+		max_disp = max(max_disp, (morphed[i] - base_verts[i]).length())
+	_assert("age axis -> sparse macro cube -> nonzero vertex displacement (mesh actually morphs)",
+		max_disp > 0.001, "max old-morph displacement = %.4f m" % max_disp)
 
 	# Serialization round-trips (BodyState is seeded-sim data).
 	var rt := BodyState.from_dict(old_bs.to_dict())
@@ -170,11 +171,14 @@ func _test_is_adult_body_predicate() -> void:
 	# distinct) blendshape projection for ordinary NPC use — the gate is a predicate
 	# OVER the axis, not a notch cut into it.
 	var child := BodyState.new()
-	child.age_years = 10.0  # the child anchor (macro 0.1875)
+	child.age_years = 10.0  # the child anchor (macro 0.1875 -> childVal ~1.0)
 	var cw := child.to_blend_weights()
-	_assert("age axis stays continuous/complete: child morph still renders (age_child weight ~1.0)",
-		absf(float(cw["age_child"]) - 1.0) < 1e-4 and not child.is_adult_body(),
-		"age_child=%.3f is_adult=%s" % [float(cw["age_child"]), str(child.is_adult_body())])
+	# At the child anchor the universal '-child-' average-build anchor carries full weight
+	# (× femaleVal 0.5) and no adult anchor does; the morph is uncrippled and renders.
+	var child_anchor := "macrodetails/universal-female-child-averagemuscle-averageweight.target"
+	_assert("age axis stays continuous/complete: child morph still renders (child anchor weighted ~0.5, not crippled)",
+		absf(float(cw.get(child_anchor, 0.0)) - 0.5) < 1e-3 and not child.is_adult_body(),
+		"child_anchor=%.3f is_adult=%s" % [float(cw.get(child_anchor, 0.0)), str(child.is_adult_body())])
 
 
 # ---------------------------------------------------------------------------

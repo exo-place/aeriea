@@ -124,8 +124,16 @@ func _ready() -> void:
 		# backwards V-flip swaps the crown's v (~0.58) with the foot's (~0.96); an
 		# off-by-one in the vt index shifts the crown out of its u-band. Either fails
 		# here while sailing through the checkerboard-style asserts above.
-		if rt_mesh != null:
-			var rt2: Array = rt_mesh.surface_get_arrays(0)
+		# Anchor the landmark check on the STATIC asset (base_body.res), not the runtime
+		# CPU-baked mesh: Slice C bakes the default MACRO MORPH into the runtime neutral (the
+		# displayed neutral = base + the default factor-cube blend, not raw base.obj), which
+		# slightly reshapes the feet and so changes WHICH vertex is bottommost. The landmark
+		# UV coords (0.135, 0.958) were measured on the verified static mesh, and UVs are
+		# morph-invariant (the bake never touches ARRAY_TEX_UV), so the static asset is the
+		# correct reference for this V-flip / scrambled-UV guard.
+		var static_mesh := load("res://assets/body/base_body.res") as ArrayMesh
+		if static_mesh != null:
+			var rt2: Array = static_mesh.surface_get_arrays(0)
 			var lv: PackedVector3Array = rt2[Mesh.ARRAY_VERTEX]
 			var lu: PackedVector2Array = rt2[Mesh.ARRAY_TEX_UV]
 			var y_max := -INF; var y_min := INF; var crown := 0; var sole := 0

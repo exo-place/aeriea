@@ -119,14 +119,14 @@ func _build_body_state_section(panel: VBoxContainer) -> void:
 
 	# [field, min, max, init] for the natural-unit headline axes BodyState carries
 	# (body-parameterization.md §2). age in YEARS; masculinity 0–100 (0=feminine,
-	# 50=androgynous, 100=masculine); muscle/weight in %; height the Slice A
-	# provisional normalized macro-height amount.
+	# 50=androgynous, 100=masculine); muscle/weight in %; height in metric CM (Slice C,
+	# §4 — a uniform stature scale orthogonal to proportions).
 	var axes := [
 		["age_years", 1.0, 90.0, _body_state.age_years],
 		["masculinity", 0.0, 100.0, _body_state.masculinity],
 		["muscle", 0.0, 100.0, _body_state.muscle],
 		["weight", 50.0, 150.0, _body_state.weight],
-		["height", 0.0, 1.0, _body_state.height],
+		["height_cm", 50.0, 230.0, _body_state.height_cm],
 	]
 	for spec in axes:
 		var field: String = spec[0]

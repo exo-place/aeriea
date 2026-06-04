@@ -162,7 +162,7 @@ func _test_json_history_roundtrip() -> void:
 	body.age_years = 33.0
 	body.masculinity = 70.0
 	var t := HistoryTreeScript.new(BodyState.new().to_dict(), "initial")
-	t.commit({"age_years": 30.0, "masculinity": 50.0, "muscle": 50.0, "weight": 100.0, "proportions": 0.5, "height": 0.0}, "age = 30")
+	t.commit({"age_years": 30.0, "masculinity": 50.0, "muscle": 50.0, "weight": 100.0, "proportions": 0.5, "height_cm": 166.589}, "age = 30")
 	t.commit(body.to_dict(), "masculinity = 70%")
 	var json := CreatorIOScript.history_to_json(body, t)
 	var parsed := CreatorIOScript.parse_payload(json)

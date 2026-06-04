@@ -45,6 +45,7 @@ extends RefCounted
 ## the runtime never re-parses the MakeHuman source.
 const ModifierRegistry := preload("res://scripts/body/modifier_registry.gd")
 const REGISTRY_MANIFEST := "res://assets/body/modifier_registry.json"
+const DetailLibrary := preload("res://scripts/body/detail_library.gd")
 
 # ---------------------------------------------------------------------------
 # The headline natural-unit macro axes (body-parameterization.md §2/§3). All
@@ -69,17 +70,15 @@ var age_years: float = 25.0
 ## body morphology). Real sex-morphology richness emerges from Slice C detail-target
 ## modifiers, not from a macro split.
 var masculinity: float = 50.0
-## Muscle mass, 0 … 100 % (default 50 = average-for-build).
-##
-## PROVISIONAL (Slice A): only the `muscle_max` (above-average) target is imported.
-## 50 % = average = the base (weight 0); 100 % = full max-muscle anchor. Below 50 %
-## there is no min-muscle target yet (Slice C), so it clamps to the average base.
+## Muscle mass, 0 … 100 % (default 50 = average-for-build). FULL RANGE (Slice C): the
+## min-muscle anchors are now imported in the sparse macro factor-cube, so 0 % drives the
+## full minmuscle anchor, 50 % = average (base), 100 % = full maxmuscle anchor — mapped to
+## the MakeHuman muscle macro 0–1 (muscle% / 100) and split into {min,avg,max} anchor vals.
 var muscle: float = 50.0
-## Adiposity for the build, 50 … 150 % (default 100 = average-for-build).
-##
-## PROVISIONAL (Slice A): only the `weight_max` (above-average) target is imported.
-## 100 % = average = the base (weight 0); 150 % = full max-weight anchor. Below 100 %
-## there is no min-weight target yet (Slice C), so it clamps to the average base.
+## Adiposity for the build, 50 … 150 % of average-for-build (default 100 = average). FULL
+## RANGE (Slice C): the min-weight anchors are now imported, so 50 % drives the full
+## minweight anchor, 100 % = average (base), 150 % = full maxweight anchor — mapped to the
+## MakeHuman weight macro 0–1 ((weight%-50)/100) and split into {min,avg,max} anchor vals.
 var weight: float = 100.0
 ## Within-form proportion envelope (dimensionless). BIDIRECTIONAL about the base:
 ## 0.0 = full "uncommon" proportions, 0.5 = the base mesh (regular/average), 1.0 = full
@@ -88,13 +87,16 @@ var weight: float = 100.0
 ## 0..1-about-0.5 encoding so the two imported proportions targets still drive — the
 ## natural-unit re-centering is a later slice once more targets land.)
 var proportions: float = 0.5
-## Stature in cm (PROVISIONAL Slice A): the height-cm = uniform-scale-⊥-proportions
-## realization is decided in §4 but is a Slice C deliverable (it needs the full mesh
-## scale path, not a blendshape). In Slice A `height_cm` is NOT yet a metric scale; it
-## is carried as a normalized 0..1 macro-height amount driving the single `height_max`
-## blendshape, exactly as the old `height` axis did, so the render path is unchanged.
-## Renamed-but-same: see height_macro(). Default 0.0 = average-height base.
-var height: float = 0.0
+## Stature in CM (Slice C, §4): a REAL metric axis realized as a UNIFORM mesh scale,
+## ORTHOGONAL to proportions BY CONSTRUCTION. MakeHuman couples height into its morph cube
+## (§1.5) so it is NOT a pure scale there; aeriea deliberately deviates — `height_cm` does
+## NOT drive the MakeHuman height macro (that 144-target cube is dropped). Instead the
+## fully-morphed mesh is scaled by `height_cm / base_height_cm` about the foot origin
+## (see BodyRig). So proportions change shape at fixed stature; height changes stature at
+## fixed shape — genuinely independent. base_height_cm is the neutral build's getHeightCm
+## (≈166.6 cm), read from the detail-library index. Default = base_height_cm if the library
+## is present, else DEFAULT_HEIGHT_CM. Clamped to [MIN_HEIGHT_CM, MAX_HEIGHT_CM].
+var height_cm: float = 166.589
 
 ## The DETAIL ENVELOPE (body-parameterization.md §3, Slice B): a SPARSE generic map,
 ## modifier `fullName` -> value. An absent key means NEUTRAL (the base mesh). Keys are the
@@ -142,6 +144,28 @@ const MAX_AGE_YEARS := 90.0
 ## gate the configuration, not the primitive).
 const ADULT_AGE_YEARS := 18.0
 
+## Metric stature bounds (§4). The default is the neutral base build's natural height
+## (getHeightCm ≈ 166.6 cm). The range spans well below a small child to above a tall adult,
+## sex-neutral, so the uniform-scale axis is useful across the whole age range without
+## claiming MakeHuman-style build-correlated stature realism (that is the deferred open
+## question in §4). DEFAULT_HEIGHT_CM is used only when the detail library is absent.
+const MIN_HEIGHT_CM := 50.0
+const MAX_HEIGHT_CM := 230.0
+const DEFAULT_HEIGHT_CM := 166.589
+
+## The macro factor-cube anchor token sets (verified lib/targets.py `_cat_data`, §1.3).
+## A universal cube target's filename decodes into one token per category; the target's
+## weight is the PRODUCT of the anchor val for each of its decoded tokens.
+const GENDER_TOKENS := {"male": true, "female": true}
+const AGE_TOKENS := {"baby": true, "child": true, "young": true, "old": true}
+const MUSCLE_TOKENS := {"maxmuscle": true, "averagemuscle": true, "minmuscle": true}
+const WEIGHT_TOKENS := {"minweight": true, "averageweight": true, "maxweight": true}
+## Race is pinned to caucasian (the base mesh ethnicity; race axis is out of scope), so the
+## caucasian race-cube targets carry race factor val 1.0; asian/african cubes are not
+## imported. The `universal-` cube targets carry NO race token (universal across race).
+const RACE_TOKENS := {"caucasian": true, "asian": true, "african": true}
+const CAUCASIAN_VAL := 1.0
+
 # ---------------------------------------------------------------------------
 # Natural-unit <-> macro conversions (body-parameterization.md §1.4). PURE functions,
 # verified against the verbatim MakeHuman formulas (apps/human.py getAgeYears/setAgeYears).
@@ -168,9 +192,90 @@ static func age_macro_to_years(macro: float) -> float:
 func age_macro() -> float:
 	return age_years_to_macro(age_years)
 
-## The internal normalized macro-height amount (Slice A: same 0..1 as the old `height`).
-func height_macro() -> float:
-	return clampf(height, 0.0, 1.0)
+## The §4 uniform stature SCALE = height_cm / base_height_cm. base_height_cm is the neutral
+## build's getHeightCm (from the detail-library index; falls back to DEFAULT_HEIGHT_CM).
+## BodyRig multiplies the morphed mesh by this scale about the foot origin, so stature is a
+## pure scale orthogonal to the shape morphs. Clamped to a sane positive range.
+func height_scale() -> float:
+	var base := DetailLibrary.base_height_cm()
+	if base <= 0.0:
+		base = DEFAULT_HEIGHT_CM
+	var h := clampf(height_cm, MIN_HEIGHT_CM, MAX_HEIGHT_CM)
+	return h / base
+
+# ---------------------------------------------------------------------------
+# The macro factor-PRODUCT anchor vals (§1.3, verbatim apps/human.py setters). Each macro
+# axis splits into anchor sub-weights; a macro target's weight is the PRODUCT of the anchor
+# vals for the factor tokens its filename decodes to. PURE functions of the headline axes.
+# ---------------------------------------------------------------------------
+
+## Gender anchor vals: maleVal = gender, femaleVal = 1 - gender  (_setGenderVals).
+## gender macro = masculinity / 100.
+func _gender_vals() -> Dictionary:
+	var g := clampf(masculinity / 100.0, 0.0, 1.0)
+	return {"male": g, "female": 1.0 - g}
+
+## Age anchor vals: the verbatim _setAgeVals piecewise map over baby/child/young/old.
+func _age_vals() -> Dictionary:
+	var a := age_macro()
+	var baby := 0.0; var child := 0.0; var young := 0.0; var old := 0.0
+	if a < 0.5:
+		old = 0.0
+		baby = maxf(0.0, 1.0 - a * 5.333)            # 1/0.1875
+		young = maxf(0.0, (a - 0.1875) * 3.2)        # 1/(0.5-0.1875)
+		child = maxf(0.0, minf(1.0, 5.333 * a) - young)
+	else:
+		child = 0.0; baby = 0.0
+		old = maxf(0.0, a * 2.0 - 1.0)
+		young = 1.0 - old
+	return {"baby": baby, "child": child, "young": young, "old": old}
+
+## Muscle anchor vals: {min,avg,max} from the 2× split about the midpoint (_setMuscleVals).
+## muscle macro = muscle% / 100.
+func _muscle_vals() -> Dictionary:
+	var m := clampf(muscle / 100.0, 0.0, 1.0)
+	var mx := maxf(0.0, m * 2.0 - 1.0)
+	var mn := maxf(0.0, 1.0 - m * 2.0)
+	return {"maxmuscle": mx, "minmuscle": mn, "averagemuscle": 1.0 - (mx + mn)}
+
+## Weight anchor vals: {min,avg,max} (_setWeightVals). weight macro = (weight%-50)/100, so
+## 50%→0 (full min), 100%→0.5 (full average), 150%→1 (full max).
+func _weight_vals() -> Dictionary:
+	var w := clampf((weight - 50.0) / 100.0, 0.0, 1.0)
+	var mx := maxf(0.0, w * 2.0 - 1.0)
+	var mn := maxf(0.0, 1.0 - w * 2.0)
+	return {"maxweight": mx, "minweight": mn, "averageweight": 1.0 - (mx + mn)}
+
+## Decode a macro-cube target filename (universal muscle/weight cube OR caucasian race
+## cube), e.g. "macrodetails/universal-male-old-maxmuscle-maxweight.target" or
+## "macrodetails/caucasian-female-child.target", into its factor tokens — one per
+## category in {race,gender,age,muscle,weight}. Returns a Dictionary category->token.
+static func _decode_macro_factors(rel_path: String) -> Dictionary:
+	var base := rel_path.get_file().trim_suffix(".target")
+	var out := {}
+	for tok in base.split("-", false):
+		if RACE_TOKENS.has(tok): out["race"] = tok
+		elif GENDER_TOKENS.has(tok): out["gender"] = tok
+		elif AGE_TOKENS.has(tok): out["age"] = tok
+		elif MUSCLE_TOKENS.has(tok): out["muscle"] = tok
+		elif WEIGHT_TOKENS.has(tok): out["weight"] = tok
+	return out
+
+## The factor-PRODUCT weight for one macro-cube target, given the anchor-val maps. weight =
+## Π over the target's decoded factor tokens of the matching anchor val (§1.3
+## getTargetWeights: reduce(mul, [factors[f] for f in tfactors])). The race factor is pinned
+## (caucasian=1, asian/african=0) — a non-caucasian race target gets weight 0 (not imported
+## anyway). A category absent from the filename contributes 1 (e.g. the caucasian race cube
+## omits muscle/weight; the universal cube omits race).
+func _universal_target_weight(rel_path: String, gv: Dictionary, av: Dictionary, mv: Dictionary, wv: Dictionary) -> float:
+	var f := _decode_macro_factors(rel_path)
+	var prod := 1.0
+	if f.has("race"): prod *= (CAUCASIAN_VAL if f["race"] == "caucasian" else 0.0)
+	if f.has("gender"): prod *= float(gv[f["gender"]])
+	if f.has("age"): prod *= float(av[f["age"]])
+	if f.has("muscle"): prod *= float(mv[f["muscle"]])
+	if f.has("weight"): prod *= float(wv[f["weight"]])
+	return prod
 
 # ---------------------------------------------------------------------------
 # The derived Layer-1 gate predicate (body-parameterization.md §5). PURE function of
@@ -200,55 +305,43 @@ func is_adult_body() -> bool:
 # the natural-unit public fields are converted to the raw macro values here, internally.
 # ---------------------------------------------------------------------------
 
-## Project this BodyState to the per-blendshape weight map for the existing 9-axis set.
-## Returns { blendshape_name: weight } — a pure function of the record. The natural-unit
-## headline fields are converted to the raw MakeHuman macro values INSIDE this function
-## (they are no longer public). The age macro fans out to the three age anchor-
-## blendshapes (baby/child/old; young is the base = weight 0) by piecewise-linear
-## interpolation. Continuity is preserved: every weight is a continuous function of the
-## inputs, so sweeping any axis morphs the mesh smoothly with no discontinuity.
+## The two neutral proportions anchor target paths (uncommon / ideal). Proportions stays a
+## 2-anchor bidirectional axis at the neutral build (the full proportions factor-cube is
+## intentionally not imported — see tools/detail_library_build.gd header).
+const PROPORTIONS_IDEAL_TARGET := "macrodetails/proportions/female-young-averagemuscle-averageweight-idealproportions.target"
+const PROPORTIONS_UNCOMMON_TARGET := "macrodetails/proportions/female-young-averagemuscle-averageweight-uncommonproportions.target"
+
+## Project this BodyState to the per-target weight map. Returns { target_path: weight } —
+## a pure, deterministic function of the record. Keys are SPARSE-LIBRARY target file paths
+## (the names DetailLibrary resolves), NOT GPU blendshape names: the whole morph (macro
+## factor-cube + proportions anchors + detail envelope) flows through the CPU sparse-delta
+## path (Slice C). The macro cube is the §1.3 factor-PRODUCT over gender×age×muscle×weight,
+## so COMBINED macro morphs compose correctly (NOT the old linear single-anchor sum). Every
+## weight is a continuous function of the inputs, so sweeping any axis morphs smoothly.
+## height_cm is NOT in this map — it is a UNIFORM SCALE applied by BodyRig (§4), orthogonal.
 func to_blend_weights() -> Dictionary:
-	# masculinity: single macro sex axis (0–100), maps directly to the `gender_male`
-	# blendshape. macro_gender = masculinity/100.0 (0=feminine base, 1.0=masculine anchor).
-	var w := {
-		"gender_male": clampf(masculinity / 100.0, 0.0, 1.0),
-		# muscle 0..100% where 50 = average (base, weight 0). Only the max anchor exists,
-		# so map [50,100]% -> [0,1] on muscle_max; below 50% has no min target (clamps to base).
-		"muscle_max": clampf((muscle - 50.0) / 50.0, 0.0, 1.0),
-		# weight 50..150% where 100 = average (base, weight 0). Only the max anchor exists,
-		# so map [100,150]% -> [0,1] on weight_max; below 100% has no min target (clamps to base).
-		"weight_max": clampf((weight - 100.0) / 50.0, 0.0, 1.0),
-		"height_max": height_macro(),
-		"age_baby": 0.0,
-		"age_child": 0.0,
-		"age_old": 0.0,
-		"proportions_ideal": 0.0,
-		"proportions_uncommon": 0.0,
-	}
-	# Proportions is bidirectional about the base (0.5). Below 0.5 fades in the
-	# "uncommon" anchor; above 0.5 fades in the "ideal" anchor; exactly 0.5 = base
-	# (both weights 0). Continuous and orthogonal to the other axes.
+	var w := {}
+	# --- MACRO factor-product cube (§1.3): for each universal cube target the library
+	# knows, emit Π of its decoded factor anchor vals. Empty/zero weights are still emitted
+	# as 0 by omission (absent key = neutral). ----------------------------------------
+	var gv := _gender_vals()
+	var av := _age_vals()
+	var mv := _muscle_vals()
+	var wv := _weight_vals()
+	for rel in DetailLibrary.paths_of_kind("macro"):
+		if rel == PROPORTIONS_IDEAL_TARGET or rel == PROPORTIONS_UNCOMMON_TARGET:
+			continue  # proportions handled below, not as a universal factor-product target
+		var tw := _universal_target_weight(rel, gv, av, mv, wv)
+		if tw > 1e-6:
+			w[rel] = tw
+
+	# --- Proportions: bidirectional about the base (0.5). Below 0.5 fades in the uncommon
+	# anchor; above 0.5 the ideal anchor; exactly 0.5 = base. Orthogonal to the cube. ----
 	var pr := clampf(proportions, 0.0, 1.0)
 	if pr < 0.5:
-		w["proportions_uncommon"] = (0.5 - pr) / 0.5
+		w[PROPORTIONS_UNCOMMON_TARGET] = (0.5 - pr) / 0.5
 	elif pr > 0.5:
-		w["proportions_ideal"] = (pr - 0.5) / 0.5
-	# Age: natural-unit years -> macro -> the three anchor blendshapes.
-	var a := age_macro()
-	# Piecewise-linear over the anchors: baby(0) -> child(0.1875) -> young(0.5,base) -> old(1).
-	if a <= AGE_CHILD:
-		# baby..child: baby weight falls 1->0, child weight rises 0->1.
-		var t := a / AGE_CHILD if AGE_CHILD > 0.0 else 0.0
-		w["age_baby"] = 1.0 - t
-		w["age_child"] = t
-	elif a <= AGE_YOUNG:
-		# child..young(base): child weight falls 1->0, age weights -> 0 at young.
-		var t := (a - AGE_CHILD) / (AGE_YOUNG - AGE_CHILD)
-		w["age_child"] = 1.0 - t
-	else:
-		# young(base)..old: old weight rises 0->1.
-		var t := (a - AGE_YOUNG) / (AGE_OLD - AGE_YOUNG)
-		w["age_old"] = t
+		w[PROPORTIONS_IDEAL_TARGET] = (pr - 0.5) / 0.5
 
 	# --- the DETAIL ENVELOPE (Slice B, §6): project the sparse `modifiers` map through
 	# the data-driven registry. Each non-neutral entry resolves via its registered kind
@@ -373,6 +466,11 @@ func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array,
 	# per-blendshape sliders); default is the BodyState macro-axis projection.
 	var weights := weights_override if not weights_override.is_empty() else to_blend_weights()
 	var morphed := base_pos.duplicate()
+	# (1) Legacy GPU blendshapes by NAME — still applied so an explicit weights_override
+	# that names the 9 starter axes (the demo's raw per-blendshape sliders) keeps working.
+	# BodyState.to_blend_weights() no longer emits those names (Slice C routes the macro +
+	# detail morph through the sparse library below), so this pass is a no-op for the
+	# default projection and only fires for raw-blendshape overrides.
 	var bs_arrays := mesh.surface_get_blend_shape_arrays(0)
 	for i in mesh.get_blend_shape_count():
 		var axis := str(mesh.get_blend_shape_name(i))
@@ -384,6 +482,17 @@ func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array,
 			continue
 		for vi in n:
 			morphed[vi] = morphed[vi] + dv[vi] * w
+	# (2) SPARSE DELTA LIBRARY (Slice C): every weight whose key is a target FILE PATH the
+	# library knows is applied as morphed[ri] += delta_ri * weight. This carries the macro
+	# factor-cube + the proportions anchors + the full detail envelope, all on the CPU, so
+	# we avoid ~531 GPU blendshapes (≈180 MB). Iterated in SORTED key order for determinism.
+	if DetailLibrary.ensure_loaded():
+		var keys := weights.keys()
+		keys.sort()
+		for k in keys:
+			var ks := String(k)
+			if DetailLibrary.has_target(ks):
+				DetailLibrary.apply(ks, float(weights[k]), morphed)
 	# Area-weighted smooth normals over the triangle list (same accumulation as the
 	# converter's _compute_normals, so the neutral case reproduces the baked normals).
 	# Operands SWAPPED — (c-a)×(b-a) — so the normal points OUTWARD over the reversed
@@ -449,7 +558,7 @@ func to_dict() -> Dictionary:
 		"muscle": muscle,
 		"weight": weight,
 		"proportions": proportions,
-		"height": height,
+		"height_cm": height_cm,
 	}
 	# The detail envelope (Slice B): only serialized when NON-EMPTY, so a neutral body
 	# stays a tiny dict. Sorted-key copy for byte-stable diffs / replay.
@@ -469,7 +578,7 @@ static func from_dict(d: Dictionary) -> BodyState:
 	bs.muscle = float(d.get("muscle", 50.0))
 	bs.weight = float(d.get("weight", 100.0))
 	bs.proportions = float(d.get("proportions", 0.5))
-	bs.height = float(d.get("height", 0.0))
+	bs.height_cm = float(d.get("height_cm", DEFAULT_HEIGHT_CM))
 	var m = d.get("modifiers", {})
 	if typeof(m) == TYPE_DICTIONARY:
 		for k in m:

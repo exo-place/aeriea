@@ -203,6 +203,14 @@ func apply_body_state(state: BodyState) -> void:
 	if mesh_instance == null or mesh_instance.mesh == null:
 		return
 	body_state.apply_morph_cpu(mesh_instance)
+	# METRIC HEIGHT (§4): height_cm is a UNIFORM SCALE orthogonal to the shape morphs, applied
+	# to the skeleton (mesh + bones) about the foot origin (y=0). The mesh has feet at local
+	# y=0, so a uniform scale about the node origin scales stature while keeping feet planted.
+	# Changing height_cm only changes this scalar — it never touches the morph deltas, so
+	# proportions (the shape) and stature (the scale) are genuinely independent.
+	if skeleton != null:
+		var s := body_state.height_scale()
+		skeleton.scale = Vector3(s, s, s)
 
 
 ## Body-local eye height (metres above the body's feet origin), derived from the

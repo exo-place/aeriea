@@ -18,7 +18,11 @@ config/name="aeriea"
 config/description="A place to be — embodied modern-life sandbox built around 100% immersion"
 config/version="0.1.0"
 config/tags=PackedStringArray("sandbox", "immersive", "modern-life")
-run/main_scene="res://scenes/test_level.tscn"
+; TEMPORARY: the character creator is the main scene so running the game opens
+; the 3rd-person body viewer (the tool to actually SEE the body — the FP camera
+; sits inside the head). The real game level is res://scenes/test_level.tscn;
+; revert this line to it when returning to gameplay.
+run/main_scene="res://scenes/character_creator.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 

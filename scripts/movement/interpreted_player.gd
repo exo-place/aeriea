@@ -211,6 +211,15 @@ func _ready() -> void:
 		interpreter = MovementInterpreter.new()
 	interpreter.setup(kit, self)
 
+	# Derive the first-person eye height from the ACTUAL rendered body, not a magic
+	# constant. The body is ~1.67 m (feet at its local y=0); its eye landmark sits
+	# at ~1.54 m. The hardcoded camera_height_stand=0.85 put the eye at world 1.75 m
+	# — ABOVE the 1.67 m head — so looking down rendered the inside of the skull (the
+	# camera-inside-the-head bug). Runs AFTER the kit/interpreter exist so it can also
+	# replace the kit's camera-height params (the lerp_camera_height effect targets
+	# them every frame). No-op for body-less players (the parity/golden runs).
+	_apply_body_eye_height()
+
 	# Accessibility (#5): register the sprint tap-vs-hold resolver from GameSettings.
 	# The interpreter's once-per-tick InputFrame then exposes a single coherent
 	# "sprint active" signal regardless of mode, so the kit's sprint condition is
@@ -223,6 +232,41 @@ func _ready() -> void:
 	if Engine.is_editor_hint():
 		return
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+## Set the camera eye height from the rendered body's real eye landmark (derived
+## by BodyRig.eye_height(), from the CC0 rig's eye joints) instead of the hardcoded
+## camera_height_stand magic. Keeps the eye at the body's eyes (outside/below the
+## crown) so a downward look sees the world, not the skull interior. Also seats the
+## camera at the eye PLANE (a small forward nudge toward the face front, -Z) so the
+## near plane sits at the eyes rather than the centre of the head, and clips the
+## near plane so the player's own head/nose never fills the view. Crouch height is
+## derived proportionally. No-op if the body or its skeleton is unavailable
+## (tests construct body-less players); the exported defaults then stand.
+func _apply_body_eye_height() -> void:
+	if body_rig == null or body_rig.skeleton == null:
+		return
+	var eye_above_feet := body_rig.eye_height()      # body-local, feet at 0
+	# Camera pivot is camera_height above the capsule CENTRE origin; the body's feet
+	# are stand_height below that origin, so eye-above-origin = eye-above-feet - stand_height.
+	camera_height_stand = eye_above_feet - stand_height
+	# Crouch: keep the eye at the same fraction of standing eye-above-feet, shifted
+	# for the lower crouch origin (origin is crouch_height above the feet when crouched).
+	camera_height_crouch = (eye_above_feet * (crouch_height / stand_height)) - crouch_height
+	if _camera_pivot:
+		_camera_pivot.position.y = camera_height_stand
+	if _camera:
+		# Tight near plane so the player's own face never renders into the view when
+		# looking down at the body.
+		_camera.near = 0.1
+	# The kit's `lerp_camera_height` effect eases the pivot toward the kit's
+	# camera_height_stand / camera_height_crouch params EVERY frame, so the derived
+	# eye height must also replace those params or the kit would drag the pivot back
+	# up to 0.85 (re-burying the camera in the skull). One source of truth: the
+	# body-derived values flow into the kit params the interpreter resolves.
+	if kit != null:
+		kit.params["camera_height_stand"] = camera_height_stand
+		kit.params["camera_height_crouch"] = camera_height_crouch
 
 ## (Re)build the per-action tap-vs-hold resolvers from GameSettings. Called on
 ## ready and whenever settings change. Preserves an existing sprint latch across a

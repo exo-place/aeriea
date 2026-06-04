@@ -165,6 +165,47 @@ func build() -> bool:
 	return true
 
 
+## Body-local eye height (metres above the body's feet origin), derived from the
+## actual rig's eye landmark — NOT a magic constant. The body mesh has feet at
+## local y=0; the eye bones (eye.L/eye.R from the CC0 default.mhskel joint cubes)
+## sit at the anatomical eye level. The first-person camera reads this so the eye
+## sits at the body's real eyes, not at an assumed height above the skull (the
+## camera-inside-the-head bug: a hardcoded pivot above the shorter-than-assumed
+## body put the eye at the crown, so looking down rendered the skull interior).
+## Falls back to the head bone, then a sane default, if the eye bones are absent.
+func eye_height() -> float:
+	if skeleton == null:
+		return 1.6
+	var sum := 0.0
+	var n := 0
+	for bn in ["eye.L", "eye.R"]:
+		if _bone_index.has(bn):
+			sum += skeleton.get_bone_global_pose(_bone_index[bn]).origin.y
+			n += 1
+	if n > 0:
+		return sum / float(n)
+	if _bone_index.has("head"):
+		# head joint sits at the base of the skull; nudge up to ~eye level
+		return skeleton.get_bone_global_pose(_bone_index["head"]).origin.y + 0.05
+	return 1.6
+
+
+## Body-local top-of-head height (metres above feet) — the rendered mesh's max Y.
+## Used to sanity-check the eye sits below the crown.
+func head_top() -> float:
+	if mesh_instance == null or mesh_instance.mesh == null:
+		return 1.7
+	var ab: AABB = mesh_instance.mesh.get_aabb()
+	# The mesh AABB includes blendshape extents (e.g. height_max), so clamp to the
+	# base surface top by reading ARRAY_VERTEX rather than the morph-inflated AABB.
+	var arrays := (mesh_instance.mesh as ArrayMesh).surface_get_arrays(0)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var mx := -INF
+	for v in verts:
+		mx = maxf(mx, v.y)
+	return mx if mx > -INF else ab.position.y + ab.size.y
+
+
 func _load_rig_json() -> Dictionary:
 	var f := FileAccess.open(RIG_PATH, FileAccess.READ)
 	if f == null:

@@ -244,10 +244,16 @@ func _test_chain_a_fill_place_arms_beacon() -> void:
 	var holding_jug: bool = interactor.held_body() == jug
 
 	# 3) Carry the jug into the spout stream (spout Area3D at 7,0.95,-5). We move
-	# the player so the carry point sits in the stream, and hold there to fill.
+	# the player so the carry point sits in the stream, and hold there to fill. The
+	# carried jug hangs `hold_distance` (1.6 m) in front of the EYE along the look
+	# ray; the eye now sits at the body's real eye landmark (~0.65 m above the
+	# capsule centre, derived from the rig) instead of the old 0.85 magic that buried
+	# the camera in the skull. Stand a little closer (z -3.6) and aim straight at the
+	# spout centre so the carry endpoint lands inside the small spout cylinder
+	# (r=0.18, ~y 0.75-1.15) at the lower eye height and the jug fills.
 	var fill_before: float = jug.fill
-	player.global_position = Vector3(7.0, 1.2, -3.8)
-	_aim_at(player, Vector3(7.0, 0.6, -5.0))   # look down at the spout
+	player.global_position = Vector3(7.0, 1.2, -3.6)
+	_aim_at(player, Vector3(7.0, 0.95, -5.0))  # look down at the spout
 	await _step(60)                            # hold under the running spout
 	var fill_after: float = jug.fill
 	var filled: bool = jug.is_full()

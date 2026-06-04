@@ -1,20 +1,22 @@
-# Decision: Body parameterization — natural units, two-axis sex, data-driven modifier registry, full CC0 library
+# Decision: Body parameterization — natural units, single-axis sex macro, data-driven modifier registry, full CC0 library
 
-Status: **DECIDED — design + phased slice plan** (2026-06-04)
+Status: **DECIDED — design + phased slice plan** (2026-06-04); **amended** (sex
+axis collapsed to single macro, 2026-06-04 — see §2)
 
 Scope: the overhaul of the body-morph parameterization. This doc supersedes the
 provisional `BodyState` shape sketched in `body-and-locomotion-slice.md` §2.1
 (the six raw 0–1 macro knobs, 9-of-1280 targets imported) with: (a) a **public
-API in natural units** where a real unit exists; (b) **two independent sex axes**
-(femininity / masculinity) replacing the single 0–1 `gender`; (c) **height as
-pure stature, orthogonal to proportions**; (d) the **entire ~1,280-target CC0
-library** imported via a **data-driven modifier registry** parsed from
-MakeHuman's own modifier-definition JSON; (e) the **gate re-expressed** from
-`age >= 0.5` to `body_age_years >= 18`. This doc is the spec — **no implementation
-code**. It extends, and is cross-linked from, `body-and-locomotion-slice.md`
-(the pipeline + slice discipline) rather than living inside it, because that doc
-is the *pipeline* decision and this is the *parameterization* decision; they are
-independently load-bearing.
+API in natural units** where a real unit exists; (b) a **single `masculinity`
+macro sex axis** (0–100) replacing the single 0–1 `gender` (the earlier two-axis
+model — femininity + masculinity — was a design error; see §2 amendment); (c)
+**height as pure stature, orthogonal to proportions**; (d) the **entire
+~1,280-target CC0 library** imported via a **data-driven modifier registry**
+parsed from MakeHuman's own modifier-definition JSON; (e) the **gate re-expressed**
+from `age >= 0.5` to `body_age_years >= 18`. This doc is the spec — **no
+implementation code**. It extends, and is cross-linked from,
+`body-and-locomotion-slice.md` (the pipeline + slice discipline) rather than
+living inside it, because that doc is the *pipeline* decision and this is the
+*parameterization* decision; they are independently load-bearing.
 
 Cross-links:
 - `body-and-locomotion-slice.md` §1 (the nix-reproducible `.target`→ArrayMesh
@@ -323,22 +325,33 @@ where none does.
 |---|---|---|---|
 | `age_years` | **years, 1.0 … 90.0** (default 25) | real age | MakeHuman age macro 0–1 via the §1.4 piecewise map |
 | `height_cm` | **cm** (e.g. ~50 … ~210, default per `units-and-scale.md`) | **pure stature scale, ⊥ proportions** | a *uniform mesh scale* + (optionally) a clamped height-macro contribution — see §4 |
-| `femininity` | **0 … 100 %** (default per base) | feminine-coded morph amount | `femaleVal` side of the gender factor |
-| `masculinity` | **0 … 100 %** (default 0) | masculine-coded morph amount | `maleVal` side of the gender factor |
+| `masculinity` | **0 … 100** (default 50 = androgynous) | single macro sex axis: 0=feminine body, 50=androgynous, 100=masculine body | `macro_gender = masculinity/100.0` → drives the `gender_male` blendshape directly |
 | `muscle` | **0 … 100 %** (default 50 = average) | muscle mass | muscle macro {min,avg,max} |
 | `weight` | **50 … 150 %** of average-for-build (default 100 = average) | adiposity for the build | weight macro {min,avg,max} (100% = `averageweightVal`=1) |
 | `proportions` | **dimensionless, idealized ↔ uncommon** (default 0 = regular) | within-form proportion envelope | proportions macro {uncommon,regular,ideal} |
 | `modifiers` | **map: modifier `fullName` → value** | every detail axis (§1.2), defaulting to neutral when absent | direct per-modifier value, [-1,1] or [0,1] by shape |
 
-**Two-axis sex (decided).** The single 0–1 `gender` is **replaced by two
-independent axes**: `femininity` and `masculinity`, each 0–100%. They are **not**
-constrained to sum to 100 — high-both ("androgynous-full"), neither
-("neutral/undefined"), or any blend is representable, fitting the malleable-body
-premise (DESIGN.md). The internal mapping derives `femaleVal`/`maleVal` directly
-from the two axes (rather than from one slider's complement), which is *more*
-expressive than MakeHuman's single gender macro — a deliberate widening of the
-primitive, consistent with "don't cripple primitives." The base mesh corresponds
-to femininity=base, masculinity=0 `[A]` (base is caucasian-female-young `[V]`).
+**Single-axis sex macro (amended from the earlier two-axis design).** The
+initial design replaced the single 0–1 `gender` with **two independent axes**
+`femininity` and `masculinity`, each 0–100%, on the premise that androgynous
+bodies (high-both) should be representable independently of the two poles. This
+was a design error: MakeHuman's gender macro is a **single female↔male
+interpolation** — one anchor pair, one blendshape (`gender_male`). Two
+independent axes correspond to nothing in the data: `femininity` was a no-op
+fiction in Slice A (it drove no blendshape; the base mesh *is* the feminine
+pole). The "androgynous-full" configuration is incoherent in MakeHuman's single
+macro space.
+
+**Decision `[A]`:** the axis is collapsed to **one scalar `masculinity`**,
+0–100, default 50 = androgynous (halfway between the poles). The mapping is
+direct: `macro_gender = masculinity / 100.0` → `gender_male` blendshape weight.
+`masculinity` is the chosen name — NOT `sex` (categorical) and NOT `gender`
+(gender identity is deliberately decoupled from body morphology). The base mesh
+is the feminine pole (0); 100 is the masculine anchor. Real sex-morphology
+richness — androgyny blends, etc. — is emergent from the Slice C detail-target
+modifiers (breast, hip, torso shape, …), not from splitting the macro. The name
+`masculinity` conveys the morphology direction without encoding a gender-identity
+claim.
 
 **Raw macro weights are internal.** The 0–1 MakeHuman macro values
 (`age`,`gender`,`muscle`,`weight`,`height`,`proportions`) are computed *inside*
@@ -355,8 +368,7 @@ BodyState = {
   # headline natural-unit macro axes (§2)
   age_years:    float,   # 1..90
   height_cm:    float,   # stature, ⊥ proportions
-  femininity:   float,   # 0..100
-  masculinity:  float,   # 0..100
+  masculinity:  float,   # 0..100 (0=feminine body, 50=androgynous, 100=masculine body)
   muscle:       float,   # 0..100
   weight:       float,   # 50..150 (% of avg-for-build)
   proportions:  float,   # idealized..uncommon, dimensionless
@@ -537,9 +549,9 @@ top-level tabs (`Face`, …) with `sortOrder` + `cameraView`, each holding named
 sub-groups (`"head shape"`, `"head size"`, `"eyebrows"`, …) of slider defs
 `{"mod": "<fullName>", "cam": "...", "label": "..."}`. Decided:
 
-- **Headline macros prominent.** The seven natural-unit axes (§2) are the
+- **Headline macros prominent.** The headline natural-unit axes (§2) are the
   always-visible top section, in natural units with real labels ("Age: 25
-  years", "Height: 175 cm", "Femininity 60% / Masculinity 10%").
+  years", "Height: 175 cm", "Masculine body: 50 (androgynous)").
 - **Detail axes categorized.** The `modifiers` map is presented through the
   parsed `*_sliders.json` tree (tabs → sub-groups → labeled sliders), tooltips
   from `*_desc.json`. The creator (`scripts/body/character_creator.gd`) drives
@@ -578,12 +590,12 @@ render-side mesh/skin format:
    runtime `BodyState` can resolve `fullName`→blendshape without re-parsing the
    MakeHuman source.
 
-`scripts/body/body_state.gd` changes: the seven natural-unit fields replace the
-six 0–1 fields; add the `modifiers` map; `to_blend_weights()` gains the
-factor-cube + registry projection; `is_adult_body()` becomes `age_years >= 18.0`;
-`to_dict`/`from_dict` round-trip the new shape (with back-compat read of old keys
-optional — but per "retire, don't deprecate", a clean break with a one-time
-migration is preferred `[A]`).
+`scripts/body/body_state.gd` changes: the natural-unit fields (including the
+single `masculinity` macro sex axis) replace the six 0–1 fields; add the
+`modifiers` map; `to_blend_weights()` gains the factor-cube + registry projection;
+`is_adult_body()` becomes `age_years >= 18.0`; `to_dict`/`from_dict` round-trip
+the new shape (per "retire, don't deprecate", a clean break — old `gender`/`age`
+keys and the dropped `femininity` key are not read back `[A]`).
 
 ---
 
@@ -593,11 +605,12 @@ Each phase is independently shippable and **xvfb-verifiable** (the standing CI
 discipline; `body-and-locomotion-slice.md` §4). "Touches gate" is called out
 explicitly per the hard-constraint rule.
 
-**Phase A — natural-unit public API + two-axis sex + gate re-expression.**
-*Scope:* rewrite `BodyState` to the §2 natural-unit fields (incl.
-femininity/masculinity), keep the *existing* 9-target macro projection underneath
-(map natural units → the current 0–1 macros internally via the §1.4 functions).
-Re-express the gate to `age_years >= 18.0`.
+**Phase A — natural-unit public API + single masculinity macro sex axis + gate re-expression.**
+*Scope:* rewrite `BodyState` to the §2 natural-unit fields (incl. the single
+`masculinity` macro sex axis, 0–100, default 50 = androgynous — see §2 amendment
+for why the earlier two-axis model was collapsed), keep the *existing* 9-target
+macro projection underneath (map natural units → the current 0–1 macros internally
+via the §1.4 functions). Re-express the gate to `age_years >= 18.0`.
 *Files:* `scripts/body/body_state.gd`, `scripts/body/character_creator.gd` (labels
 → natural units), the body/gate tests (`tests/body_asset_test.gd`,
 the interaction gate test).
@@ -666,9 +679,10 @@ proportions {min,avg,max} structure; that **height-cm and weight-kg are emergent
 (bbox / Mosteller), not anchored constants**; and that **MakeHuman does NOT keep
 height orthogonal to proportions** (no mechanism to confirm — it couples them).
 
-**Assumed / decided `[A]` (not derivable from source):** the two-axis
-femininity/masculinity model (a deliberate widening of MakeHuman's single
-gender); the height-cm = uniform-scale orthogonality (a deliberate deviation);
+**Assumed / decided `[A]` (not derivable from source):** the single `masculinity`
+macro sex axis (0–100, default 50; the earlier two-axis femininity/masculinity
+model was a design error collapsed at Slice A — §2); the height-cm =
+uniform-scale orthogonality (a deliberate deviation);
 the 18.0-year gate constant and fail-closed/single-source robustness rules; the
 sparse-map `BodyState` shape and sorted-key determinism; the clean-break
 serialization migration; UI progressive-disclosure defaults; the import

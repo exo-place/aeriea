@@ -118,11 +118,11 @@ func _build_body_state_section(panel: VBoxContainer) -> void:
 	panel.add_child(_adult_label)
 
 	# [field, min, max, init] for the natural-unit headline axes BodyState carries
-	# (body-parameterization.md §2). age in YEARS; femininity/masculinity/muscle/weight
-	# in %; height the Slice A provisional normalized macro-height amount.
+	# (body-parameterization.md §2). age in YEARS; masculinity 0–100 (0=feminine,
+	# 50=androgynous, 100=masculine); muscle/weight in %; height the Slice A
+	# provisional normalized macro-height amount.
 	var axes := [
 		["age_years", 1.0, 90.0, _body_state.age_years],
-		["femininity", 0.0, 100.0, _body_state.femininity],
 		["masculinity", 0.0, 100.0, _body_state.masculinity],
 		["muscle", 0.0, 100.0, _body_state.muscle],
 		["weight", 50.0, 150.0, _body_state.weight],

@@ -58,7 +58,7 @@ func _test_bodystate_drives_morphs() -> void:
 
 	# Neutral young-adult default: all age weights ~0 (base mesh = young, 25yr), and
 	# every other axis at its neutral base value.
-	var neutral := BodyState.new()  # defaults: age_years=25 (macro 0.5), masculinity=0, etc.
+	var neutral := BodyState.new()  # defaults: age_years=25 (macro 0.5), masculinity=50 (androgynous), etc.
 	neutral.apply_to(mi)
 	var w_age_old := float(mi.get("blend_shapes/age_old"))
 	var w_age_child := float(mi.get("blend_shapes/age_child"))
@@ -84,12 +84,12 @@ func _test_bodystate_drives_morphs() -> void:
 	_assert("BodyState.age_years=10 (child anchor) drives age_child blendshape weight to ~1.0",
 		absf(child_w - 1.0) < 1e-4, "age_child weight = %.4f" % child_w)
 
-	# Drive a SECOND axis (masculinity) independently — orthogonality.
+	# Drive the masculinity axis — single macro sex axis (0–100, maps to gender_male).
 	var masc := BodyState.new()
 	masc.masculinity = 80.0
 	masc.apply_to(mi)
 	var gender_w := float(mi.get("blend_shapes/gender_male"))
-	_assert("BodyState.masculinity=80%% drives gender_male blendshape weight to 0.8 (axes orthogonal)",
+	_assert("BodyState.masculinity=80 drives gender_male blendshape weight to 0.8 (masculinity/100 = macro_gender)",
 		absf(gender_w - 0.8) < 1e-4, "gender_male weight = %.4f" % gender_w)
 
 	# Weight is 50..150% where 100 = average (base, weight 0); 150 = full max anchor.

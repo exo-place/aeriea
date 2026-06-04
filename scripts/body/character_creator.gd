@@ -176,8 +176,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 # ---------------------------------------------------------------------------
 # Morph UI — sliders for the BodyState natural-unit headline axes (age in years,
-# femininity/masculinity %, muscle %, weight %, proportions), live-driving the
-# blendshapes through the rig's correct-normals CPU morph bake.
+# masculinity 0–100 (feminine←→masculine), muscle %, weight %, proportions),
+# live-driving the blendshapes through the rig's correct-normals CPU morph bake.
 # (body-parameterization.md §2/§7 — natural units on the public surface.)
 # ---------------------------------------------------------------------------
 
@@ -206,14 +206,14 @@ func _build_ui() -> void:
 	vbox.add_child(HSeparator.new())
 
 	# [field, min, max, step, label, unit] — the BodyState natural-unit headline axes
-	# (body-parameterization.md §2). age is in YEARS (the gate reads >= 18); femininity/
-	# masculinity are the two independent sex axes in %; muscle/weight in %; proportions
-	# is the dimensionless 0..1-about-0.5 bidirectional envelope. height is the Slice A
-	# provisional normalized macro-height amount (Slice C makes it metric cm, §4).
+	# (body-parameterization.md §2). age is in YEARS (the gate reads >= 18); masculinity
+	# is the single macro sex axis 0–100 (0=feminine, 50=androgynous, 100=masculine);
+	# muscle/weight in %; proportions is the dimensionless 0..1-about-0.5 bidirectional
+	# envelope. height is the Slice A provisional normalized macro-height amount (Slice C
+	# makes it metric cm, §4).
 	var axes := [
 		["age_years", 1.0, 90.0, 0.5, "age", "yr"],
-		["femininity", 0.0, 100.0, 1.0, "femininity", "%"],
-		["masculinity", 0.0, 100.0, 1.0, "masculinity", "%"],
+		["masculinity", 0.0, 100.0, 1.0, "masc (fem←→masc)", "%"],
 		["muscle", 0.0, 100.0, 1.0, "muscle", "%"],
 		["weight", 50.0, 150.0, 1.0, "weight", "%"],
 		["proportions", 0.0, 1.0, 0.01, "proportions", ""],

@@ -3,12 +3,22 @@
 ## natural-unit overhaul) which supersedes body-and-locomotion-slice.md §2.1.
 ##
 ## SLICE A deliverable (body-parameterization.md §9, Phase A): the PUBLIC API is now
-## in NATURAL UNITS (years, percentages) with two independent sex axes; the raw 0–1
-## MakeHuman macro weights are demoted to an INTERNAL detail computed inside
-## to_blend_weights(). The gate is re-expressed to `age_years >= 18.0`. Slice A uses
-## ONLY the existing 9 blendshapes (no new target imports — those are Slices B/C), so
-## the CPU-morph render path (apply_morph_cpu / apply_to / BodyRig.apply_body_state)
+## in NATURAL UNITS (years, percentages) with a single `masculinity` macro sex axis;
+## the raw 0–1 MakeHuman macro weights are demoted to an INTERNAL detail computed
+## inside to_blend_weights(). The gate is re-expressed to `age_years >= 18.0`. Slice A
+## uses ONLY the existing 9 blendshapes (no new target imports — those are Slices B/C),
+## so the CPU-morph render path (apply_morph_cpu / apply_to / BodyRig.apply_body_state)
 ## is byte-for-byte unchanged in behavior; only the public field shape changed.
+##
+## Sex axis (body-parameterization.md §2, amended): the earlier two-axis model
+## (femininity + masculinity) is collapsed to ONE macro axis `masculinity` (0–100,
+## default 50 = androgynous). MakeHuman's gender macro is a SINGLE female↔male
+## interpolation (one anchor pair, `gender_male`), so two independent axes
+## corresponded to nothing in the data — `femininity` was a no-op fiction. The
+## single `masculinity` axis maps directly: macro_gender = masculinity/100.0, driving
+## the `gender_male` blendshape (0 = feminine base/anchor, 0.5 = androgynous, 1.0 =
+## masculine anchor). Real sex-morphology richness emerges from Slice C detail-target
+## modifiers, not a macro split.
 ##
 ## BodyState is DATA (like MovementState and the interactable state maps) — part of
 ## the seeded sim, deterministic, serializable to/from a plain Dictionary so it fits
@@ -40,23 +50,17 @@ extends RefCounted
 ## piecewise map. This is the PUBLIC field the gate reads — `>= 18 years` is the
 ## self-evident legal line, unlike the opaque old `age >= 0.5`.
 var age_years: float = 25.0
-## Feminine-coded morph amount, 0 … 100 %.
-##
-## PROVISIONAL LIMITATION (Slice A): the base mesh is caucasian-FEMALE-young, and the
-## only sex blendshape imported so far is `gender_male` (a masculinizing target). There
-## is NO feminizing `.target` available yet (Slice C imports the full library). So this
-## axis is represented HONESTLY in the API and serialization, but in Slice A it has no
-## morph target to drive — the base mesh is already the feminine pole. We deliberately
-## DO NOT fake a feminization morph (e.g. by abusing -gender_male, which would just
-## masculinize-in-reverse / push past the base into nonsense). femininity is wired into
-## to_blend_weights() only insofar as a feminizing target exists; today it is a no-op on
-## the mesh while remaining a first-class, serialized public axis.
-var femininity: float = 100.0
-## Masculine-coded morph amount, 0 … 100 % (default 0). Drives the `gender_male`
-## blendshape (masculinity/100). Independent of `femininity` — the two are NOT
-## constrained to sum to 100 (androgynous-full, neutral, or any blend is representable),
-## a deliberate widening of MakeHuman's single 0–1 gender macro (§2).
-var masculinity: float = 0.0
+## Single macro sex axis, 0 … 100 (default 50 = androgynous).
+## Maps directly to the MakeHuman gender macro: macro_gender = masculinity / 100.0,
+## driving the `gender_male` blendshape.
+##   0   = feminine body anchor (base mesh = the fully-feminine MakeHuman base)
+##   50  = androgynous (halfway between the two anchors)
+##   100 = masculine body anchor (full `gender_male` blendshape weight 1.0)
+## The name `masculinity` is the chosen morphology scalar — NOT `sex` (sex is
+## categorical) and NOT `gender` (gender identity is deliberately decoupled from
+## body morphology). Real sex-morphology richness emerges from Slice C detail-target
+## modifiers, not from a macro split.
+var masculinity: float = 50.0
 ## Muscle mass, 0 … 100 % (default 50 = average-for-build).
 ##
 ## PROVISIONAL (Slice A): only the `muscle_max` (above-average) target is imported.
@@ -183,8 +187,8 @@ func is_adult_body() -> bool:
 ## interpolation. Continuity is preserved: every weight is a continuous function of the
 ## inputs, so sweeping any axis morphs the mesh smoothly with no discontinuity.
 func to_blend_weights() -> Dictionary:
-	# femininity: PROVISIONAL — no feminizing target exists yet (base mesh is the
-	# feminine pole). We do NOT fake it. masculinity drives the one imported sex target.
+	# masculinity: single macro sex axis (0–100), maps directly to the `gender_male`
+	# blendshape. macro_gender = masculinity/100.0 (0=feminine base, 1.0=masculine anchor).
 	var w := {
 		"gender_male": clampf(masculinity / 100.0, 0.0, 1.0),
 		# muscle 0..100% where 50 = average (base, weight 0). Only the max anchor exists,
@@ -347,7 +351,6 @@ func apply_morph_cpu(mesh_instance: MeshInstance3D, weights_override: Dictionary
 func to_dict() -> Dictionary:
 	return {
 		"age_years": age_years,
-		"femininity": femininity,
 		"masculinity": masculinity,
 		"muscle": muscle,
 		"weight": weight,
@@ -358,8 +361,7 @@ func to_dict() -> Dictionary:
 static func from_dict(d: Dictionary) -> BodyState:
 	var bs := BodyState.new()
 	bs.age_years = float(d.get("age_years", 25.0))
-	bs.femininity = float(d.get("femininity", 100.0))
-	bs.masculinity = float(d.get("masculinity", 0.0))
+	bs.masculinity = float(d.get("masculinity", 50.0))
 	bs.muscle = float(d.get("muscle", 50.0))
 	bs.weight = float(d.get("weight", 100.0))
 	bs.proportions = float(d.get("proportions", 0.5))

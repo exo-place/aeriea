@@ -265,6 +265,15 @@ func apply_pose(delta: float) -> void:
 # bones to rest first so the pose is a pure function of the matched frame.
 var _mm_frame: int = 0
 
+## Below this planar speed (m/s) the body is treated as standing still and is
+## blended fully to the authored MakeHuman REST pose (a clean neutral stand). The
+## captured-clip "idle" frames in the DB are mid-fidget poses that, at true rest,
+## read as a frozen contorted stance (head/arms thrown off-axis); the authored
+## rest is the correct neutral. Between idle_speed and idle_blend_top the MM pose
+## fades in. Render-side only; chosen well below the test walk goal (3 m/s).
+@export var idle_speed: float = 0.15
+@export var idle_blend_top: float = 0.9
+
 func _apply_motion_matching() -> void:
 	# Step the matcher (deterministic argmin / clip-advance) with the goal.
 	var vel := local_velocity
@@ -274,14 +283,28 @@ func _apply_motion_matching() -> void:
 		vel = Vector2.ZERO
 	_mm_frame = matcher.step(vel, turn_rate)
 
-	# Reset every MM-driven bone to rest, then stamp the matched local rotations.
+	# Idle blend: at/near rest, fade the whole MM pose toward the authored rest
+	# pose so a standing body looks like a normal neutral stand (the DB's captured
+	# idle frames are off-axis fidgets that read as broken when frozen). Uses the
+	# render-side smoothed speed so the transition is stable. A pure function of
+	# state — no accumulation, no sim feedback.
+	var mm_w := clampf((_smoothed_speed - idle_speed) / maxf(idle_blend_top - idle_speed, 1e-3), 0.0, 1.0)
+
+	# Reset every MM-driven bone to rest, then stamp the matched local rotations
+	# blended against rest by mm_w (mm_w=0 -> pure rest stand; mm_w=1 -> full MM).
 	var nb := motion_db.bone_count
 	for bi in nb:
 		var bname := motion_db.bone_names[bi]
 		if not _bone_index.has(bname):
 			continue
 		var rest: Transform3D = _rest_local.get(bname, Transform3D.IDENTITY)
+		var rest_q := rest.basis.get_rotation_quaternion()
 		var q := motion_db.pose_quat(_mm_frame, bi)
+		if mm_w < 1.0:
+			# Compose the MM delta onto the rest rotation, then fade in from rest.
+			# (Rest bases are identity here, so rest_q*q == q; the slerp from rest_q
+			# is what produces the neutral stand at idle.)
+			q = rest_q.slerp((rest_q * q).normalized(), mm_w)
 		# The DB quats are BVH-joint local rotations. Apply as the bone's local
 		# rotation, keeping the rest position. The root keeps its rest position
 		# (sim owns translation); MM supplies only orientation.

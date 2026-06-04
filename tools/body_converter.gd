@@ -104,12 +104,16 @@ func _run() -> int:
 	var base_verts: PackedVector3Array = parsed["verts"]      # MH-space, raw
 	var tris: PackedInt32Array = parsed["tris"]                # triangulated indices
 	var n := base_verts.size()
-	print("body_converter: %d vertices, %d triangle indices (%d tris)" % [n, tris.size(), tris.size() / 3])
+	var body_vert_count: int = parsed["body_vert_count"]
+	print("body_converter: %d vertices (%d body), %d triangle indices (%d tris)" % [n, body_vert_count, tris.size(), tris.size() / 3])
 
 	# --- scale + feet-to-origin transform (1u = 1m) ---------------------------
+	# Lift so the lowest BODY vertex (feet) sits at y=0. Using only body verts keeps
+	# helper-* proxies (e.g. the skirt hanging below the feet) from offsetting the
+	# rendered body off the floor; the rig shares this same min_y (one frame).
 	var min_y := INF
-	for v in base_verts:
-		min_y = min(min_y, v.y)
+	for i in body_vert_count:
+		min_y = min(min_y, base_verts[i].y)
 	# scaled positions, lifted so the lowest vertex (feet) sits at y = 0
 	var scaled_base := PackedVector3Array()
 	scaled_base.resize(n)
@@ -472,9 +476,25 @@ func _write_rig_data(rig: Dictionary) -> bool:
 # Parsers — pure text → arrays. Deterministic: preserve source order.
 # ---------------------------------------------------------------------------
 
-## Parse a MakeHuman base.obj: collect `v x y z` in file order and `f` quad faces,
-## triangulating each quad (a b c d) → (a b c) + (a c d) with a fixed diagonal.
-## OBJ face indices are 1-based; we return 0-based triangle indices.
+## The ONLY OBJ group whose faces are the actual rendered body. MakeHuman's
+## base.obj bundles the body mesh with HELPER geometry the rest of the toolchain
+## consumes but which must NEVER render: a `helper-*` proxy set (skirt / tights /
+## hair / eyes / teeth / tongue / genital / eyelashes — fitting cages for clothing,
+## hair and organs) and 125 `joint-*` "joint cubes" (8-vertex boxes whose centroids
+## the skeleton fitter reads as joint positions). Including them in the ArrayMesh
+## is what made the body render with stray boxes/dots all over it.
+##
+## We render ONLY `g body` faces. We KEEP the full vertex array — the `joint-*`
+## cube vertices (read by index via the .mhskel `joints` map in _parse_skeleton)
+## and every blendshape/skin-weight vertex index stay valid and unchanged; the
+## helper/joint vertices simply become unreferenced by the rendered index buffer.
+const BODY_GROUP := "body"
+
+## Parse a MakeHuman base.obj: collect `v x y z` in file order, and `f` faces
+## ONLY for the `g body` group (see BODY_GROUP). Quads (a b c d) triangulate to
+## (a b c) + (a c d) with a fixed diagonal. OBJ face indices are 1-based; we
+## return 0-based triangle indices. The full vertex set is returned regardless of
+## group (helper/joint vertices stay addressable by index for the rig + morphs).
 func _parse_obj(path: String) -> Dictionary:
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
@@ -482,13 +502,21 @@ func _parse_obj(path: String) -> Dictionary:
 		return {}
 	var verts := PackedVector3Array()
 	var tris := PackedInt32Array()
+	var in_body := false   # are we inside the `g body` group right now?
+	var body_faces := 0
 	while not f.eof_reached():
 		var line := f.get_line()
 		if line.begins_with("v "):
 			var p := line.split(" ", false)
 			# p[0] == "v"
 			verts.append(Vector3(p[1].to_float(), p[2].to_float(), p[3].to_float()))
+		elif line.begins_with("g "):
+			# OBJ group switch: only `g body` faces are part of the rendered body.
+			var p := line.split(" ", false)
+			in_body = p.size() >= 2 and p[1] == BODY_GROUP
 		elif line.begins_with("f "):
+			if not in_body:
+				continue   # skip helper-* / joint-* faces (non-rendered geometry)
 			var p := line.split(" ", false)
 			# face verts are p[1..]; each token "vidx/uvidx" — take the vertex index
 			var fi := PackedInt32Array()
@@ -501,13 +529,24 @@ func _parse_obj(path: String) -> Dictionary:
 				# quad → 2 tris, fixed diagonal v0-v2
 				tris.append(fi[0]); tris.append(fi[1]); tris.append(fi[2])
 				tris.append(fi[0]); tris.append(fi[2]); tris.append(fi[3])
+				body_faces += 1
 			elif fi.size() == 3:
 				tris.append(fi[0]); tris.append(fi[1]); tris.append(fi[2])
+				body_faces += 1
 			# (ngons >4 not present in this mesh; ignore defensively)
 	f.close()
-	if verts.is_empty():
+	if verts.is_empty() or body_faces == 0:
+		push_error("body_converter: no `g %s` faces found in %s" % [BODY_GROUP, path])
 		return {}
-	return {"verts": verts, "tris": tris}
+	# Highest body vertex index actually referenced by a body face, +1 = the count
+	# of leading vertices that belong to the rendered body. (In MakeHuman's base.obj
+	# the `g body` group is the contiguous leading vertex block.) The feet-to-origin
+	# lift uses THIS range so helper-* verts — e.g. the skirt that hangs below the
+	# feet — don't drag the body up off the floor.
+	var body_vmax := 0
+	for i in tris:
+		body_vmax = maxi(body_vmax, i)
+	return {"verts": verts, "tris": tris, "body_vert_count": body_vmax + 1}
 
 
 ## Parse a `.target`: comment lines start with '#'; data lines are

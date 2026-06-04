@@ -1,7 +1,13 @@
 ## Slice-1 body asset test (docs/decisions/body-and-locomotion-slice.md §4,
 ## Slice 1 verify). Loads the nix-built base body ArrayMesh and asserts:
 ##
-##   - the mesh loads and has exactly 19158 vertices (the MakeHuman base topology)
+##   - the mesh loads and keeps all 19158 vertices of the MakeHuman base topology
+##     (the full vertex array is retained so blendshape + skin-weight indices, and
+##     the .mhskel joint-cube vertex indices the rig reads, stay valid)
+##   - ONLY the `g body` group is rendered: the index buffer references exactly the
+##     body vertex range (0..13379) and never the helper-* / joint-* vertices
+##     (>= 13380) — the fix for the "stray dots/boxes" bug where MakeHuman's helper
+##     proxies + joint cubes were being rendered along with the body
 ##   - the macro blendshapes exist BY NAME, including the age axis
 ##     (age_old / age_baby / age_child are non-negotiable — they feed §2.2)
 ##   - applying a blendshape weight actually MOVES vertices (morph works) — proven
@@ -15,7 +21,17 @@
 extends Node
 
 const MESH_PATH := "res://assets/body/base_body.res"
+## Full MakeHuman base topology (body + helper-* proxies + joint-* cubes). The
+## converter keeps every vertex so morph/skin/joint indices stay valid.
 const EXPECTED_VERTS := 19158
+## The rendered `g body` group is the first 13380 vertices (OBJ vrange 1..13380 →
+## 0-based 0..13379). Everything at index >= this is helper/joint geometry that
+## must NOT be referenced by any rendered triangle.
+const BODY_VERT_COUNT := 13380
+## The `g body` group triangulates to exactly this many triangles (13378 quads/
+## tris → 26756 tris with the fixed-diagonal quad split). Asserting the exact
+## count guards against helper faces leaking back into the render set.
+const EXPECTED_BODY_TRIS := 26756
 
 var _pass := 0
 var _fail := 0
@@ -32,15 +48,34 @@ func _ready() -> void:
 	# --- surface arrays -------------------------------------------------------
 	var arrays := mesh.surface_get_arrays(0)
 	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	_assert("vertex count == %d" % EXPECTED_VERTS, verts.size() == EXPECTED_VERTS,
-		"got %d" % verts.size())
+	_assert("vertex count == %d (full base, indices preserved)" % EXPECTED_VERTS,
+		verts.size() == EXPECTED_VERTS, "got %d" % verts.size())
+
+	# --- rendered geometry is BODY-ONLY (no helper/joint dots) ----------------
+	# The index buffer must reference ONLY the body vertex range (0..13379); any
+	# referenced vertex >= BODY_VERT_COUNT means a helper-* / joint-* face leaked
+	# into the rendered mesh (the "stray dots/boxes" bug).
+	var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	_assert("body triangle count == %d (body group only)" % EXPECTED_BODY_TRIS,
+		idx.size() / 3 == EXPECTED_BODY_TRIS, "got %d tris" % (idx.size() / 3))
+	var ref_max := -1
+	var ref_min := EXPECTED_VERTS
+	for i in idx:
+		ref_max = maxi(ref_max, i)
+		ref_min = mini(ref_min, i)
+	_assert("no helper/joint faces rendered (max referenced vert < %d)" % BODY_VERT_COUNT,
+		ref_max < BODY_VERT_COUNT, "referenced range %d..%d" % [ref_min, ref_max])
+	_assert("rendered verts start at body vertex 0", ref_min == 0, "min ref = %d" % ref_min)
 
 	# --- human scale at 1u = 1m ----------------------------------------------
+	# Measure the BODY bbox only (vertices 0..BODY_VERT_COUNT-1); helper-* verts
+	# (hair above the head, skirt below the feet) live in the array but are not the
+	# body and would skew the silhouette.
 	var min_y := INF
 	var max_y := -INF
-	for v in verts:
-		min_y = min(min_y, v.y)
-		max_y = max(max_y, v.y)
+	for i in BODY_VERT_COUNT:
+		min_y = min(min_y, verts[i].y)
+		max_y = max(max_y, verts[i].y)
 	var height := max_y - min_y
 	_assert("bbox height ~human (1.6–1.9 m)", height >= 1.6 and height <= 1.9,
 		"height = %.4f m" % height)

@@ -211,9 +211,52 @@ func _ready() -> void:
 		"%.5f -> %.5f" % [phase_rest_a, phase_rest_b])
 	var hip_l := rig.skeleton.find_bone("upperleg01.L")
 	var rest_q := rig.skeleton.get_bone_rest(hip_l).basis.get_rotation_quaternion()
+	# HARD REQUIREMENT: a still-standing gameplay body is NEVER in the skeleton's
+	# neutral/bind pose — it holds the authored RELAXED-IDLE stance. So at rest a
+	# tracked joint's pose must DIFFER from its bind rotation beyond a threshold.
+	# (The old test asserted the opposite — "idle near rest" — which was the defect.)
+	var arm_l := rig.skeleton.find_bone("upperarm01.L")
+	var arm_rest := rig.skeleton.get_bone_rest(arm_l).basis.get_rotation_quaternion()
+	var arm_idle := rig.skeleton.get_bone_pose_rotation(arm_l)
+	_assert("idle is NOT the bind/rest pose (relaxed stand, arm adducted)",
+		arm_rest.angle_to(arm_idle) > 0.3,
+		"upperarm.L idle vs rest angle=%.4f rad" % arm_rest.angle_to(arm_idle))
+	# The legs also settle off the spread bind pose at idle.
 	var idle_q := rig.skeleton.get_bone_pose_rotation(hip_l)
-	_assert("idle: hip near rest pose", rest_q.angle_to(idle_q) < 0.05,
-		"angle=%.4f rad" % rest_q.angle_to(idle_q))
+	_assert("idle: legs settle off the bind pose",
+		rest_q.angle_to(idle_q) > 0.01,
+		"upperleg.L idle vs rest angle=%.4f rad" % rest_q.angle_to(idle_q))
+
+	# DETERMINISM: the idle micro-motion is a pure function of accumulated idle time
+	# (seeded/replayable timeline), never Math.random / wall-clock. A fresh rig fed
+	# the SAME delta sequence reaches the SAME idle pose.
+	var rig_d := BodyRig.new(); add_child(rig_d); rig_d.build()
+	rig_d.use_motion_matching = false; rig_d.foot_ik_enabled = false
+	rig_d.set_movement_state(true, 0.0); rig_d._smoothed_speed = 0.0
+	for i in 40:
+		rig_d.apply_pose(1.0 / 60.0)
+	var rig_d2 := BodyRig.new(); add_child(rig_d2); rig_d2.build()
+	rig_d2.use_motion_matching = false; rig_d2.foot_ik_enabled = false
+	rig_d2.set_movement_state(true, 0.0); rig_d2._smoothed_speed = 0.0
+	for i in 40:
+		rig_d2.apply_pose(1.0 / 60.0)
+	# Use a bone the procedural floor actually drives at idle (upperarm carries the
+	# breathing micro-motion; spine is only driven on the MM path).
+	var sp := rig_d.skeleton.find_bone("upperarm01.L")
+	var idle_det_a := rig_d.skeleton.get_bone_pose_rotation(sp)
+	var idle_det_b := rig_d2.skeleton.get_bone_pose_rotation(sp)
+	_assert("idle is deterministic (same seed+sim-time -> same pose)",
+		idle_det_a.angle_to(idle_det_b) < 1e-5,
+		"upperarm.L idle angle diff=%.8f rad" % idle_det_a.angle_to(idle_det_b))
+	# And it is genuinely ALIVE: the idle pose changes over sim time (breathing /
+	# weight-shift), it is not a frozen static stance.
+	var sp_t0 := rig_d.skeleton.get_bone_pose_rotation(sp)
+	for i in 60:
+		rig_d.apply_pose(1.0 / 60.0)
+	var sp_t1 := rig_d.skeleton.get_bone_pose_rotation(sp)
+	_assert("idle micro-motion is alive (pose advances over sim time)",
+		sp_t0.angle_to(sp_t1) > 1e-4,
+		"upperarm.L moved %.6f rad over 1s idle" % sp_t0.angle_to(sp_t1))
 
 	# MOVING: phase advances, and faster speed advances it MORE per frame.
 	rig.set_movement_state(true, 9.0)

@@ -118,6 +118,42 @@ func _ready() -> void:
 		var walk_q := rig.skeleton.get_bone_pose_rotation(hip)
 		_assert("MM walk goal poses the leg away from rest", rest_q.angle_to(walk_q) > 0.05,
 			"angle=%.4f rad, frame=%d" % [rest_q.angle_to(walk_q), rig.motion_matched_frame()])
+
+		# HARD REQUIREMENT: at a ZERO (idle) goal the gameplay body holds the authored
+		# RELAXED-IDLE stance, NEVER the skeleton's neutral/bind pose and NEVER a
+		# blend-to-rest. So a tracked joint at idle must differ from its bind rotation.
+		var arm := rig.skeleton.find_bone("upperarm01.L")
+		var arm_rest := rig.skeleton.get_bone_rest(arm).basis.get_rotation_quaternion()
+		rig.set_movement_state(true, 0.0, Vector2.ZERO, 0.0)
+		rig._smoothed_speed = 0.0
+		for i in 12:
+			rig.apply_pose(1.0 / 60.0)
+		var arm_idle := rig.skeleton.get_bone_pose_rotation(arm)
+		_assert("MM idle goal holds the relaxed stand, NOT the bind/rest pose",
+			arm_rest.angle_to(arm_idle) > 0.3,
+			"upperarm.L idle vs rest angle=%.4f rad" % arm_rest.angle_to(arm_idle))
+		# Idle is deterministic AND alive: a fresh rig fed the same idle deltas lands
+		# the same pose, and the pose advances over sim time (breathing/weight-shift).
+		var sp := rig.skeleton.find_bone("spine01")
+		var sp_a := rig.skeleton.get_bone_pose_rotation(sp)
+		for i in 60:
+			rig.apply_pose(1.0 / 60.0)
+		var sp_b := rig.skeleton.get_bone_pose_rotation(sp)
+		_assert("MM idle micro-motion is alive (advances over sim time)",
+			sp_a.angle_to(sp_b) > 1e-4, "spine moved %.6f rad over 1s idle" % sp_a.angle_to(sp_b))
+		var rig_i := BodyRig.new(); add_child(rig_i); rig_i.build(); rig_i.foot_ik_enabled = false
+		rig_i.set_movement_state(true, 0.0, Vector2.ZERO, 0.0); rig_i._smoothed_speed = 0.0
+		for i in 12:
+			rig_i.apply_pose(1.0 / 60.0)
+		var sp_det := rig_i.skeleton.get_bone_pose_rotation(sp)
+		# A second fresh rig fed the same idle deltas must reach the identical pose.
+		var rig_i2 := BodyRig.new(); add_child(rig_i2); rig_i2.build(); rig_i2.foot_ik_enabled = false
+		rig_i2.set_movement_state(true, 0.0, Vector2.ZERO, 0.0); rig_i2._smoothed_speed = 0.0
+		for i in 12:
+			rig_i2.apply_pose(1.0 / 60.0)
+		var sp_det2 := rig_i2.skeleton.get_bone_pose_rotation(sp)
+		_assert("MM idle is deterministic (same seed+sim-time -> same pose)",
+			sp_det.angle_to(sp_det2) < 1e-5, "spine idle angle diff=%.8f rad" % sp_det.angle_to(sp_det2))
 		# Determinism through the rig: same goals from a fresh rig -> same frame seq.
 		var frame_seq_a := _drive_seq(rig, Vector2(0.0, 6.0))
 		var rig2 := BodyRig.new(); add_child(rig2); rig2.build(); rig2.foot_ik_enabled = false

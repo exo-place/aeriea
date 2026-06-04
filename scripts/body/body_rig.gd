@@ -69,6 +69,11 @@ var _rest_local := {}     ## name -> resting bone-local Transform3D (for layerin
 var _phase: float = 0.0
 ## Smoothed speed for blend (render-side; no sim feedback).
 var _smoothed_speed: float = 0.0
+## Render-side idle clock (seconds), advanced by delta whenever the body is at/near
+## rest. Drives the deterministic breathing / weight-shift micro-motion of the
+## relaxed idle. A pure accumulator of the per-frame delta — no Math.random, no
+## wall-clock: the pose is a reproducible function of (seed, accumulated idle time).
+var _idle_time: float = 0.0
 
 ## Set by the host each frame BEFORE _apply_pose: the current MovementState read.
 var grounded: bool = true
@@ -286,6 +291,10 @@ func apply_pose(delta: float) -> void:
 	if skeleton == null:
 		return
 	_smoothed_speed = lerpf(_smoothed_speed, horizontal_speed, clampf(delta * 12.0, 0.0, 1.0))
+	# Advance the deterministic idle clock (drives the relaxed-idle micro-motion).
+	# A pure delta accumulator — no Math.random, no wall-clock; the idle pose is a
+	# reproducible function of accumulated idle time. Bounded to keep it stable.
+	_idle_time = fposmod(_idle_time + delta, TAU * 1000.0)
 
 	# Slice 4 — Motion Matching drives the gross body when a DB is loaded; foot-IK
 	# (below) stays the ground-adaptation layer on top. Falls through to the
@@ -300,15 +309,20 @@ func apply_pose(delta: float) -> void:
 		# from the captured clips themselves, so IK is skipped under MM.
 		return
 
-	# Reset the layered bones to rest before re-posing (so the pose is a pure
-	# function of state, not an accumulation).
+	# Seed the layered bones with the RELAXED-IDLE stance before re-posing (so the
+	# pose is a pure function of state, not an accumulation, AND so the idle floor of
+	# the procedural path is the relaxed stand — never the bind pose). The walk/run
+	# swing layers additively on top and dominates as speed rises.
 	for bname in [HIP_L, HIP_R, KNEE_L, KNEE_R, SHOULDER_L, SHOULDER_R, FOOT_L, FOOT_R, ROOT_BONE]:
 		if _rest_local.has(bname):
-			_set_bone_local(bname, _rest_local[bname])
+			var rest: Transform3D = _rest_local[bname]
+			skeleton.set_bone_pose_position(_bone_index[bname], rest.origin)
+			skeleton.set_bone_pose_rotation(_bone_index[bname],
+				_idle_local_rotation(bname, rest.basis.get_rotation_quaternion()))
 
 	# --- procedural walk/run cycle -------------------------------------------
 	# Phase advances with DISTANCE (speed * dt / stride) so cadence scales with
-	# speed; at rest the phase freezes and the swing blend -> 0 (idle pose).
+	# speed; at rest the phase freezes and the swing blend -> 0 (relaxed idle).
 	var speed := _smoothed_speed
 	var blend := clampf(speed / run_speed_ref, 0.0, 1.0)   # idle(0) -> run(1)
 	if grounded and speed > 0.05:
@@ -322,13 +336,15 @@ func apply_pose(delta: float) -> void:
 	var s_opp := sin(_phase + PI)
 
 	# Legs swing fore/aft about the hip X axis; opposite phase L/R. Knees flex on
-	# the back-swing (a cheap, readable gait). Arms counter-swing the legs.
-	_rotate_bone_local(HIP_L, Vector3.RIGHT, s * swing)
-	_rotate_bone_local(HIP_R, Vector3.RIGHT, s_opp * swing)
-	_rotate_bone_local(KNEE_L, Vector3.RIGHT, maxf(0.0, -s) * swing * 1.4)
-	_rotate_bone_local(KNEE_R, Vector3.RIGHT, maxf(0.0, -s_opp) * swing * 1.4)
-	_rotate_bone_local(SHOULDER_L, Vector3.RIGHT, s_opp * arm)
-	_rotate_bone_local(SHOULDER_R, Vector3.RIGHT, s * arm)
+	# the back-swing (a cheap, readable gait). Arms counter-swing the legs. Applied
+	# ADDITIVELY onto the relaxed-idle baseline seeded above (so at rest the body
+	# holds the relaxed stand, and the swing fades in over it as speed rises).
+	_rotate_bone_local(HIP_L, Vector3.RIGHT, s * swing, true)
+	_rotate_bone_local(HIP_R, Vector3.RIGHT, s_opp * swing, true)
+	_rotate_bone_local(KNEE_L, Vector3.RIGHT, maxf(0.0, -s) * swing * 1.4, true)
+	_rotate_bone_local(KNEE_R, Vector3.RIGHT, maxf(0.0, -s_opp) * swing * 1.4, true)
+	_rotate_bone_local(SHOULDER_L, Vector3.RIGHT, s_opp * arm, true)
+	_rotate_bone_local(SHOULDER_R, Vector3.RIGHT, s * arm, true)
 
 	if grounded and foot_ik_enabled and _space != null:
 		_apply_foot_ik()
@@ -342,13 +358,35 @@ func apply_pose(delta: float) -> void:
 var _mm_frame: int = 0
 
 ## Below this planar speed (m/s) the body is treated as standing still and is
-## blended fully to the authored MakeHuman REST pose (a clean neutral stand). The
-## captured-clip "idle" frames in the DB are mid-fidget poses that, at true rest,
-## read as a frozen contorted stance (head/arms thrown off-axis); the authored
-## rest is the correct neutral. Between idle_speed and idle_blend_top the MM pose
-## fades in. Render-side only; chosen well below the test walk goal (3 m/s).
+## driven by the authored RELAXED-IDLE stance (NOT the rig rest/bind pose). Between
+## idle_speed and idle_blend_top the Motion-Matching locomotion pose fades in.
+## Render-side only; chosen well below the test walk goal (3 m/s).
+##
+## HONEST SCOPE: the 100STYLE locomotion clips ARE the source for moving poses, but
+## the current retarget carries a frame-of-reference error (root/forearm thrown
+## off-axis — visible in the captured idle frames, e.g. matched idle frame 4642 has
+## root rotated ~65deg) that makes the captured *idle* frames read as a broken
+## contorted stance when held still. Until the DB is regenerated with a corrected
+## retarget (TODO: source-real-idle / fix-retarget follow-up), the still-standing
+## pose is the AUTHORED relaxed stance below — explicitly NOT the bind pose, NOT a
+## blend-to-rest. The user's hard requirement: the gameplay body never rests in the
+## skeleton's neutral pose.
 @export var idle_speed: float = 0.15
 @export var idle_blend_top: float = 0.9
+
+## Authored relaxed-stand offsets (radians), composed onto each bone's rest. The
+## MakeHuman bind pose is an A-pose (arms splayed down/out, legs spread); a relaxed
+## human stand brings the arms in to the sides with a slight elbow bend, settles
+## the legs, and adds a faint asymmetry (weight on one leg). These are hand-authored
+## deltas, deterministic, with NO captured-data source — see HONEST SCOPE above.
+## Adduction brings the A-pose upper arm down to the side. Verified by render: for
+## the L arm a +angle about local FORWAD (Zn) lowers the arm; the R arm mirrors it
+## about local BACK (Zp). ~0.7 rad brings the hands roughly to hip level.
+const IDLE_ADDUCT_ARM := 0.78    ## bring upper arm in toward the torso (frontal)
+const IDLE_ELBOW_BEND := 0.12    ## slight forearm bend so arms hang naturally
+const IDLE_LEG_SETTLE := 0.05    ## bring spread legs slightly together
+const IDLE_ASYM := 0.04          ## left/right asymmetry (weight bias)
+const IDLE_ARM_INTERNAL := 0.5   ## internal upper-arm rotation so forearm hangs back
 
 func _apply_motion_matching() -> void:
 	# Step the matcher (deterministic argmin / clip-advance) with the goal.
@@ -359,15 +397,14 @@ func _apply_motion_matching() -> void:
 		vel = Vector2.ZERO
 	_mm_frame = matcher.step(vel, turn_rate)
 
-	# Idle blend: at/near rest, fade the whole MM pose toward the authored rest
-	# pose so a standing body looks like a normal neutral stand (the DB's captured
-	# idle frames are off-axis fidgets that read as broken when frozen). Uses the
-	# render-side smoothed speed so the transition is stable. A pure function of
-	# state — no accumulation, no sim feedback.
+	# Idle weight: 0 at/below idle_speed (full relaxed-idle stance), 1 at/above
+	# idle_blend_top (full MM locomotion). Pure function of the render-side smoothed
+	# speed — no accumulation, no sim feedback.
 	var mm_w := clampf((_smoothed_speed - idle_speed) / maxf(idle_blend_top - idle_speed, 1e-3), 0.0, 1.0)
 
 	# Reset every MM-driven bone to rest, then stamp the matched local rotations
-	# blended against rest by mm_w (mm_w=0 -> pure rest stand; mm_w=1 -> full MM).
+	# blended toward the RELAXED-IDLE stance by (1 - mm_w). mm_w=1 -> full MM
+	# locomotion; mm_w=0 -> the authored relaxed stand (NEVER the bind pose).
 	var nb := motion_db.bone_count
 	for bi in nb:
 		var bname := motion_db.bone_names[bi]
@@ -375,18 +412,70 @@ func _apply_motion_matching() -> void:
 			continue
 		var rest: Transform3D = _rest_local.get(bname, Transform3D.IDENTITY)
 		var rest_q := rest.basis.get_rotation_quaternion()
-		var q := motion_db.pose_quat(_mm_frame, bi)
-		if mm_w < 1.0:
-			# Compose the MM delta onto the rest rotation, then fade in from rest.
-			# (Rest bases are identity here, so rest_q*q == q; the slerp from rest_q
-			# is what produces the neutral stand at idle.)
-			q = rest_q.slerp((rest_q * q).normalized(), mm_w)
-		# The DB quats are BVH-joint local rotations. Apply as the bone's local
-		# rotation, keeping the rest position. The root keeps its rest position
-		# (sim owns translation); MM supplies only orientation.
+		# The relaxed-idle local rotation for this bone (rest + authored offset +
+		# deterministic micro-motion). This is the floor the body sits at when still.
+		var idle_q := _idle_local_rotation(bname, rest_q)
+		var q: Quaternion
+		if mm_w <= 0.0:
+			q = idle_q
+		else:
+			# The DB quats are BVH-joint-local; compose onto rest, then blend from the
+			# relaxed-idle pose toward the full MM locomotion pose as speed rises.
+			var mm_q := (rest_q * motion_db.pose_quat(_mm_frame, bi)).normalized()
+			q = idle_q.slerp(mm_q, mm_w)
+		# Keep the bone's rest position (sim owns root translation); supply orientation.
 		var idx: int = _bone_index[bname]
 		skeleton.set_bone_pose_position(idx, rest.origin)
 		skeleton.set_bone_pose_rotation(idx, q)
+
+
+## The relaxed-standing LOCAL rotation for a bone: its rest rotation composed with
+## an authored relaxed-stand offset and a deterministic breathing / weight-shift
+## micro-motion driven by `_idle_time`. Pure function of (bone, rest, _idle_time):
+## same idle time -> same pose (the determinism invariant for this render layer).
+func _idle_local_rotation(bname: String, rest_q: Quaternion) -> Quaternion:
+	var t := _idle_time
+	# Breathing: a slow chest/shoulder rise. Weight-shift: an even slower lateral
+	# sway. Both are small, smooth sinusoids of the idle clock (deterministic).
+	var breath := sin(t * 1.6)                 # ~0.25 Hz breathing
+	var sway := sin(t * 0.5)                    # ~0.08 Hz weight shift
+	var off := Quaternion.IDENTITY
+	match bname:
+		"upperarm01.L":
+			# Adduct (bring arm down to the side) about local FORWARD, then a small
+			# internal rotation (about the bone long axis, ~UP) so the elbow faces back
+			# and the forearm hangs alongside the torso instead of reaching forward.
+			# Breathing adds a faint lift; asymmetry biases the weight onto this side.
+			off = Quaternion(Vector3.FORWARD, IDLE_ADDUCT_ARM + IDLE_ASYM) \
+				* Quaternion(Vector3.UP, IDLE_ARM_INTERNAL) \
+				* Quaternion(Vector3.RIGHT, breath * 0.02)
+		"upperarm01.R":
+			off = Quaternion(Vector3.BACK, IDLE_ADDUCT_ARM - IDLE_ASYM) \
+				* Quaternion(Vector3.DOWN, IDLE_ARM_INTERNAL) \
+				* Quaternion(Vector3.RIGHT, breath * 0.02)
+		"lowerarm01.L":
+			off = Quaternion(Vector3.RIGHT, IDLE_ELBOW_BEND)
+		"lowerarm01.R":
+			off = Quaternion(Vector3.RIGHT, IDLE_ELBOW_BEND)
+		"upperleg01.L":
+			# Settle the spread legs slightly together; faint weight-shift sway.
+			off = Quaternion(Vector3.BACK, IDLE_LEG_SETTLE + sway * 0.012)
+		"upperleg01.R":
+			off = Quaternion(Vector3.FORWARD, IDLE_LEG_SETTLE - sway * 0.012)
+		"spine01":
+			# Breathing lifts the chest; weight-shift gives a faint torso sway.
+			off = Quaternion(Vector3.RIGHT, -breath * 0.015) \
+				* Quaternion(Vector3.BACK, sway * 0.01)
+		"spine03":
+			off = Quaternion(Vector3.RIGHT, -breath * 0.012)
+		"head":
+			# A faint head settle counter to the sway so the gaze stays level-ish.
+			off = Quaternion(Vector3.BACK, -sway * 0.01)
+		"clavicle.L", "clavicle.R":
+			off = Quaternion(Vector3.RIGHT, breath * 0.012)
+		_:
+			off = Quaternion.IDENTITY
+	return (rest_q * off).normalized()
 
 
 ## Expose the matched frame for tests (which DB frame the MM search chose).

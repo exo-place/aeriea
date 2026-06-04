@@ -270,15 +270,26 @@ func _ready() -> void:
 	# backfaces when the camera ORBITS.
 	#
 	# Two objective measures over the stored index/winding order:
-	#   1. SIGNED VOLUME  V = (1/6) Σ v0·(v1×v2). For a closed mesh wound CCW-outward in
-	#      Godot's right-handed space this is POSITIVE; a globally inverted mesh NEGATIVE.
+	#   1. SIGNED VOLUME  V = (1/6) Σ v0·(v1×v2). Sign tracks the stored triangle winding.
 	#   2. OUTWARD AGGREGATE  Σ dot(faceNormal_from_winding, faceCentroid − meshCentroid).
-	#      POSITIVE ⇒ winding normals point away from the centroid (outward).
-	# Godot's StandardMaterial3D with default cull_mode=BACK renders CCW-from-camera as
-	# FRONT-facing (verified empirically on Forward+: front_face=CCW, standard right-
-	# handed/OpenGL convention — NOT clockwise), so CCW-outward winding == correctly
-	# front-facing from outside. Both POSITIVE == the body shows its solid exterior from
-	# every orbit angle. This guard makes the inversion regression impossible to ship.
+	#      Sign tracks whether the winding's face normals point away from (out) or toward
+	#      (in) the centroid.
+	#
+	# ORIENTATION SIGN — CORRECTED (winding-reversal fix, tools/body_converter.gd).
+	# The body_converter reverses each emitted triangle's winding (i0,i2,i1) because the
+	# naive winding rendered the body INSIDE-OUT in Godot — front faces culled, the camera
+	# saw the mesh interior (whole-body "backfaces", USER-CONFIRMED against the in-game
+	# render). The OLD committed mesh (the backface one) measured signed volume +0.0549 /
+	# outward aggregate POSITIVE — i.e. those positive signs were the BUG, not the fix.
+	# After reversing the winding the FRONT-FACING mesh measures signed volume ≈ -0.0549 /
+	# outward aggregate NEGATIVE. So for THIS mesh, in Godot's right-handed space with the
+	# converter's corner/diagonal order, NEGATIVE signed volume + NEGATIVE outward aggregate
+	# == the orientation that renders FRONT faces from every orbit angle (cull_mode=BACK).
+	# We assert that orientation. (The absolute sign is a convention artifact of the OBJ's
+	# native winding × the converter's diagonal choice; what matters is that it matches the
+	# winding the converter now emits, verified to render front-facing.) This guard makes
+	# the inversion regression — in EITHER direction — impossible to ship: a future flip of
+	# the converter winding would flip these signs and fail here.
 	var ov: PackedVector3Array = verts
 	var oidx: PackedInt32Array = idx
 	var mc := Vector3.ZERO
@@ -295,10 +306,12 @@ func _ready() -> void:
 		outward += fn.dot((a + b + c) / 3.0 - mc)
 		oti += 3
 	signed_vol /= 6.0
-	_assert("mesh signed volume POSITIVE (wound OUTWARD, not globally inverted)",
-		signed_vol > 0.0, "V = %.9f m^3" % signed_vol)
-	_assert("winding outward aggregate POSITIVE (face normals point away from centroid)",
-		outward > 0.0, "sum = %.6f" % outward)
+	# FRONT-FACING orientation for this mesh = NEGATIVE signs (see the corrected note
+	# above; verified against the user-confirmed in-game render after the winding reversal).
+	_assert("mesh signed volume NEGATIVE (winding renders FRONT faces, not inside-out backfaces)",
+		signed_vol < 0.0, "V = %.9f m^3" % signed_vol)
+	_assert("winding outward aggregate NEGATIVE (matches the front-facing winding the converter emits)",
+		outward < 0.0, "sum = %.6f" % outward)
 
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)

@@ -647,12 +647,20 @@ func _parse_obj(path: String) -> Dictionary:
 			for i in range(1, p.size()):
 				c.append(corner.call(p[i]))
 			if c.size() == 4:
-				# quad → 2 tris, fixed diagonal c0-c2
-				tris.append(c[0]); tris.append(c[1]); tris.append(c[2])
-				tris.append(c[0]); tris.append(c[2]); tris.append(c[3])
+				# quad → 2 tris, fixed diagonal c0-c2. WINDING REVERSED: the MakeHuman
+				# base.obj faces are wound such that the naive (c0,c1,c2)/(c0,c2,c3) order
+				# produced an inside-out body in Godot — front faces were culled and the
+				# camera saw the mesh interior (the user-confirmed whole-body "backfaces").
+				# Godot's default cull_mode=BACK treats CCW-from-camera as front-facing, so
+				# we emit each triangle with its corners reversed (i0,i2,i1) to flip the
+				# winding outward. This makes the cross-product normals point OUT too
+				# (_compute_normals uses (b-a)×(c-a), which reverses sign with the winding).
+				tris.append(c[0]); tris.append(c[2]); tris.append(c[1])
+				tris.append(c[0]); tris.append(c[3]); tris.append(c[2])
 				body_faces += 1
 			elif c.size() == 3:
-				tris.append(c[0]); tris.append(c[1]); tris.append(c[2])
+				# REVERSED winding (see the quad case above): (c0,c2,c1) instead of (c0,c1,c2).
+				tris.append(c[0]); tris.append(c[2]); tris.append(c[1])
 				body_faces += 1
 			# (ngons >4 not present in this mesh; ignore defensively)
 	f.close()

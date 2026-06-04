@@ -180,7 +180,8 @@ func _run() -> int:
 
 	# --- blendshapes: one per selected macro anchor ---------------------------
 	var mesh := ArrayMesh.new()
-	mesh.blend_shape_mode = Mesh.BLEND_SHAPE_MODE_NORMALIZED if false else Mesh.BLEND_SHAPE_MODE_RELATIVE
+	# RELATIVE: final = base + Σ(weightᵢ · blend_arrayᵢ); blend arrays are DELTAS.
+	mesh.blend_shape_mode = Mesh.BLEND_SHAPE_MODE_RELATIVE
 	var manifest_axes := []
 	var blend_arrays := []   # one ARRAY for each blendshape, in registration order
 
@@ -192,12 +193,16 @@ func _run() -> int:
 		if deltas.is_empty():
 			push_error("body_converter: target had no deltas or failed to load: %s" % tpath)
 			return 1
-		# A blendshape surface array is the FULL morphed RENDER vertex set (Godot
-		# stores absolute positions per blendshape; in RELATIVE mode it subtracts the
-		# base internally). The `.target` deltas are keyed by BASE vertex index, so we
-		# scatter each base delta onto EVERY render vert that came from that base vert
-		# (render_to_base) — a UV-seam split moves identically to its parent, keeping
-		# morphs watertight across seams. Deltas are MH units, same scale as verts.
+		# A blendshape surface array in BLEND_SHAPE_MODE_RELATIVE is the per-vertex
+		# DELTA (morphed - base); Godot composes final = base + Σ(weightᵢ · arrayᵢ).
+		# (The earlier code stored the ABSOLUTE morphed position here on the false
+		# belief that RELATIVE mode subtracts the base internally — it does NOT. At
+		# weight 1 that added the whole position again, ~doubling the body's size and
+		# lifting it off the floor; that was the creator's "slider changes size" bug.)
+		# The `.target` deltas are keyed by BASE vertex index, so we scatter each base
+		# delta onto EVERY render vert that came from that base vert (render_to_base)
+		# — a UV-seam split moves identically to its parent, keeping morphs watertight
+		# across seams. Deltas are MH units, same scale as verts.
 		var morphed := scaled_render.duplicate()
 		var moved := 0          # render verts displaced
 		var moved_base := {}    # distinct BASE verts displaced (for the manifest)
@@ -210,19 +215,27 @@ func _run() -> int:
 			moved += 1
 			moved_base[b] = true
 		# Recompute normals from the MORPHED geometry. Godot's RELATIVE blend mode
-		# interpolates ARRAY_NORMAL alongside ARRAY_VERTEX, so a blendshape that ships
-		# the BASE normals (the prior behaviour) lights the morphed surface with stale
-		# normals. That is wrong for any lit/normal-mapped skin and grows with morph
-		# weight; per-morph normals keep shading correct as the body morphs. (The
-		# UV path is separate: corner-expansion already gives the surface correct UVs,
-		# and blendshape arrays may only carry Vertex/Normal/Tangent — never UV — so
-		# UVs are NOT and must NOT be stored per blendshape.) Same deterministic
-		# triangle-order accumulation as the base normals.
+		# composes the normal the same way as the vertex (final = base + Σ wᵢ·Δnᵢ), so
+		# the blendshape's ARRAY_NORMAL must also be the DELTA (morphed_normal -
+		# base_normal). Shipping the base (stale) normals lit the morphed surface with
+		# wrong shading; shipping absolute morphed normals (the prior bug) added the
+		# whole normal again at weight 1. Per-morph normal DELTAS keep shading correct
+		# as the body morphs. (The UV path is separate: corner-expansion already gives
+		# the surface correct UVs, and blendshape arrays may only carry Vertex/Normal/
+		# Tangent — never UV — so UVs are NOT and must NOT be stored per blendshape.)
+		# Same deterministic triangle-order accumulation as the base normals.
 		var morphed_normals := _compute_normals(morphed, tris)
+		var vert_delta := PackedVector3Array()
+		var norm_delta := PackedVector3Array()
+		vert_delta.resize(rn)
+		norm_delta.resize(rn)
+		for vi in rn:
+			vert_delta[vi] = morphed[vi] - scaled_render[vi]
+			norm_delta[vi] = morphed_normals[vi] - normals[vi]
 		var ba := []
 		ba.resize(Mesh.ARRAY_MAX)
-		ba[Mesh.ARRAY_VERTEX] = morphed
-		ba[Mesh.ARRAY_NORMAL] = morphed_normals
+		ba[Mesh.ARRAY_VERTEX] = vert_delta
+		ba[Mesh.ARRAY_NORMAL] = norm_delta
 		mesh.add_blend_shape(axis_name)
 		blend_arrays.append(ba)
 		manifest_axes.append({

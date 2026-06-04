@@ -146,34 +146,52 @@ func _ready() -> void:
 	for required in ["age_old", "age_baby", "age_child", "gender_male", "muscle_max", "weight_max", "height_max"]:
 		_assert("blendshape '%s' present" % required, names.has(StringName(required)), str(names))
 
-	# --- morph actually moves vertices ---------------------------------------
-	# surface_get_blend_shape_arrays() returns, per blendshape, the FULL morphed
-	# vertex set (RELATIVE mode stores absolute morphed positions in the array).
-	# Compare the age_old morph target verts against the base verts → must differ.
+	# --- morph blendshapes are DELTAS (RELATIVE mode), and they move vertices --
+	# surface_get_blend_shape_arrays() returns, per blendshape, the stored array.
+	# In BLEND_SHAPE_MODE_RELATIVE the array is the per-vertex DELTA (morphed-base);
+	# Godot composes final = base + Σ(weightᵢ · deltaᵢ). The array MUST be deltas:
+	# storing absolute morphed positions here was the bug that doubled the body's
+	# size and lifted it off the floor at weight 1 (the "slider changes size" bug).
+	# A delta array is mostly ~0 (only the morph-affected verts move) and its max
+	# magnitude is a sane local displacement (well under a body-height), NOT a full
+	# absolute position (~1.6 m for a top-of-head vertex).
 	var bs_arrays := mesh.surface_get_blend_shape_arrays(0)
 	var age_old_idx := names.find(StringName("age_old"))
 	_assert("age_old index found", age_old_idx >= 0, "idx=%d" % age_old_idx)
 	if age_old_idx >= 0:
-		var morphed: PackedVector3Array = bs_arrays[age_old_idx][Mesh.ARRAY_VERTEX]
-		_assert("morph array vertex count == base", morphed.size() == verts.size(),
-			"got %d" % morphed.size())
+		var delta: PackedVector3Array = bs_arrays[age_old_idx][Mesh.ARRAY_VERTEX]
+		_assert("morph array vertex count == base", delta.size() == verts.size(),
+			"got %d" % delta.size())
 		var max_disp := 0.0
 		var moved_count := 0
+		var mean_y := 0.0   # mean Y of the stored array — ~0 for a delta, ~1 m for absolute
 		for i in verts.size():
-			var d := (morphed[i] - verts[i]).length()
+			var d := delta[i].length()
 			if d > 1e-6:
 				moved_count += 1
 			max_disp = max(max_disp, d)
+			mean_y += delta[i].y
+		mean_y /= float(verts.size())
 		_assert("age_old morph moves vertices (max disp > 1mm)", max_disp > 0.001,
 			"max disp = %.4f m, %d verts moved" % [max_disp, moved_count])
+		# Delta sanity: a DELTA array, NOT absolute positions. The discriminator is
+		# magnitude — every stored value is a small LOCAL displacement (max well under
+		# a body-height), and the mean Y is near 0 (deltas centre on 0). Absolute
+		# storage (the old bug that doubled the body's size and lifted it off the
+		# floor at weight 1) would make max ~1.6 m+ and mean Y ~0.9 m (the body's
+		# centroid height). Here both confirm deltas.
+		_assert("age_old delta magnitudes are local (max < 0.5 m, not absolute ~1.6 m)",
+			max_disp < 0.5, "max disp = %.4f m" % max_disp)
+		_assert("age_old array centres on 0 (delta, not absolute; |mean Y| < 0.1 m)",
+			absf(mean_y) < 0.1, "mean Y = %.4f m" % mean_y)
 
 	# --- a SECOND axis morphs differently (sanity: not all the same) ----------
 	var weight_idx := names.find(StringName("weight_max"))
 	if weight_idx >= 0:
-		var wm: PackedVector3Array = bs_arrays[weight_idx][Mesh.ARRAY_VERTEX]
+		var wd: PackedVector3Array = bs_arrays[weight_idx][Mesh.ARRAY_VERTEX]
 		var wdisp := 0.0
 		for i in verts.size():
-			wdisp = max(wdisp, (wm[i] - verts[i]).length())
+			wdisp = max(wdisp, wd[i].length())
 		_assert("weight_max morph moves vertices", wdisp > 0.001, "max disp = %.4f m" % wdisp)
 
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])

@@ -83,6 +83,58 @@ func _ready() -> void:
 			# restore
 			rig.skeleton.reset_bone_pose(foot_idx)
 
+	# --- 2b. RUNTIME-BUILT MESH carries UVs + per-morph normals --------------
+	# The bug that slipped through 6933c5a's asset-only test: a fix can be verified
+	# on base_body.res yet not reach what the player SEES, because the rendered body
+	# is BodyRig.mesh_instance.mesh. Assert UVs and blendshape normals on the mesh
+	# BodyRig actually hands the renderer — the user's real view, not the raw asset.
+	var rt_mesh := rig.mesh_instance.mesh as ArrayMesh
+	_assert("BodyRig renders an ArrayMesh", rt_mesh != null, str(rt_mesh))
+	if rt_mesh != null:
+		var rt := rt_mesh.surface_get_arrays(0)
+		var rt_verts: PackedVector3Array = rt[Mesh.ARRAY_VERTEX]
+		var rt_uv: PackedVector2Array = rt[Mesh.ARRAY_TEX_UV]
+		_assert("runtime mesh has a UV array", rt_uv != null and rt_uv.size() > 0,
+			"uv=%d" % (rt_uv.size() if rt_uv else 0))
+		_assert("runtime UV array sized to runtime verts",
+			rt_uv != null and rt_uv.size() == rt_verts.size(),
+			"uv=%d verts=%d" % [rt_uv.size() if rt_uv else 0, rt_verts.size()])
+		# Non-degenerate: a body that lost UVs collapses every UV to (0,0); the real
+		# atlas spreads across many distinct coords spanning >0.5 in both axes.
+		var distinct := {}
+		var umin := INF; var umax := -INF; var vmin := INF; var vmax := -INF
+		if rt_uv != null:
+			for u in rt_uv:
+				distinct[Vector2(snappedf(u.x, 0.001), snappedf(u.y, 0.001))] = true
+				umin = minf(umin, u.x); umax = maxf(umax, u.x)
+				vmin = minf(vmin, u.y); vmax = maxf(vmax, u.y)
+		_assert("runtime UVs non-degenerate (>1000 distinct)", distinct.size() > 1000,
+			"%d distinct" % distinct.size())
+		_assert("runtime UVs span the atlas (>0.5 each axis)",
+			(umax - umin) > 0.5 and (vmax - vmin) > 0.5,
+			"u span %.3f v span %.3f" % [umax - umin, vmax - vmin])
+		# Blendshapes morph POSITION; their normals must be recomputed from the
+		# morphed geometry, not copied from the base (stale base normals shade the
+		# morphed body wrongly and break any future normal-mapped skin). Assert each
+		# blendshape ships a full-size normal array that DIFFERS from the base normals.
+		var base_n: PackedVector3Array = rt[Mesh.ARRAY_NORMAL]
+		var bsa := rt_mesh.surface_get_blend_shape_arrays(0)
+		_assert("runtime mesh has blendshapes", bsa.size() > 0, "%d" % bsa.size())
+		var all_have_normals := true
+		var any_differs := false
+		for bi in bsa.size():
+			var bn = bsa[bi][Mesh.ARRAY_NORMAL]
+			if bn == null or (bn as PackedVector3Array).size() != base_n.size():
+				all_have_normals = false
+				continue
+			for i in base_n.size():
+				if (bn[i] - base_n[i]).length() > 1e-4:
+					any_differs = true
+					break
+		_assert("every blendshape carries a full normal array", all_have_normals, "")
+		_assert("blendshape normals recomputed from morphed geometry (differ from base)",
+			any_differs, "no blendshape normal differed from base")
+
 	# --- 3. FOOT-IK plants a foot on a raycast surface -----------------------
 	# Place a flat ground StaticBody just under the rig and run IK.
 	var ground := _make_ground(0.0)

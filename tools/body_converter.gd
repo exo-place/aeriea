@@ -209,10 +209,20 @@ func _run() -> int:
 			morphed[ri] = morphed[ri] + Vector3(d.x * MH_TO_METERS, d.y * MH_TO_METERS, d.z * MH_TO_METERS)
 			moved += 1
 			moved_base[b] = true
+		# Recompute normals from the MORPHED geometry. Godot's RELATIVE blend mode
+		# interpolates ARRAY_NORMAL alongside ARRAY_VERTEX, so a blendshape that ships
+		# the BASE normals (the prior behaviour) lights the morphed surface with stale
+		# normals. That is wrong for any lit/normal-mapped skin and grows with morph
+		# weight; per-morph normals keep shading correct as the body morphs. (The
+		# UV path is separate: corner-expansion already gives the surface correct UVs,
+		# and blendshape arrays may only carry Vertex/Normal/Tangent — never UV — so
+		# UVs are NOT and must NOT be stored per blendshape.) Same deterministic
+		# triangle-order accumulation as the base normals.
+		var morphed_normals := _compute_normals(morphed, tris)
 		var ba := []
 		ba.resize(Mesh.ARRAY_MAX)
 		ba[Mesh.ARRAY_VERTEX] = morphed
-		ba[Mesh.ARRAY_NORMAL] = normals  # keep base normals; Slice 1 morph proof is positional
+		ba[Mesh.ARRAY_NORMAL] = morphed_normals
 		mesh.add_blend_shape(axis_name)
 		blend_arrays.append(ba)
 		manifest_axes.append({

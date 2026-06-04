@@ -200,6 +200,10 @@ func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array,
 			morphed[vi] = morphed[vi] + dv[vi] * w
 	# Area-weighted smooth normals over the triangle list (same accumulation as the
 	# converter's _compute_normals, so the neutral case reproduces the baked normals).
+	# Operands SWAPPED — (c-a)×(b-a) — so the normal points OUTWARD over the reversed
+	# winding, IDENTICAL to _compute_normals. (The naive (b-a)×(c-a) over the reversed
+	# winding points inward and inverts lighting; winding/ARRAY_INDEX is untouched —
+	# culling keys off winding, lighting off these normals, and they are independent.)
 	var normals := PackedVector3Array()
 	normals.resize(n)
 	for i in n:
@@ -207,7 +211,7 @@ func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array,
 	var t := 0
 	while t < tris.size():
 		var a := tris[t]; var b := tris[t + 1]; var c := tris[t + 2]
-		var fn := (morphed[b] - morphed[a]).cross(morphed[c] - morphed[a])
+		var fn := (morphed[c] - morphed[a]).cross(morphed[b] - morphed[a])
 		normals[a] += fn; normals[b] += fn; normals[c] += fn
 		t += 3
 	for i in n:

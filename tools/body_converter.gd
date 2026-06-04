@@ -653,8 +653,10 @@ func _parse_obj(path: String) -> Dictionary:
 				# camera saw the mesh interior (the user-confirmed whole-body "backfaces").
 				# Godot's default cull_mode=BACK treats CCW-from-camera as front-facing, so
 				# we emit each triangle with its corners reversed (i0,i2,i1) to flip the
-				# winding outward. This makes the cross-product normals point OUT too
-				# (_compute_normals uses (b-a)×(c-a), which reverses sign with the winding).
+				# winding outward. Normal DIRECTION is handled INDEPENDENTLY in
+				# _compute_normals (it swaps the cross operands to (c-a)×(b-a) so stored
+				# normals point OUTWARD over this reversed winding) — culling keys off the
+				# winding here, lighting off those normals; the two are not coupled.
 				tris.append(c[0]); tris.append(c[2]); tris.append(c[1])
 				tris.append(c[0]); tris.append(c[3]); tris.append(c[2])
 				body_faces += 1
@@ -710,6 +712,17 @@ func _parse_target(path: String) -> Dictionary:
 
 ## Smooth per-vertex normals from the triangulated mesh (area-weighted accumulate).
 ## Deterministic: triangles iterated in index order.
+##
+## NORMAL DIRECTION vs WINDING — these are INDEPENDENT in Godot: backface culling
+## keys off the triangle WINDING (ARRAY_INDEX order) while lighting keys off the
+## stored NORMAL vectors. The winding was reversed (i0,i2,i1) in _parse_obj so the
+## mesh renders FRONT faces (cull_mode=BACK) — that is correct and must NOT change.
+## But the naive face normal (verts[b]-verts[a])×(verts[c]-verts[a]) over that
+## reversed winding points INWARD, which inverts lighting. So we compute the cross
+## with the operands SWAPPED — (verts[c]-verts[a])×(verts[b]-verts[a]) — yielding
+## OUTWARD-pointing per-vertex normals for correct lighting, while ARRAY_INDEX (the
+## winding the culler uses) is untouched. (Verified: stored-normal radial dot flips
+## from negative/inward to positive/outward; signed volume is unchanged.)
 func _compute_normals(verts: PackedVector3Array, tris: PackedInt32Array) -> PackedVector3Array:
 	var n := verts.size()
 	var normals := PackedVector3Array()
@@ -721,7 +734,7 @@ func _compute_normals(verts: PackedVector3Array, tris: PackedInt32Array) -> Pack
 		var a := tris[t]
 		var b := tris[t + 1]
 		var c := tris[t + 2]
-		var fn := (verts[b] - verts[a]).cross(verts[c] - verts[a])
+		var fn := (verts[c] - verts[a]).cross(verts[b] - verts[a])
 		normals[a] += fn
 		normals[b] += fn
 		normals[c] += fn

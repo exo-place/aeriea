@@ -218,12 +218,20 @@ func _ready() -> void:
 			wdisp = max(wdisp, wd[i].length())
 		_assert("weight_max morph moves vertices", wdisp > 0.001, "max disp = %.4f m" % wdisp)
 
-	# --- CPU morph bake produces CORRECT normals under morph (the creator + in-game
-	# skinned path; BodyState.apply_morph_cpu). The GPU blendshapes carry a zero normal
-	# delta, so correct lighting under morph depends ENTIRELY on the CPU rebake. Assert
-	# that after a heavy morph the baked per-vertex normals AGREE with the triangle
-	# winding (geometric normal) — a flipped/stale normal would disagree and light the
-	# morphed body inside-out (the user's "backfaces" report). ----------------------
+	# --- CPU morph bake produces CORRECT (OUTWARD) normals under morph (the creator +
+	# in-game skinned path; BodyState.apply_morph_cpu). The GPU blendshapes carry a zero
+	# normal delta, so correct lighting under morph depends ENTIRELY on the CPU rebake.
+	# Assert that after a heavy morph the baked per-vertex normals point OUTWARD, i.e.
+	# the aggregate radial dot Σ dot(stored_normal_i, vertex_i − centroid) is POSITIVE —
+	# the SAME outward-orientation invariant the static asset must satisfy (see the
+	# "stored vertex normals point OUTWARD" guard below). Inward/flipped morphed normals
+	# (the inverted-lighting regression) would make this negative.
+	#
+	# NOTE this is deliberately measured against the morphed CENTROID, NOT against the
+	# triangle winding: lighting keys off the normal vectors and culling off the winding,
+	# and they are INDEPENDENT. Stored normals now point outward while the reversed
+	# winding's (b-a)×(c-a) points inward — so a winding-agreement check would (correctly)
+	# now DISAGREE. The load-bearing property is outward-ness, which we test directly.
 	var morph_mesh := (load(MESH_PATH) as ArrayMesh).duplicate(true)
 	var mi := MeshInstance3D.new()
 	mi.mesh = morph_mesh
@@ -236,21 +244,15 @@ func _ready() -> void:
 	var ma: Array = morph_mesh.surface_get_arrays(0)
 	var mv: PackedVector3Array = ma[Mesh.ARRAY_VERTEX]
 	var mn: PackedVector3Array = ma[Mesh.ARRAY_NORMAL]
-	var mtris: PackedInt32Array = ma[Mesh.ARRAY_INDEX]
-	var agree := 0
-	var tcount := 0
-	var ti := 0
-	while ti < mtris.size():
-		var a := mtris[ti]; var b := mtris[ti + 1]; var c := mtris[ti + 2]
-		var gn := (mv[b] - mv[a]).cross(mv[c] - mv[a])
-		var sn := (mn[a] + mn[b] + mn[c])
-		if gn.dot(sn) > 0.0:
-			agree += 1
-		tcount += 1
-		ti += 3
-	var agree_frac := float(agree) / float(maxi(tcount, 1))
-	_assert("CPU-morph baked normals agree with winding (correct lighting under morph; not inside-out)",
-		agree_frac > 0.99, "agree fraction = %.5f" % agree_frac)
+	var mcen := Vector3.ZERO
+	for p in mv:
+		mcen += p
+	mcen /= float(mv.size())
+	var morph_radial := 0.0
+	for i in mv.size():
+		morph_radial += mn[i].dot(mv[i] - mcen)
+	_assert("CPU-morph baked normals point OUTWARD (positive radial dot; correct lighting under morph, not inverted)",
+		morph_radial > 0.0, "Σ dot(normal, pos−centroid) = %.6f" % morph_radial)
 	# Format preserved through the rebake (skin arrays + tangents kept, so the SKINNED
 	# in-game body still binds + composes with LBS).
 	var mfmt: int = morph_mesh.surface_get_format(0)
@@ -312,6 +314,29 @@ func _ready() -> void:
 		signed_vol < 0.0, "V = %.9f m^3" % signed_vol)
 	_assert("winding outward aggregate NEGATIVE (matches the front-facing winding the converter emits)",
 		outward < 0.0, "sum = %.6f" % outward)
+
+	# --- STORED VERTEX NORMALS point OUTWARD (lighting guard, INDEPENDENT of winding) ---
+	# Backface culling keys off the WINDING (asserted above); LIGHTING keys off the
+	# stored NORMAL vectors — they are INDEPENDENT in Godot. The converter reversed the
+	# winding (correct for culling) but the naive face normal over that winding points
+	# INWARD, which inverts lighting (the user-confirmed "lighting good before the
+	# winding reversal, inverted after" report). _compute_normals / bake_morphed_normals
+	# swap the cross operands so stored normals point OUTWARD again. This guard is SEPARATE
+	# from and ADDITIONAL to the signed-volume (winding) guard above, so winding and normal
+	# orientation are each pinned independently and can't silently diverge: a future flip
+	# of EITHER the winding OR the normal convention fails exactly one of the two guards.
+	#
+	# Measure: aggregate radial dot Σ dot(stored_normal_i, vertex_i − meshCentroid). It
+	# MUST be POSITIVE (normals point away from the centroid = outward). Inward normals
+	# (the inverted-lighting regression) make it negative.
+	var stored_radial := 0.0
+	var sn_arr: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+	_assert("ARRAY_NORMAL present + sized to render verts", sn_arr != null and sn_arr.size() == verts.size(),
+		"got %d" % (sn_arr.size() if sn_arr != null else -1))
+	for i in verts.size():
+		stored_radial += sn_arr[i].dot(verts[i] - mc)
+	_assert("stored vertex normals point OUTWARD (positive aggregate radial dot; correct lighting, not inverted)",
+		stored_radial > 0.0, "Σ dot(normal, pos−centroid) = %.6f" % stored_radial)
 
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)

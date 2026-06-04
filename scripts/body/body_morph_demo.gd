@@ -11,6 +11,10 @@ const MESH_PATH := "res://assets/body/base_body.res"
 
 var _mi: MeshInstance3D
 var _sliders: Dictionary = {}
+## Raw per-blendshape weights driven by the top section's sliders. Baked through the
+## correct-normals CPU path (apply_morph_cpu) just like BodyState, so the demo is lit
+## correctly under morph from EITHER section.
+var _raw_weights: Dictionary = {}
 ## SLICE 2 — the BodyState record is the single source of truth for body morph
 ## params (body_state.gd; body-and-locomotion-slice.md §2.1). The BodyState section
 ## of the panel drives the blendshape weights through BodyState.apply_to(), and shows
@@ -40,6 +44,10 @@ func _ready() -> void:
 	add_child(env)
 
 	_mi = MeshInstance3D.new()
+	# PER-INSTANCE copy: the BodyState section morphs through the correct-normals CPU
+	# bake (apply_morph_cpu), which mutates the surface — keep it private to this demo
+	# so the shared cached asset is never corrupted.
+	mesh = (mesh as ArrayMesh).duplicate(true)
 	_mi.mesh = mesh
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.8, 0.7, 0.62)
@@ -79,9 +87,14 @@ func _build_ui(mesh: ArrayMesh) -> void:
 		slider.step = 0.01
 		slider.custom_minimum_size = Vector2(180, 0)
 		slider.value = 0.0
-		var idx := i
+		var axis_name := str(axis)
+		_raw_weights[axis_name] = 0.0
 		slider.value_changed.connect(func(v: float) -> void:
-			_mi.set("blend_shapes/%s" % axis, v)
+			# Correct-normals path: accumulate the raw weight then CPU-bake (positions +
+			# recomputed normals). A GPU-only set("blend_shapes/...") would leave stale,
+			# octahedral-compressed normals -> mis-lit morphed surface (BodyState).
+			_raw_weights[axis_name] = v
+			_body_state.apply_morph_cpu(_mi, _raw_weights)
 		)
 		row.add_child(slider)
 		panel.add_child(row)
@@ -127,13 +140,13 @@ func _build_body_state_section(panel: VBoxContainer) -> void:
 		slider.custom_minimum_size = Vector2(180, 0)
 		slider.value_changed.connect(func(v: float) -> void:
 			_body_state.set(field, v)
-			_body_state.apply_to(_mi)
+			_body_state.apply_morph_cpu(_mi)
 			_refresh_adult_label()
 		)
 		row.add_child(slider)
 		panel.add_child(row)
 
-	_body_state.apply_to(_mi)
+	_body_state.apply_morph_cpu(_mi)
 	_refresh_adult_label()
 
 

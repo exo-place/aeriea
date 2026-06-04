@@ -58,6 +58,10 @@ const ROOT_BONE := "root"
 var skeleton: Skeleton3D
 var mesh_instance: MeshInstance3D
 
+## The body's morph parameters (the single source of truth, BodyState). Default is the
+## neutral young-adult base. Set via apply_body_state() to re-morph the SKINNED body.
+var body_state: BodyState = BodyState.new()
+
 var _bone_index := {}     ## name -> bone index
 var _rest_local := {}     ## name -> resting bone-local Transform3D (for layering)
 
@@ -142,6 +146,14 @@ func build() -> bool:
 
 	mesh_instance = MeshInstance3D.new()
 	mesh_instance.name = "Body"
+	# PER-INSTANCE mesh copy. apply_body_state() bakes the CPU-morphed positions +
+	# recomputed normals into this surface (the correct-normals-under-morph path; the
+	# GPU blendshapes carry a ZERO normal delta and CANNOT be lit correctly under morph
+	# — see BodyState/body_converter). Baking mutates the ArrayMesh, so it MUST be a
+	# private copy: the shared load() result is the cache and mutating it would corrupt
+	# every other body and persist across runs. The skin/skeleton binding (vertex/bone
+	# arrays) is unchanged by the bake, so LBS still composes correctly on top.
+	mesh = (mesh as ArrayMesh).duplicate(true)
 	mesh_instance.mesh = mesh
 	# A simple skin material so the body reads as a body (not a flat silhouette).
 	var mat := StandardMaterial3D.new()
@@ -162,7 +174,30 @@ func build() -> bool:
 			matcher = MotionMatcher.new()
 			matcher.setup(motion_db)
 
+	# Bake the initial BodyState morph (default = neutral) with correct normals. This
+	# establishes the neutral-base capture on the MeshInstance metadata so later
+	# re-morphs are stable and non-cumulative.
+	apply_body_state(body_state)
+
 	return true
+
+
+## Re-morph the SKINNED body to `state` with CORRECT normals under morph.
+##
+## The in-game body is skinned (Skeleton3D / LBS). The morph (blendshapes) lives in the
+## mesh REST space and is applied BEFORE skinning — final = LBS(base + Σ wᵢ·Δvᵢ). So
+## baking the CPU-morphed rest-space positions + recomputed rest-space normals into the
+## base surface is exactly what the GPU blendshape stage feeds the skinning stage, and
+## LBS then composes on top unchanged. This is why a rest-space CPU bake is correct for
+## the skinned body and not merely the static viewer (verified with a posed+morphed
+## render). We use the CPU bake instead of GPU blendshape weights because Godot stores
+## blendshape normals octahedral-compressed, which cannot carry a normal delta — the
+## GPU-only morph leaves stale normals that mis-light the morphed surface (BodyState).
+func apply_body_state(state: BodyState) -> void:
+	body_state = state
+	if mesh_instance == null or mesh_instance.mesh == null:
+		return
+	body_state.apply_morph_cpu(mesh_instance)
 
 
 ## Body-local eye height (metres above the body's feet origin), derived from the

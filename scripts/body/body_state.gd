@@ -175,14 +175,17 @@ func apply_to(mesh_instance: MeshInstance3D) -> void:
 ## the full current morph from neutral, so repeated calls are stable and not cumulative
 ## only if the stored base is neutral — apply_morph_cpu keeps that invariant by always
 ## baking from a preserved neutral copy held on the MeshInstance via metadata).
-func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array) -> void:
+func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array,
+		weights_override: Dictionary = {}) -> void:
 	if mesh == null or mesh.get_surface_count() == 0:
 		return
 	var arrays := mesh.surface_get_arrays(0)
 	var tris: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
 	var n := base_pos.size()
 	# Reconstruct the morphed positions on the CPU from the NEUTRAL base + vertex deltas.
-	var weights := to_blend_weights()
+	# Callers may supply an explicit { blendshape_name: weight } map (the demo's raw
+	# per-blendshape sliders); default is the BodyState macro-axis projection.
+	var weights := weights_override if not weights_override.is_empty() else to_blend_weights()
 	var morphed := base_pos.duplicate()
 	var bs_arrays := mesh.surface_get_blend_shape_arrays(0)
 	for i in mesh.get_blend_shape_count():
@@ -226,7 +229,7 @@ func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array) -> void
 ## `mesh_instance.mesh` must be a per-instance ArrayMesh copy. The neutral base
 ## positions are captured once into instance metadata so every call bakes from neutral
 ## (stable, non-cumulative). Use this INSTEAD of apply_to for a correctly-lit morph.
-func apply_morph_cpu(mesh_instance: MeshInstance3D) -> void:
+func apply_morph_cpu(mesh_instance: MeshInstance3D, weights_override: Dictionary = {}) -> void:
 	var mesh := mesh_instance.mesh as ArrayMesh
 	if mesh == null or mesh.get_surface_count() == 0:
 		return
@@ -237,7 +240,7 @@ func apply_morph_cpu(mesh_instance: MeshInstance3D) -> void:
 	else:
 		base_pos = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 		mesh_instance.set_meta("neutral_base_pos", base_pos)
-	bake_morphed_normals(mesh, base_pos)
+	bake_morphed_normals(mesh, base_pos, weights_override)
 	# Zero every GPU blend weight: the morph is fully baked on the CPU now.
 	for i in mesh.get_blend_shape_count():
 		mesh_instance.set("blend_shapes/%s" % mesh.get_blend_shape_name(i), 0.0)

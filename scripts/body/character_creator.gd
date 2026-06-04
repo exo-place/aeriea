@@ -110,15 +110,12 @@ func _build_body() -> void:
 	# off MM so even an accidental apply_pose call would not contort the stand.
 	_rig.use_motion_matching = false
 	_rig.foot_ik_enabled = false
+	# Drive the rig with THIS creator's BodyState (the single source of truth the
+	# sliders edit). BodyRig already holds a per-instance mesh copy and morphs through
+	# the correct-normals CPU bake (apply_body_state), so the creator no longer
+	# duplicates or bakes itself — it just edits the shared record and re-applies it.
+	_rig.body_state = _body_state
 	add_child(_rig)
-
-	# Use a PER-INSTANCE copy of the mesh: _apply_state bakes recomputed normals into
-	# the surface (the morphed-normal fix), which mutates the ArrayMesh. The rig loads
-	# the SHARED cached asset via load(); mutating that would corrupt every other user
-	# (and persist across runs in the cache). Duplicate so the bake is local to this
-	# viewer. The skin/skeleton binding is unaffected (same vertex/bone arrays).
-	if _rig.mesh_instance != null and _rig.mesh_instance.mesh != null:
-		_rig.mesh_instance.mesh = (_rig.mesh_instance.mesh as ArrayMesh).duplicate(true)
 
 
 func _build_camera() -> void:
@@ -269,10 +266,10 @@ func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float)
 ## (BodyState.bake_morphed_normals). Only runs on slider changes, so it's cheap.
 func _apply_state() -> void:
 	if _rig != null and _rig.mesh_instance != null:
-		# CPU morph (positions + recomputed normals), GPU blend weights zeroed. This is
-		# the correct path for the creator: Godot's octahedral blendshape-normal storage
-		# can't carry normal deltas, so a GPU-only morph is mis-lit (see BodyState).
-		_body_state.apply_morph_cpu(_rig.mesh_instance)
+		# Route through the rig's correct-normals CPU morph bake (the same path the
+		# in-game skinned body uses). Godot's octahedral blendshape-normal storage can't
+		# carry normal deltas, so a GPU-only morph is mis-lit (see BodyState/BodyRig).
+		_rig.apply_body_state(_body_state)
 	for field in _value_labels:
 		(_value_labels[field] as Label).text = "%.2f" % float(_body_state.get(field))
 

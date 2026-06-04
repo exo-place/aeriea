@@ -42,6 +42,7 @@ var _dragging_pan: bool = false
 
 var _value_labels: Dictionary = {}   ## field -> Label showing current value
 var _sliders: Dictionary = {}        ## field -> HSlider
+var _units: Dictionary = {}          ## field -> unit suffix string ("yr"/"%"/"")
 
 
 func _ready() -> void:
@@ -174,8 +175,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 # ---------------------------------------------------------------------------
-# Morph UI — sliders for the BodyState macro axes (gender/age/muscle/weight/
-# height/proportions), live-driving the blendshapes through BodyState.apply_to.
+# Morph UI — sliders for the BodyState natural-unit headline axes (age in years,
+# femininity/masculinity %, muscle %, weight %, proportions), live-driving the
+# blendshapes through the rig's correct-normals CPU morph bake.
+# (body-parameterization.md §2/§7 — natural units on the public surface.)
 # ---------------------------------------------------------------------------
 
 func _build_ui() -> void:
@@ -202,19 +205,22 @@ func _build_ui() -> void:
 
 	vbox.add_child(HSeparator.new())
 
-	# [field, min, max] — the BodyState macro axes. age is the continuous axis;
-	# proportions is carried in the record (no Slice-1 blendshape yet) but exposed
-	# so the full macro vector is editable.
+	# [field, min, max, step, label, unit] — the BodyState natural-unit headline axes
+	# (body-parameterization.md §2). age is in YEARS (the gate reads >= 18); femininity/
+	# masculinity are the two independent sex axes in %; muscle/weight in %; proportions
+	# is the dimensionless 0..1-about-0.5 bidirectional envelope. height is the Slice A
+	# provisional normalized macro-height amount (Slice C makes it metric cm, §4).
 	var axes := [
-		["gender", 0.0, 1.0],
-		["age", 0.0, 1.0],
-		["muscle", 0.0, 1.0],
-		["weight", 0.0, 1.0],
-		["height", 0.0, 1.0],
-		["proportions", 0.0, 1.0],
+		["age_years", 1.0, 90.0, 0.5, "age", "yr"],
+		["femininity", 0.0, 100.0, 1.0, "femininity", "%"],
+		["masculinity", 0.0, 100.0, 1.0, "masculinity", "%"],
+		["muscle", 0.0, 100.0, 1.0, "muscle", "%"],
+		["weight", 50.0, 150.0, 1.0, "weight", "%"],
+		["proportions", 0.0, 1.0, 0.01, "proportions", ""],
+		["height", 0.0, 1.0, 0.01, "height (prov.)", ""],
 	]
 	for spec in axes:
-		_build_axis_row(vbox, spec[0], spec[1], spec[2])
+		_build_axis_row(vbox, spec[0], spec[1], spec[2], spec[3], spec[4], spec[5])
 
 	vbox.add_child(HSeparator.new())
 
@@ -226,20 +232,21 @@ func _build_ui() -> void:
 	_apply_state()
 
 
-func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float) -> void:
+func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float,
+		step: float, label: String, unit: String) -> void:
 	var row := HBoxContainer.new()
 
 	var name_lbl := Label.new()
-	name_lbl.text = field
-	name_lbl.custom_minimum_size = Vector2(95, 0)
+	name_lbl.text = label
+	name_lbl.custom_minimum_size = Vector2(110, 0)
 	row.add_child(name_lbl)
 
 	var slider := HSlider.new()
 	slider.min_value = lo
 	slider.max_value = hi
-	slider.step = 0.01
+	slider.step = step
 	slider.value = float(_body_state.get(field))
-	slider.custom_minimum_size = Vector2(170, 0)
+	slider.custom_minimum_size = Vector2(150, 0)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.value_changed.connect(func(v: float) -> void:
 		_body_state.set(field, v)
@@ -249,12 +256,23 @@ func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float)
 	_sliders[field] = slider
 
 	var value_lbl := Label.new()
-	value_lbl.custom_minimum_size = Vector2(46, 0)
-	value_lbl.text = "%.2f" % float(_body_state.get(field))
+	value_lbl.custom_minimum_size = Vector2(66, 0)
+	value_lbl.text = _format_value(field, unit)
 	row.add_child(value_lbl)
 	_value_labels[field] = value_lbl
+	_units[field] = unit
 
 	parent.add_child(row)
+
+
+func _format_value(field: String, unit: String) -> String:
+	var v := float(_body_state.get(field))
+	if unit == "yr":
+		var adult := " adult" if _body_state.is_adult_body() else " <18"
+		return "%.0f%s%s" % [v, unit, adult]
+	if unit == "%":
+		return "%.0f%s" % [v, unit]
+	return "%.2f" % v
 
 
 ## Project the current BodyState onto the body's blendshapes and refresh labels.
@@ -271,7 +289,7 @@ func _apply_state() -> void:
 		# carry normal deltas, so a GPU-only morph is mis-lit (see BodyState/BodyRig).
 		_rig.apply_body_state(_body_state)
 	for field in _value_labels:
-		(_value_labels[field] as Label).text = "%.2f" % float(_body_state.get(field))
+		(_value_labels[field] as Label).text = _format_value(field, str(_units.get(field, "")))
 
 
 func _reset_all() -> void:

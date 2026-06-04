@@ -237,9 +237,9 @@ func _ready() -> void:
 	mi.mesh = morph_mesh
 	add_child(mi)
 	var bstate := BodyState.new()
-	bstate.weight = 1.0
-	bstate.muscle = 0.8
-	bstate.age = 0.8
+	bstate.weight = 150.0       # full max-weight anchor (weight_max -> 1.0)
+	bstate.muscle = 90.0        # near-max muscle (muscle_max -> 0.8)
+	bstate.age_years = 68.0     # well into the old band (macro ~0.83)
 	bstate.apply_morph_cpu(mi)
 	var ma: Array = morph_mesh.surface_get_arrays(0)
 	var mv: PackedVector3Array = ma[Mesh.ARRAY_VERTEX]

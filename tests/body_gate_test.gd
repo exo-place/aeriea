@@ -56,9 +56,9 @@ func _test_bodystate_drives_morphs() -> void:
 	add_child(mi)
 	await_nothing()
 
-	# Neutral young-adult default: all age weights ~0 (base mesh = young), and
-	# every other axis 0.
-	var neutral := BodyState.new()  # defaults: age = AGE_YOUNG (0.5), all else 0
+	# Neutral young-adult default: all age weights ~0 (base mesh = young, 25yr), and
+	# every other axis at its neutral base value.
+	var neutral := BodyState.new()  # defaults: age_years=25 (macro 0.5), masculinity=0, etc.
 	neutral.apply_to(mi)
 	var w_age_old := float(mi.get("blend_shapes/age_old"))
 	var w_age_child := float(mi.get("blend_shapes/age_child"))
@@ -68,29 +68,46 @@ func _test_bodystate_drives_morphs() -> void:
 		absf(w_age_old) < 1e-4 and absf(w_age_child) < 1e-4 and absf(w_age_baby) < 1e-4,
 		"old=%.4f child=%.4f baby=%.4f" % [w_age_old, w_age_child, w_age_baby])
 
-	# Drive age toward OLD: age_old weight must rise.
+	# Drive age toward OLD (90yr): age_old weight must rise to 1.0.
 	var old_bs := BodyState.new()
-	old_bs.age = BodyState.AGE_OLD
+	old_bs.age_years = 90.0
 	old_bs.apply_to(mi)
 	var old_w := float(mi.get("blend_shapes/age_old"))
-	_assert("BodyState.age=OLD drives age_old blendshape weight to 1.0",
+	_assert("BodyState.age_years=90 drives age_old blendshape weight to 1.0",
 		absf(old_w - 1.0) < 1e-4, "age_old weight = %.4f" % old_w)
 
-	# Drive age toward CHILD: age_child weight must be ~1.0 at the child anchor.
+	# Drive age to the CHILD anchor (10yr): age_child weight must be ~1.0.
 	var child_bs := BodyState.new()
-	child_bs.age = BodyState.AGE_CHILD
+	child_bs.age_years = 10.0
 	child_bs.apply_to(mi)
 	var child_w := float(mi.get("blend_shapes/age_child"))
-	_assert("BodyState.age=CHILD drives age_child blendshape weight to ~1.0",
+	_assert("BodyState.age_years=10 (child anchor) drives age_child blendshape weight to ~1.0",
 		absf(child_w - 1.0) < 1e-4, "age_child weight = %.4f" % child_w)
 
-	# Drive a SECOND axis (weight) independently — orthogonality.
+	# Drive a SECOND axis (masculinity) independently — orthogonality.
+	var masc := BodyState.new()
+	masc.masculinity = 80.0
+	masc.apply_to(mi)
+	var gender_w := float(mi.get("blend_shapes/gender_male"))
+	_assert("BodyState.masculinity=80%% drives gender_male blendshape weight to 0.8 (axes orthogonal)",
+		absf(gender_w - 0.8) < 1e-4, "gender_male weight = %.4f" % gender_w)
+
+	# Weight is 50..150% where 100 = average (base, weight 0); 150 = full max anchor.
 	var heavy := BodyState.new()
-	heavy.weight = 0.8
+	heavy.weight = 150.0
 	heavy.apply_to(mi)
 	var weight_w := float(mi.get("blend_shapes/weight_max"))
-	_assert("BodyState.weight=0.8 drives weight_max blendshape weight to 0.8 (axes orthogonal)",
-		absf(weight_w - 0.8) < 1e-4, "weight_max weight = %.4f" % weight_w)
+	_assert("BodyState.weight=150%% drives weight_max blendshape weight to 1.0",
+		absf(weight_w - 1.0) < 1e-4, "weight_max weight = %.4f" % weight_w)
+
+	# The age_years<->macro map is the verified MakeHuman piecewise (§1.4).
+	_assert("age_years 18 -> macro ~0.354 (the gate's macro position, verified)",
+		absf(BodyState.age_years_to_macro(18.0) - 0.354166) < 1e-4,
+		"macro(18yr) = %.6f" % BodyState.age_years_to_macro(18.0))
+	_assert("age macro<->years round-trips (25yr<->0.5, 90yr<->1.0)",
+		absf(BodyState.age_macro_to_years(0.5) - 25.0) < 1e-4
+		and absf(BodyState.age_macro_to_years(1.0) - 90.0) < 1e-4,
+		"yr(0.5)=%.2f yr(1.0)=%.2f" % [BodyState.age_macro_to_years(0.5), BodyState.age_macro_to_years(1.0)])
 
 	# And prove the morph weight actually changes the rendered VERTICES: read the
 	# age_old morph array vs base and confirm a nonzero displacement (the weight we
@@ -112,8 +129,8 @@ func _test_bodystate_drives_morphs() -> void:
 	# Serialization round-trips (BodyState is seeded-sim data).
 	var rt := BodyState.from_dict(old_bs.to_dict())
 	_assert("BodyState round-trips through to_dict/from_dict (serializable sim data)",
-		is_equal_approx(rt.age, old_bs.age) and is_equal_approx(rt.weight, old_bs.weight),
-		"age=%.3f weight=%.3f" % [rt.age, rt.weight])
+		is_equal_approx(rt.age_years, old_bs.age_years) and is_equal_approx(rt.weight, old_bs.weight),
+		"age_years=%.3f weight=%.3f" % [rt.age_years, rt.weight])
 
 	mi.queue_free()
 
@@ -123,28 +140,37 @@ func _test_bodystate_drives_morphs() -> void:
 # ---------------------------------------------------------------------------
 
 func _test_is_adult_body_predicate() -> void:
-	print("--- (b) is_adult_body predicate (continuous age axis, not crippled) ---")
+	print("--- (b) is_adult_body predicate (>= 18 years, over the continuous age axis) ---")
 	var cases := [
-		# [age, expected_is_adult, label]
-		[BodyState.AGE_BABY, false, "baby (0.0)"],
-		[BodyState.AGE_CHILD, false, "child anchor (0.1875)"],
-		[0.3, false, "child->young midpoint (0.3, adolescent)"],
-		[BodyState.AGE_YOUNG, true, "young adult anchor (0.5)"],
-		[0.75, true, "young->old (0.75)"],
-		[BodyState.AGE_OLD, true, "old (1.0)"],
+		# [age_years, expected_is_adult, label]
+		[1.0, false, "baby (1yr)"],
+		[10.0, false, "child anchor (10yr)"],
+		[15.0, false, "adolescent (15yr)"],
+		# --- THE GATE BOUNDARY (body-parameterization.md §5.4) ---
+		[17.9, false, "BOUNDARY just below 18 (17.9yr) — DENIED"],
+		[18.0, true, "BOUNDARY exactly 18 (18.0yr) — PERMITTED"],
+		[18.1, true, "BOUNDARY just above 18 (18.1yr) — PERMITTED"],
+		[25.0, true, "young adult (25yr, default base)"],
+		[90.0, true, "old (90yr)"],
 	]
 	for c in cases:
 		var bs := BodyState.new()
-		bs.age = float(c[0])
+		bs.age_years = float(c[0])
 		var got := bs.is_adult_body()
 		_assert("age %s -> is_adult_body=%s" % [c[2], str(c[1])], got == bool(c[1]),
-			"age=%.4f is_adult_body=%s (threshold=%.4f)" % [bs.age, str(got), BodyState.ADULT_AGE_THRESHOLD])
+			"age_years=%.2f is_adult_body=%s (threshold=%.1fyr)" % [bs.age_years, str(got), BodyState.ADULT_AGE_YEARS])
+
+	# Fail-closed on a non-finite age (robustness requirement §5.1).
+	var nan_bs := BodyState.new()
+	nan_bs.age_years = NAN
+	_assert("fail-closed: non-finite age_years -> is_adult_body=false",
+		not nan_bs.is_adult_body(), "age_years=NaN is_adult=%s" % str(nan_bs.is_adult_body()))
 
 	# The age axis is NOT crippled: the child morph still produces a valid (nonzero,
 	# distinct) blendshape projection for ordinary NPC use — the gate is a predicate
 	# OVER the axis, not a notch cut into it.
 	var child := BodyState.new()
-	child.age = BodyState.AGE_CHILD
+	child.age_years = 10.0  # the child anchor (macro 0.1875)
 	var cw := child.to_blend_weights()
 	_assert("age axis stays continuous/complete: child morph still renders (age_child weight ~1.0)",
 		absf(float(cw["age_child"]) - 1.0) < 1e-4 and not child.is_adult_body(),
@@ -171,31 +197,32 @@ func _test_gate_holds_at_guard_layer(compiled: bool) -> void:
 	_assert("(%s) kit declares the test-placeholder NSFW verb gated on body_is_adult" % tag,
 		kit.interactables.has(NSFW_DEF), "interactables: %s" % str(kit.interactable_order))
 
-	# --- child-range body-state: the verb must be ABSENT / un-fireable ---
-	var child_host := GateTestHost.new()
-	child_host.body_state.age = BodyState.AGE_CHILD
-	var drv_child = (CompiledScript.new() if compiled else InterpreterScript.new())
-	drv_child.setup(kit, child_host)
-	var child_present := _verb_in_live_set(drv_child, child_host, compiled)
-	var child_fired := _try_fire_and_check_fired(drv_child, child_host, compiled)
-	_assert(
-		"(%s) child-range body-state (age=%.3f, is_adult=false): NSFW verb ABSENT from live set + cannot fire" % [tag, BodyState.AGE_CHILD],
-		(not child_present) and (not child_fired),
-		"is_adult=%s verb_present=%s verb_fired=%s" % [
-			str(child_host.host_is_adult_body()), str(child_present), str(child_fired)])
-
-	# --- adult-range body-state: the verb must be PRESENT / fireable ---
-	var adult_host := GateTestHost.new()
-	adult_host.body_state.age = BodyState.AGE_YOUNG
-	var drv_adult = (CompiledScript.new() if compiled else InterpreterScript.new())
-	drv_adult.setup(kit, adult_host)
-	var adult_present := _verb_in_live_set(drv_adult, adult_host, compiled)
-	var adult_fired := _try_fire_and_check_fired(drv_adult, adult_host, compiled)
-	_assert(
-		"(%s) adult body-state (age=%.3f, is_adult=true): NSFW verb PRESENT in live set + fires" % [tag, BodyState.AGE_YOUNG],
-		adult_present and adult_fired,
-		"is_adult=%s verb_present=%s verb_fired=%s" % [
-			str(adult_host.host_is_adult_body()), str(adult_present), str(adult_fired)])
+	# Each case: [age_years, expect_verb_live, label]. The boundary cases (17.9 / 18.0)
+	# assert the gate at the AFFORDANCE GUARD LAYER, not just the predicate — the NSFW
+	# verb must be absent/un-fireable below 18 and present/fireable at/above 18.
+	var gate_cases := [
+		[10.0, false, "child-range (10yr)"],
+		[17.9, false, "BOUNDARY just below 18 (17.9yr)"],
+		[18.0, true, "BOUNDARY exactly 18 (18.0yr)"],
+		[18.1, true, "BOUNDARY just above 18 (18.1yr)"],
+		[25.0, true, "young adult (25yr)"],
+	]
+	for gc in gate_cases:
+		var age_yr := float(gc[0])
+		var expect_live := bool(gc[1])
+		var host := GateTestHost.new()
+		host.body_state.age_years = age_yr
+		var drv = (CompiledScript.new() if compiled else InterpreterScript.new())
+		drv.setup(kit, host)
+		var present := _verb_in_live_set(drv, host, compiled)
+		var fired := _try_fire_and_check_fired(drv, host, compiled)
+		var ok := (present == expect_live) and (fired == expect_live)
+		var verdict := "PRESENT + fires" if expect_live else "ABSENT + cannot fire"
+		_assert(
+			"(%s) %s, is_adult=%s: NSFW verb %s" % [tag, gc[2], str(host.host_is_adult_body()), verdict],
+			ok,
+			"age_years=%.2f is_adult=%s verb_present=%s verb_fired=%s (expect_live=%s)" % [
+				age_yr, str(host.host_is_adult_body()), str(present), str(fired), str(expect_live)])
 
 
 ## Is the NSFW command verb in the LIVE verb set on the focused marker? We resolve

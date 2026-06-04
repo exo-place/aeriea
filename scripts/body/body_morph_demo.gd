@@ -117,12 +117,15 @@ func _build_body_state_section(panel: VBoxContainer) -> void:
 	_adult_label = Label.new()
 	panel.add_child(_adult_label)
 
-	# [field, min, max, init] for the macro axes BodyState carries.
+	# [field, min, max, init] for the natural-unit headline axes BodyState carries
+	# (body-parameterization.md §2). age in YEARS; femininity/masculinity/muscle/weight
+	# in %; height the Slice A provisional normalized macro-height amount.
 	var axes := [
-		["age", 0.0, 1.0, _body_state.age],
-		["gender", 0.0, 1.0, _body_state.gender],
-		["muscle", 0.0, 1.0, _body_state.muscle],
-		["weight", 0.0, 1.0, _body_state.weight],
+		["age_years", 1.0, 90.0, _body_state.age_years],
+		["femininity", 0.0, 100.0, _body_state.femininity],
+		["masculinity", 0.0, 100.0, _body_state.masculinity],
+		["muscle", 0.0, 100.0, _body_state.muscle],
+		["weight", 50.0, 150.0, _body_state.weight],
 		["height", 0.0, 1.0, _body_state.height],
 	]
 	for spec in axes:
@@ -153,5 +156,5 @@ func _build_body_state_section(panel: VBoxContainer) -> void:
 func _refresh_adult_label() -> void:
 	if _adult_label == null:
 		return
-	_adult_label.text = "age=%.2f -> is_adult_body() = %s  (NSFW gate input)" % [
-		_body_state.age, str(_body_state.is_adult_body())]
+	_adult_label.text = "age=%.0f yr -> is_adult_body() = %s  (NSFW gate input, >= 18yr)" % [
+		_body_state.age_years, str(_body_state.is_adult_body())]

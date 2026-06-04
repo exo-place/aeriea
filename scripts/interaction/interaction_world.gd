@@ -57,8 +57,8 @@ var _player: CharacterBody3D = null
 ## The actor BODY-STATE that the Layer-1 NSFW gate reads (DESIGN.md Layer 1;
 ## body-and-locomotion-slice.md §2.2). The affordance guard layer consults its
 ## is_adult_body() predicate via the body_is_adult guard op -> host_is_adult_body().
-## Default is the neutral young-adult base (BodyState defaults to age = AGE_YOUNG),
-## i.e. ADULT by default; a host/sim that morphs the actor toward the child range
+## Default is the neutral young-adult base (BodyState defaults to age_years = 25),
+## i.e. ADULT by default (>= 18yr); a host/sim that morphs the actor toward the child range
 ## flips is_adult_body() false and the gated verb leaves the live set BY CONSTRUCTION.
 var body_state: BodyState = BodyState.new()
 

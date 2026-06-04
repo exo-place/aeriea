@@ -260,6 +260,46 @@ func _ready() -> void:
 		"format = %d" % mfmt)
 	mi.queue_free()
 
+	# --- GLOBAL ORIENTATION: the mesh must face OUTWARD (not globally inverted) ----
+	# This is an INTERPRETATION-FREE test of triangle winding, independent of any
+	# rendered image and of normals. A previously-shipped check ("baked normals agree
+	# with winding") is USELESS for detecting inversion: a fully INVERTED mesh is
+	# self-consistent (its winding agrees with its own inward normals). What that never
+	# tested is OUTWARD-ness — a globally inverted mesh still looks body-shaped head-on
+	# (you see the inside of the far surface) and only reveals itself as whole-body
+	# backfaces when the camera ORBITS.
+	#
+	# Two objective measures over the stored index/winding order:
+	#   1. SIGNED VOLUME  V = (1/6) Σ v0·(v1×v2). For a closed mesh wound CCW-outward in
+	#      Godot's right-handed space this is POSITIVE; a globally inverted mesh NEGATIVE.
+	#   2. OUTWARD AGGREGATE  Σ dot(faceNormal_from_winding, faceCentroid − meshCentroid).
+	#      POSITIVE ⇒ winding normals point away from the centroid (outward).
+	# Godot's StandardMaterial3D with default cull_mode=BACK renders CCW-from-camera as
+	# FRONT-facing (verified empirically on Forward+: front_face=CCW, standard right-
+	# handed/OpenGL convention — NOT clockwise), so CCW-outward winding == correctly
+	# front-facing from outside. Both POSITIVE == the body shows its solid exterior from
+	# every orbit angle. This guard makes the inversion regression impossible to ship.
+	var ov: PackedVector3Array = verts
+	var oidx: PackedInt32Array = idx
+	var mc := Vector3.ZERO
+	for p in ov:
+		mc += p
+	mc /= float(ov.size())
+	var signed_vol := 0.0
+	var outward := 0.0
+	var oti := 0
+	while oti < oidx.size():
+		var a := ov[oidx[oti]]; var b := ov[oidx[oti + 1]]; var c := ov[oidx[oti + 2]]
+		signed_vol += a.dot(b.cross(c))
+		var fn := (b - a).cross(c - a)
+		outward += fn.dot((a + b + c) / 3.0 - mc)
+		oti += 3
+	signed_vol /= 6.0
+	_assert("mesh signed volume POSITIVE (wound OUTWARD, not globally inverted)",
+		signed_vol > 0.0, "V = %.9f m^3" % signed_vol)
+	_assert("winding outward aggregate POSITIVE (face normals point away from centroid)",
+		outward > 0.0, "sum = %.6f" % outward)
+
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
 

@@ -4,48 +4,49 @@
 		{
 			"axis": "age_old",
 			"blend_shape_index": 0,
-			"moved_vertices": 19156,
+			"moved_vertices": 13380,
 			"source_target": "targets/macrodetails/caucasian-female-old.target"
 		},
 		{
 			"axis": "age_baby",
 			"blend_shape_index": 1,
-			"moved_vertices": 19150,
+			"moved_vertices": 13380,
 			"source_target": "targets/macrodetails/caucasian-female-baby.target"
 		},
 		{
 			"axis": "age_child",
 			"blend_shape_index": 2,
-			"moved_vertices": 19150,
+			"moved_vertices": 13380,
 			"source_target": "targets/macrodetails/caucasian-female-child.target"
 		},
 		{
 			"axis": "gender_male",
 			"blend_shape_index": 3,
-			"moved_vertices": 19150,
+			"moved_vertices": 13380,
 			"source_target": "targets/macrodetails/caucasian-male-young.target"
 		},
 		{
 			"axis": "muscle_max",
 			"blend_shape_index": 4,
-			"moved_vertices": 6547,
+			"moved_vertices": 3781,
 			"source_target": "targets/macrodetails/universal-female-young-maxmuscle-averageweight.target"
 		},
 		{
 			"axis": "weight_max",
 			"blend_shape_index": 5,
-			"moved_vertices": 6027,
+			"moved_vertices": 3357,
 			"source_target": "targets/macrodetails/universal-female-young-averagemuscle-maxweight.target"
 		},
 		{
 			"axis": "height_max",
 			"blend_shape_index": 6,
-			"moved_vertices": 19150,
+			"moved_vertices": 13380,
 			"source_target": "targets/macrodetails/height/female-young-averagemuscle-averageweight-maxheight.target"
 		}
 	],
 	"license": "CC0-1.0 (MakeHuman core base mesh + targets, explicitly CC0 since Sept 2020)",
 	"mh_to_meters": 0.1,
+	"render_vertex_count": 14517,
 	"rig": {
 		"bone_count": 163,
 		"max_influences": 4,

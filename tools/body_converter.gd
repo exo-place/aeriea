@@ -101,11 +101,15 @@ func _run() -> int:
 		push_error("body_converter: failed to parse %s" % obj_path)
 		return 1
 
-	var base_verts: PackedVector3Array = parsed["verts"]      # MH-space, raw
-	var tris: PackedInt32Array = parsed["tris"]                # triangulated indices
-	var n := base_verts.size()
+	var base_verts: PackedVector3Array = parsed["base_verts"]   # MH-space, raw, ALL `v`
+	var render_pos: PackedVector3Array = parsed["render_pos"]   # MH-space, raw, per render vert
+	var render_uv: PackedVector2Array = parsed["render_uv"]     # UV per render vert
+	var render_to_base: PackedInt32Array = parsed["render_to_base"]  # render vert -> base `v`
+	var tris: PackedInt32Array = parsed["tris"]                 # indices into render verts
+	var n := base_verts.size()                                  # base vertex count (morph/skin keyed by this)
+	var rn := render_pos.size()                                 # render vertex count (expanded at UV seams)
 	var body_vert_count: int = parsed["body_vert_count"]
-	print("body_converter: %d vertices (%d body), %d triangle indices (%d tris)" % [n, body_vert_count, tris.size(), tris.size() / 3])
+	print("body_converter: %d base verts (%d body), %d render verts (corner-expanded), %d triangle indices (%d tris)" % [n, body_vert_count, rn, tris.size(), tris.size() / 3])
 
 	# --- scale + feet-to-origin transform (1u = 1m) ---------------------------
 	# Lift so the lowest BODY vertex (feet) sits at y=0. Using only body verts keeps
@@ -114,15 +118,15 @@ func _run() -> int:
 	var min_y := INF
 	for i in body_vert_count:
 		min_y = min(min_y, base_verts[i].y)
-	# scaled positions, lifted so the lowest vertex (feet) sits at y = 0
-	var scaled_base := PackedVector3Array()
-	scaled_base.resize(n)
-	for i in n:
-		var v := base_verts[i]
-		scaled_base[i] = Vector3(v.x * MH_TO_METERS, (v.y - min_y) * MH_TO_METERS, v.z * MH_TO_METERS)
+	# scaled RENDER positions, lifted so the lowest vertex (feet) sits at y = 0
+	var scaled_render := PackedVector3Array()
+	scaled_render.resize(rn)
+	for i in rn:
+		var v := render_pos[i]
+		scaled_render[i] = Vector3(v.x * MH_TO_METERS, (v.y - min_y) * MH_TO_METERS, v.z * MH_TO_METERS)
 
-	# --- normals from the triangulated base (smooth, deterministic) -----------
-	var normals := _compute_normals(scaled_base, tris)
+	# --- normals from the triangulated render mesh (smooth, deterministic) ----
+	var normals := _compute_normals(scaled_render, tris)
 
 	# --- rig: parse the vendored CC0 skeleton + per-vertex skin weights -------
 	# (Slice 3, §1.5 / §3.) The .mhskel gives the bone hierarchy + joint cubes
@@ -144,15 +148,32 @@ func _run() -> int:
 	if skin_arrays.is_empty():
 		push_error("body_converter: failed to parse skin weights %s" % weights_path)
 		return 1
-	var bones_arr: PackedInt32Array = skin_arrays["bones"]
-	var weights_arr: PackedFloat32Array = skin_arrays["weights"]
-	print("body_converter: skin weights for %d verts (%d unweighted -> root)" % [n, skin_arrays["unweighted"]])
+	var base_bones_arr: PackedInt32Array = skin_arrays["bones"]      # 4 per BASE vert
+	var base_weights_arr: PackedFloat32Array = skin_arrays["weights"]
+	print("body_converter: skin weights for %d base verts (%d unweighted -> root)" % [n, skin_arrays["unweighted"]])
 
-	# --- build the surface arrays ---------------------------------------------
+	# --- expand skin weights onto render verts via render_to_base -------------
+	# ARRAY_BONES/ARRAY_WEIGHTS are keyed PER RENDER VERTEX; the parsed weights are
+	# keyed per BASE vertex. Each render vert that came from base vert b copies b's
+	# 4-wide influence set, so a UV-seam split shares its parent's skinning exactly.
+	var bones_arr := PackedInt32Array()
+	var weights_arr := PackedFloat32Array()
+	bones_arr.resize(rn * MAX_INFLUENCES)
+	weights_arr.resize(rn * MAX_INFLUENCES)
+	for ri in rn:
+		var b := render_to_base[ri]
+		var ro := ri * MAX_INFLUENCES
+		var bo := b * MAX_INFLUENCES
+		for k in MAX_INFLUENCES:
+			bones_arr[ro + k] = base_bones_arr[bo + k]
+			weights_arr[ro + k] = base_weights_arr[bo + k]
+
+	# --- build the surface arrays (per RENDER vertex) -------------------------
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = scaled_base
+	arrays[Mesh.ARRAY_VERTEX] = scaled_render
 	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_TEX_UV] = render_uv
 	arrays[Mesh.ARRAY_INDEX] = tris
 	arrays[Mesh.ARRAY_BONES] = bones_arr
 	arrays[Mesh.ARRAY_WEIGHTS] = weights_arr
@@ -171,18 +192,23 @@ func _run() -> int:
 		if deltas.is_empty():
 			push_error("body_converter: target had no deltas or failed to load: %s" % tpath)
 			return 1
-		# scatter sparse deltas onto a copy of the base, scaled (deltas are in MH
-		# units, same as vertices). A blendshape surface array is the FULL morphed
-		# vertex set (Godot stores absolute positions per blendshape in RELATIVE
-		# mode it subtracts the base internally).
-		var morphed := scaled_base.duplicate()
-		var moved := 0
-		for idx in deltas:
-			var d: Vector3 = deltas[idx]
-			if idx < 0 or idx >= n:
+		# A blendshape surface array is the FULL morphed RENDER vertex set (Godot
+		# stores absolute positions per blendshape; in RELATIVE mode it subtracts the
+		# base internally). The `.target` deltas are keyed by BASE vertex index, so we
+		# scatter each base delta onto EVERY render vert that came from that base vert
+		# (render_to_base) — a UV-seam split moves identically to its parent, keeping
+		# morphs watertight across seams. Deltas are MH units, same scale as verts.
+		var morphed := scaled_render.duplicate()
+		var moved := 0          # render verts displaced
+		var moved_base := {}    # distinct BASE verts displaced (for the manifest)
+		for ri in rn:
+			var b := render_to_base[ri]
+			if not deltas.has(b):
 				continue
-			morphed[idx] = morphed[idx] + Vector3(d.x * MH_TO_METERS, d.y * MH_TO_METERS, d.z * MH_TO_METERS)
+			var d: Vector3 = deltas[b]
+			morphed[ri] = morphed[ri] + Vector3(d.x * MH_TO_METERS, d.y * MH_TO_METERS, d.z * MH_TO_METERS)
 			moved += 1
+			moved_base[b] = true
 		var ba := []
 		ba.resize(Mesh.ARRAY_MAX)
 		ba[Mesh.ARRAY_VERTEX] = morphed
@@ -193,9 +219,9 @@ func _run() -> int:
 			"axis": axis_name,
 			"blend_shape_index": manifest_axes.size(),
 			"source_target": "targets/" + rel,
-			"moved_vertices": moved,
+			"moved_vertices": moved_base.size(),
 		})
-		print("body_converter: blendshape '%s' <- %s (%d verts moved)" % [axis_name, rel, moved])
+		print("body_converter: blendshape '%s' <- %s (%d base verts moved, %d render verts)" % [axis_name, rel, moved_base.size(), moved])
 
 	# add the surface with all blendshapes attached
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, blend_arrays)
@@ -220,6 +246,7 @@ func _run() -> int:
 		},
 		"mh_to_meters": MH_TO_METERS,
 		"vertex_count": n,
+		"render_vertex_count": rn,
 		"triangle_count": tris.size() / 3,
 		"axes": manifest_axes,
 		"rig": {
@@ -490,26 +517,81 @@ func _write_rig_data(rig: Dictionary) -> bool:
 ## helper/joint vertices simply become unreferenced by the rendered index buffer.
 const BODY_GROUP := "body"
 
-## Parse a MakeHuman base.obj: collect `v x y z` in file order, and `f` faces
-## ONLY for the `g body` group (see BODY_GROUP). Quads (a b c d) triangulate to
-## (a b c) + (a c d) with a fixed diagonal. OBJ face indices are 1-based; we
-## return 0-based triangle indices. The full vertex set is returned regardless of
-## group (helper/joint vertices stay addressable by index for the rig + morphs).
+## Parse a MakeHuman base.obj into a RENDER mesh via OBJ corner-expansion.
+##
+## OBJ stores positions (`v`), texture coords (`vt`), and faces whose corners are
+## `v/vt` index pairs. A correct OBJ→engine import must produce ONE render vertex
+## per unique `(v, vt)` corner: a base position referenced under several distinct
+## `vt` indices (a UV seam) becomes several render vertices, each with its own UV.
+## Indexing UVs by the position index alone (or omitting UVs entirely, the bug
+## this replaced) smears the texture across seams. This mesh HAS seams — base.obj
+## has 21334 `vt` for 19158 `v` — so corner-expansion is mandatory.
+##
+## We render ONLY `g body` faces (see BODY_GROUP); helper-* / joint-* faces are
+## skipped so their geometry never renders. Quads (a b c d) triangulate to
+## (a b c) + (a c d) with a fixed diagonal. OBJ indices are 1-based.
+##
+## Returns:
+##   render_pos       PackedVector3Array  — RAW MH-space position per render vert
+##   render_uv        PackedVector2Array  — UV per render vert (OBJ vt; v flipped
+##                                          to Godot's top-left origin)
+##   render_to_base   PackedInt32Array    — render vert -> base `v` index (0-based)
+##   tris             PackedInt32Array     — triangle indices into the render verts
+##   base_vert_count  int                  — full base `v` count (morph/skin/joint
+##                                           indices are keyed by THIS, unchanged)
+##   body_vert_count  int                  — leading base verts in the rendered body
 func _parse_obj(path: String) -> Dictionary:
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
 		push_error("body_converter: cannot open OBJ %s (err %d)" % [path, FileAccess.get_open_error()])
 		return {}
-	var verts := PackedVector3Array()
+	var base_verts := PackedVector3Array()   # all `v`, file order (morph/skin/joint keyed by this)
+	var uvs := PackedVector2Array()           # all `vt`, file order
+	var render_pos := PackedVector3Array()    # one per unique (v,vt) corner
+	var render_uv := PackedVector2Array()
+	var render_to_base := PackedInt32Array()
 	var tris := PackedInt32Array()
+	# (v_idx, vt_idx) corner -> render-vertex index. Keyed by a stable composite int
+	# so identical corners across faces share one render vertex (deterministic).
+	var corner_to_render := {}
 	var in_body := false   # are we inside the `g body` group right now?
 	var body_faces := 0
+	var body_base_vmax := -1   # highest BASE vertex index referenced by a body face
+
+	# Resolve a face corner token "v/vt[/vn]" to a render-vertex index, creating one
+	# on first sight of a (v,vt) pair. Missing vt (e.g. "v" or "v//vn") falls back to
+	# the position index as the UV key with a zero UV (defensive; not present here).
+	var corner := func(tok: String) -> int:
+		var parts := tok.split("/")
+		var vi := int(parts[0].to_int() - 1)   # 1-based -> 0-based base vertex
+		var ti := -1
+		if parts.size() >= 2 and parts[1] != "":
+			ti = int(parts[1].to_int() - 1)    # 1-based -> 0-based texcoord
+		# composite key; +1 so a missing vt (ti=-1 -> 0) never collides with vt 0.
+		var key := vi * 2000000 + (ti + 1)
+		var existing = corner_to_render.get(key, -1)
+		if existing != -1:
+			return existing
+		var ri := render_pos.size()
+		render_pos.append(base_verts[vi])
+		# OBJ uses a bottom-left UV origin; Godot samples top-left -> flip V.
+		var uv := Vector2(0.0, 0.0)
+		if ti >= 0 and ti < uvs.size():
+			var raw := uvs[ti]
+			uv = Vector2(raw.x, 1.0 - raw.y)
+		render_uv.append(uv)
+		render_to_base.append(vi)
+		corner_to_render[key] = ri
+		return ri
+
 	while not f.eof_reached():
 		var line := f.get_line()
 		if line.begins_with("v "):
 			var p := line.split(" ", false)
-			# p[0] == "v"
-			verts.append(Vector3(p[1].to_float(), p[2].to_float(), p[3].to_float()))
+			base_verts.append(Vector3(p[1].to_float(), p[2].to_float(), p[3].to_float()))
+		elif line.begins_with("vt "):
+			var p := line.split(" ", false)
+			uvs.append(Vector2(p[1].to_float(), p[2].to_float()))
 		elif line.begins_with("g "):
 			# OBJ group switch: only `g body` faces are part of the rendered body.
 			var p := line.split(" ", false)
@@ -518,35 +600,40 @@ func _parse_obj(path: String) -> Dictionary:
 			if not in_body:
 				continue   # skip helper-* / joint-* faces (non-rendered geometry)
 			var p := line.split(" ", false)
-			# face verts are p[1..]; each token "vidx/uvidx" — take the vertex index
-			var fi := PackedInt32Array()
+			var c := PackedInt32Array()
 			for i in range(1, p.size()):
-				var tok := p[i]
-				var slash := tok.find("/")
-				var vstr := tok.substr(0, slash) if slash != -1 else tok
-				fi.append(vstr.to_int() - 1)  # 1-based → 0-based
-			if fi.size() == 4:
-				# quad → 2 tris, fixed diagonal v0-v2
-				tris.append(fi[0]); tris.append(fi[1]); tris.append(fi[2])
-				tris.append(fi[0]); tris.append(fi[2]); tris.append(fi[3])
+				c.append(corner.call(p[i]))
+			if c.size() == 4:
+				# quad → 2 tris, fixed diagonal c0-c2
+				tris.append(c[0]); tris.append(c[1]); tris.append(c[2])
+				tris.append(c[0]); tris.append(c[2]); tris.append(c[3])
 				body_faces += 1
-			elif fi.size() == 3:
-				tris.append(fi[0]); tris.append(fi[1]); tris.append(fi[2])
+			elif c.size() == 3:
+				tris.append(c[0]); tris.append(c[1]); tris.append(c[2])
 				body_faces += 1
 			# (ngons >4 not present in this mesh; ignore defensively)
 	f.close()
-	if verts.is_empty() or body_faces == 0:
+	if base_verts.is_empty() or body_faces == 0:
 		push_error("body_converter: no `g %s` faces found in %s" % [BODY_GROUP, path])
 		return {}
-	# Highest body vertex index actually referenced by a body face, +1 = the count
-	# of leading vertices that belong to the rendered body. (In MakeHuman's base.obj
-	# the `g body` group is the contiguous leading vertex block.) The feet-to-origin
-	# lift uses THIS range so helper-* verts — e.g. the skirt that hangs below the
-	# feet — don't drag the body up off the floor.
-	var body_vmax := 0
-	for i in tris:
-		body_vmax = maxi(body_vmax, i)
-	return {"verts": verts, "tris": tris, "body_vert_count": body_vmax + 1}
+	# Leading base verts that belong to the rendered body (the body group is the
+	# contiguous leading `v` block in MakeHuman's base.obj). The feet-to-origin lift
+	# uses THIS range so helper-* verts (e.g. the skirt below the feet) don't drag
+	# the body off the floor. Derived from the base verts actually referenced by the
+	# rendered body faces (highest +1). NOTE: computed here, NOT inside the `corner`
+	# lambda — a GDScript lambda captures outer locals by value, so an assignment to
+	# body_base_vmax inside it would not propagate out.
+	for b in render_to_base:
+		body_base_vmax = maxi(body_base_vmax, b)
+	return {
+		"base_verts": base_verts,
+		"render_pos": render_pos,
+		"render_uv": render_uv,
+		"render_to_base": render_to_base,
+		"tris": tris,
+		"base_vert_count": base_verts.size(),
+		"body_vert_count": body_base_vmax + 1,
+	}
 
 
 ## Parse a `.target`: comment lines start with '#'; data lines are

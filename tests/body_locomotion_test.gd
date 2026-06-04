@@ -113,6 +113,39 @@ func _ready() -> void:
 		_assert("runtime UVs span the atlas (>0.5 each axis)",
 			(umax - umin) > 0.5 and (vmax - vmin) > 0.5,
 			"u span %.3f v span %.3f" % [umax - umin, vmax - vmin])
+		# --- ANATOMICAL-LANDMARK UV CHECK (catches WRONG COORDINATES) ------------
+		# The span/distinct checks above are CHECKERBOARD-BLIND: a UV set that is
+		# V-flipped the wrong way, off-by-one in the OBJ `vt` index, or otherwise
+		# scrambled still spans the atlas and has thousands of distinct values, so it
+		# passes them — yet maps the texture to the WRONG body coordinates. This check
+		# anchors to POSE-INDEPENDENT anatomical landmarks (topmost render vertex =
+		# head crown; bottommost = foot sole) and asserts each lands in the EXPECTED
+		# MakeHuman-atlas sub-region (measured from the correct, verified mesh). A
+		# backwards V-flip swaps the crown's v (~0.58) with the foot's (~0.96); an
+		# off-by-one in the vt index shifts the crown out of its u-band. Either fails
+		# here while sailing through the checkerboard-style asserts above.
+		if rt_mesh != null:
+			var rt2: Array = rt_mesh.surface_get_arrays(0)
+			var lv: PackedVector3Array = rt2[Mesh.ARRAY_VERTEX]
+			var lu: PackedVector2Array = rt2[Mesh.ARRAY_TEX_UV]
+			var y_max := -INF; var y_min := INF; var crown := 0; var sole := 0
+			for i in lv.size():
+				if lv[i].y > y_max: y_max = lv[i].y; crown = i
+				if lv[i].y < y_min: y_min = lv[i].y; sole = i
+			var crown_uv: Vector2 = lu[crown]
+			var sole_uv: Vector2 = lu[sole]
+			_assert("head-crown vertex UV in expected atlas region (u~0.66, v~0.58)",
+				absf(crown_uv.x - 0.661) < 0.06 and absf(crown_uv.y - 0.578) < 0.06,
+				"crown uv=(%.3f, %.3f)" % [crown_uv.x, crown_uv.y])
+			# v~0.96 is the smoking gun for the V-flip: a backwards flip would place
+			# the sole near v~0.04.
+			_assert("foot-sole vertex UV in expected atlas region (u~0.14, v~0.96)",
+				absf(sole_uv.x - 0.135) < 0.06 and absf(sole_uv.y - 0.958) < 0.06,
+				"sole uv=(%.3f, %.3f)" % [sole_uv.x, sole_uv.y])
+			_assert("head-crown and foot-sole UVs in distinct atlas rows (|dv|>0.25)",
+				absf(crown_uv.y - sole_uv.y) > 0.25,
+				"|dv|=%.3f" % absf(crown_uv.y - sole_uv.y))
+
 		# Blendshapes morph POSITION; their normals must be recomputed from the
 		# morphed geometry, not copied from the base (stale base normals shade the
 		# morphed body wrongly and break any future normal-mapped skin). Assert each

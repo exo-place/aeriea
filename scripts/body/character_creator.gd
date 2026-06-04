@@ -42,7 +42,6 @@ var _dragging_pan: bool = false
 
 var _value_labels: Dictionary = {}   ## field -> Label showing current value
 var _sliders: Dictionary = {}        ## field -> HSlider
-var _units: Dictionary = {}          ## field -> unit suffix string ("yr"/"%"/"")
 
 
 func _ready() -> void:
@@ -187,7 +186,7 @@ func _build_ui() -> void:
 
 	var panel := PanelContainer.new()
 	panel.position = Vector2(16, 16)
-	panel.custom_minimum_size = Vector2(360, 0)
+	panel.custom_minimum_size = Vector2(430, 0)
 	canvas.add_child(panel)
 
 	var vbox := VBoxContainer.new()
@@ -205,22 +204,26 @@ func _build_ui() -> void:
 
 	vbox.add_child(HSeparator.new())
 
-	# [field, min, max, step, label, unit] — the BodyState natural-unit headline axes
-	# (body-parameterization.md §2). age is in YEARS (the gate reads >= 18); masculinity
-	# is the single macro sex axis 0–100 (0=feminine, 50=androgynous, 100=masculine);
-	# muscle/weight in %; proportions is the dimensionless 0..1-about-0.5 bidirectional
-	# envelope. height is the Slice A provisional normalized macro-height amount (Slice C
-	# makes it metric cm, §4).
+	# [field, min, max, step, label, lo_pole, hi_pole] — the BodyState natural-unit
+	# headline axes (body-parameterization.md §2). age is in YEARS (the gate reads
+	# >= 18); masculinity is the single macro sex axis 0–100 (0=feminine,
+	# 50=androgynous, 100=masculine); muscle/weight in %; proportions is the
+	# dimensionless 0..1-about-0.5 bidirectional envelope; height is the Slice A
+	# provisional normalized macro-height amount (Slice C makes it metric cm, §4).
+	#
+	# muscle/weight slider ranges are restricted to the functional half (50–100 /
+	# 100–150) because the below-average blend targets don't exist until Slice C.
+	# Slice C's min-anchor import restores the full 0–100 / 50–150 ranges here.
 	var axes := [
-		["age_years", 1.0, 90.0, 0.5, "age", "yr"],
-		["masculinity", 0.0, 100.0, 1.0, "masc (fem←→masc)", "%"],
-		["muscle", 0.0, 100.0, 1.0, "muscle", "%"],
-		["weight", 50.0, 150.0, 1.0, "weight", "%"],
-		["proportions", 0.0, 1.0, 0.01, "proportions", ""],
-		["height", 0.0, 1.0, 0.01, "height (prov.)", ""],
+		["age_years",   1.0, 90.0,  0.5,  "age",         "young",    "old"],
+		["masculinity", 0.0, 100.0, 1.0,  "masculinity",  "feminine", "masculine"],
+		["muscle",      50.0, 100.0, 1.0, "muscle",       "average",  "muscular"],
+		["weight",      100.0, 150.0, 1.0, "weight",      "average",  "heavy"],
+		["proportions", 0.0, 1.0,   0.01, "proportions",  "uncommon", "idealized"],
+		["height",      0.0, 1.0,   0.01, "height",       "shorter",  "taller"],
 	]
 	for spec in axes:
-		_build_axis_row(vbox, spec[0], spec[1], spec[2], spec[3], spec[4], spec[5])
+		_build_axis_row(vbox, spec[0], spec[1], spec[2], spec[3], spec[4], spec[5], spec[6])
 
 	vbox.add_child(HSeparator.new())
 
@@ -233,20 +236,30 @@ func _build_ui() -> void:
 
 
 func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float,
-		step: float, label: String, unit: String) -> void:
+		step: float, label: String, lo_pole: String, hi_pole: String) -> void:
+	# Row layout (per axis):
+	#   [label (110)] [lo-pole (54)] [slider (expand)] [hi-pole (54)] [value (46)]
 	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
 
 	var name_lbl := Label.new()
 	name_lbl.text = label
 	name_lbl.custom_minimum_size = Vector2(110, 0)
 	row.add_child(name_lbl)
 
+	var lo_lbl := Label.new()
+	lo_lbl.text = lo_pole
+	lo_lbl.custom_minimum_size = Vector2(54, 0)
+	lo_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lo_lbl.add_theme_font_size_override("font_size", 10)
+	row.add_child(lo_lbl)
+
 	var slider := HSlider.new()
 	slider.min_value = lo
 	slider.max_value = hi
 	slider.step = step
 	slider.value = float(_body_state.get(field))
-	slider.custom_minimum_size = Vector2(150, 0)
+	slider.custom_minimum_size = Vector2(100, 0)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.value_changed.connect(func(v: float) -> void:
 		_body_state.set(field, v)
@@ -255,24 +268,32 @@ func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float,
 	row.add_child(slider)
 	_sliders[field] = slider
 
+	var hi_lbl := Label.new()
+	hi_lbl.text = hi_pole
+	hi_lbl.custom_minimum_size = Vector2(54, 0)
+	hi_lbl.add_theme_font_size_override("font_size", 10)
+	row.add_child(hi_lbl)
+
 	var value_lbl := Label.new()
-	value_lbl.custom_minimum_size = Vector2(66, 0)
-	value_lbl.text = _format_value(field, unit)
+	value_lbl.custom_minimum_size = Vector2(46, 0)
+	value_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	value_lbl.text = _format_value(field)
 	row.add_child(value_lbl)
 	_value_labels[field] = value_lbl
-	_units[field] = unit
 
 	parent.add_child(row)
 
 
-func _format_value(field: String, unit: String) -> String:
+func _format_value(field: String) -> String:
 	var v := float(_body_state.get(field))
-	if unit == "yr":
-		var adult := " adult" if _body_state.is_adult_body() else " <18"
-		return "%.0f%s%s" % [v, unit, adult]
-	if unit == "%":
-		return "%.0f%s" % [v, unit]
-	return "%.2f" % v
+	match field:
+		"age_years":
+			# Floor display only — the stored value and gate stay continuous.
+			return "%d" % int(floor(v))
+		"masculinity", "muscle", "weight":
+			return "%.0f%%" % v
+		_:
+			return "%.2f" % v
 
 
 ## Project the current BodyState onto the body's blendshapes and refresh labels.
@@ -289,7 +310,7 @@ func _apply_state() -> void:
 		# carry normal deltas, so a GPU-only morph is mis-lit (see BodyState/BodyRig).
 		_rig.apply_body_state(_body_state)
 	for field in _value_labels:
-		(_value_labels[field] as Label).text = _format_value(field, str(_units.get(field, "")))
+		(_value_labels[field] as Label).text = _format_value(field)
 
 
 func _reset_all() -> void:

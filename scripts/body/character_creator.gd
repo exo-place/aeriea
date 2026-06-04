@@ -43,8 +43,30 @@ var _dragging_pan: bool = false
 var _value_labels: Dictionary = {}   ## field -> Label showing current value
 var _sliders: Dictionary = {}        ## field -> HSlider
 
+# ---------------------------------------------------------------------------
+# Edit HISTORY — a branching undo TREE over BodyState dicts (HistoryTree). Every
+# settled axis change commits a node; undo/redo walk the tree; the history panel
+# visualizes branches and jump_to lets you click any node to restore that state.
+# DESIGN.md "lived history" / variety power-fantasy: explore an edit, back up,
+# explore another, keep both branches — that is why this is a tree, not a stack.
+# ---------------------------------------------------------------------------
+const HistoryTreeScript := preload("res://scripts/util/history_tree.gd")
+const CreatorIOScript := preload("res://scripts/body/creator_io.gd")
+
+var _history: HistoryTree
+## Per-axis pending value during a slider drag — committed once on drag-end so we
+## record ONE node per settled change, not one per pixel.
+var _drag_pending: Dictionary = {}   ## field -> bool (a drag is in progress)
+var _suspend_commit: bool = false    ## true while applying a restored state (no commit)
+
+var _history_list: VBoxContainer     ## the history-panel node list (rebuilt on change)
+var _undo_btn: Button
+var _redo_btn: Button
+var _status_lbl: Label               ## export/import feedback
+
 
 func _ready() -> void:
+	_history = HistoryTreeScript.new(_body_state.to_dict(), "initial")
 	_build_environment()
 	_build_body()
 	_build_camera()
@@ -144,6 +166,16 @@ func _update_camera() -> void:
 # ---------------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Ctrl+Z = undo, Ctrl+Shift+Z = redo (history navigation).
+	if event is InputEventKey:
+		var k := event as InputEventKey
+		if k.pressed and not k.echo and k.keycode == KEY_Z and k.ctrl_pressed:
+			if k.shift_pressed:
+				_do_redo()
+			else:
+				_do_undo()
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		match mb.button_index:
@@ -232,7 +264,88 @@ func _build_ui() -> void:
 	reset.pressed.connect(_reset_all)
 	vbox.add_child(reset)
 
+	_build_history_ui(vbox)
+	_build_export_ui(vbox)
+
 	_apply_state()
+	_refresh_history_panel()
+
+
+## Undo/redo buttons + the branching history node list (click a node to jump_to it).
+func _build_history_ui(vbox: VBoxContainer) -> void:
+	vbox.add_child(HSeparator.new())
+
+	var hdr := Label.new()
+	hdr.text = "history (branching undo tree)"
+	vbox.add_child(hdr)
+
+	var nav := HBoxContainer.new()
+	nav.add_theme_constant_override("separation", 4)
+	_undo_btn = Button.new()
+	_undo_btn.text = "Undo (Ctrl+Z)"
+	_undo_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_undo_btn.pressed.connect(_do_undo)
+	nav.add_child(_undo_btn)
+	_redo_btn = Button.new()
+	_redo_btn.text = "Redo (Ctrl+Shift+Z)"
+	_redo_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_redo_btn.pressed.connect(_do_redo)
+	nav.add_child(_redo_btn)
+	vbox.add_child(nav)
+
+	# Scrollable indented node list. Branches read as deeper indentation; the
+	# current node is marked. Clicking a node jumps_to it (restores that state).
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 150)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vbox.add_child(scroll)
+	_history_list = VBoxContainer.new()
+	_history_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_history_list.add_theme_constant_override("separation", 2)
+	scroll.add_child(_history_list)
+
+
+## Export (JSON / JSON+history / PNG / PNG+history) and import (JSON or PNG-with-history).
+func _build_export_ui(vbox: VBoxContainer) -> void:
+	vbox.add_child(HSeparator.new())
+
+	var hdr := Label.new()
+	hdr.text = "export / import"
+	vbox.add_child(hdr)
+
+	var export_btn := Button.new()
+	export_btn.text = "Export all 4 (JSON / +history / PNG / PNG+history)"
+	export_btn.pressed.connect(_do_export)
+	vbox.add_child(export_btn)
+
+	_status_lbl = Label.new()
+	_status_lbl.add_theme_font_size_override("font_size", 10)
+	_status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status_lbl.text = "exports -> user://creator_exports/"
+	vbox.add_child(_status_lbl)
+
+
+func _refresh_history_panel() -> void:
+	if _history_list == null:
+		return
+	for c in _history_list.get_children():
+		c.queue_free()
+	for n in _history.structure():
+		var btn := Button.new()
+		var indent := "    ".repeat(int(n["depth"]))
+		var marker := "* " if bool(n["is_current"]) else "  "
+		var fork := "  <branch>" if int(n["child_count"]) > 1 else ""
+		btn.text = "%s%s%s%s" % [indent, marker, str(n["label"]), fork]
+		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		btn.add_theme_font_size_override("font_size", 11)
+		btn.flat = not bool(n["is_current"])
+		var nid := int(n["id"])
+		btn.pressed.connect(func() -> void: _jump_to_node(nid))
+		_history_list.add_child(btn)
+	if _undo_btn != null:
+		_undo_btn.disabled = not _history.can_undo()
+	if _redo_btn != null:
+		_redo_btn.disabled = not _history.can_redo()
 
 
 func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float,
@@ -261,9 +374,24 @@ func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float,
 	slider.value = float(_body_state.get(field))
 	slider.custom_minimum_size = Vector2(100, 0)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# value_changed fires continuously during a drag: update the live morph each
+	# frame (so the body tracks the slider) but DEBOUNCE the history commit. We
+	# commit one node only when the value SETTLES — on drag-end (drag_ended) or,
+	# for keyboard/click steps that don't drag, on the value_changed itself when no
+	# drag is in progress.
 	slider.value_changed.connect(func(v: float) -> void:
 		_body_state.set(field, v)
 		_apply_state()
+		if not bool(_drag_pending.get(field, false)) and not _suspend_commit:
+			_commit_axis(field, v)
+	)
+	slider.drag_started.connect(func() -> void:
+		_drag_pending[field] = true
+	)
+	slider.drag_ended.connect(func(value_changed: bool) -> void:
+		_drag_pending[field] = false
+		if value_changed and not _suspend_commit:
+			_commit_axis(field, float(_sliders[field].value))
 	)
 	row.add_child(slider)
 	_sliders[field] = slider
@@ -314,9 +442,94 @@ func _apply_state() -> void:
 
 
 func _reset_all() -> void:
+	_suspend_commit = true
 	var neutral := BodyState.new()
 	for field in _sliders:
 		var v := float(neutral.get(field))
 		_body_state.set(field, v)
 		(_sliders[field] as HSlider).value = v
 	_apply_state()
+	_suspend_commit = false
+	# Reset is itself a settled edit -> one history node (preserves prior branch).
+	_commit_axis("reset", 0.0, "reset to neutral")
+	_refresh_history_panel()
+
+
+# ---------------------------------------------------------------------------
+# History actions
+# ---------------------------------------------------------------------------
+
+## Commit the current BodyState as a new history node, labelled by the axis change.
+func _commit_axis(field: String, value: float, override_label: String = "") -> void:
+	var label := override_label
+	if label == "":
+		label = "%s = %s" % [field, _format_value(field)]
+	_history.commit(_body_state.to_dict(), label)
+	_refresh_history_panel()
+
+
+func _do_undo() -> void:
+	if _history.undo():
+		_restore_current()
+
+
+func _do_redo() -> void:
+	if _history.redo():
+		_restore_current()
+
+
+func _jump_to_node(id: int) -> void:
+	if _history.jump_to(id):
+		_restore_current()
+
+
+## Apply the history's current node state onto the body + sliders WITHOUT committing.
+func _restore_current() -> void:
+	var d = _history.current_state()
+	if typeof(d) != TYPE_DICTIONARY:
+		return
+	var bs := BodyState.from_dict(d)
+	_suspend_commit = true
+	for field in _sliders:
+		var v := float(bs.get(field))
+		_body_state.set(field, v)
+		(_sliders[field] as HSlider).value = v
+	_suspend_commit = false
+	_apply_state()
+	_refresh_history_panel()
+
+
+# ---------------------------------------------------------------------------
+# Export — captures the viewport render and writes the four variants.
+# ---------------------------------------------------------------------------
+
+func _do_export() -> void:
+	var png_bytes := await _capture_png_bytes()
+	var stamp := str(Time.get_unix_time_from_system()).replace(".", "")
+	var basename := "creator_%s" % stamp
+	var paths := CreatorIOScript.export_all(_body_state, _history, basename, png_bytes)
+	var lines: Array = []
+	for k in paths:
+		lines.append("%s: %s" % [k, paths[k]])
+	if _status_lbl != null:
+		_status_lbl.text = "exported:\n" + "\n".join(lines)
+	print("[creator] exported:\n", "\n".join(lines))
+
+
+## Render the 3D body to a PNG byte stream, excluding the UI overlay. The UI lives on
+## a CanvasLayer, so a SubViewport-free capture of the root viewport would include it;
+## instead we hide the CanvasLayer for one frame, grab the viewport image, restore it.
+func _capture_png_bytes() -> PackedByteArray:
+	var vp := get_viewport()
+	var canvases: Array = []
+	for c in get_children():
+		if c is CanvasLayer:
+			canvases.append(c)
+			(c as CanvasLayer).visible = false
+	await RenderingServer.frame_post_draw
+	var img := vp.get_texture().get_image()
+	for c in canvases:
+		(c as CanvasLayer).visible = true
+	if img == null:
+		return PackedByteArray()
+	return img.save_png_to_buffer()

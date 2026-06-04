@@ -50,6 +50,7 @@ SUITES=(
   body_locomotion_test
   body_motion_matching_test
   interpreter_slice1_test
+  creator_history_test
 )
 
 # ---------------------------------------------------------------------------

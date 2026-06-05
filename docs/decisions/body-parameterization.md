@@ -672,7 +672,7 @@ The Asian-MMO-style **direct-manipulation** creator: grab the body surface and p
 the modifiers that produce that surface motion engage. **Additive** to the Slice-A
 slider panel + the undo-tree history — both coexist and share one history. Core math
 lives in a **scene-free RefCounted** module (`scripts/body/morph_drag.gd`) so it
-unit-tests headlessly (`tests/morph_drag_test.gd`, 30 assertions); input/UI glue
+unit-tests headlessly (`tests/morph_drag_test.gd`, 39 assertions); input/UI glue
 (raycast, glow overlay, mouse events, history commit) lives in
 `scripts/body/character_creator.gd` around it.
 
@@ -691,28 +691,46 @@ lists sorted per vertex), so the same library+registry always build the same str
    whose **+value target** (bidirectional MAX pole / unipolar single target) is in the
    library, gather its significant per-vertex deltas (≥ `SIGNIFICANT_DELTA_M` = 0.2 mm)
    as its **footprint** + the candidate record `{render_vertex, world +value Δ}`.
-2. **Drop GROSS placement axes** — any modifier whose footprint exceeds
-   `GROSS_FOOTPRINT_FRACTION` (20 %) of the render-vertex total (whole-torso/head
-   translate & scale, body measurements). They stay **slider-editable** but are **not**
-   per-vertex drag candidates — otherwise (having the largest screen motion everywhere)
-   they swamp the local detail axes and an up-drag at the nose translates the whole upper
-   body. This is a **heuristic split**, tuned so per-feature axes (nose/eyes/mouth/cheek/
-   breast/…) stay grabbable while gross axes drop out. On the shipped library: ~14.3 k of
-   14 517 render verts covered; 280 editable modifiers; a face vertex offers ~9–12 local
-   candidates (nose/eye/head-age family) after the gross drop.
+2. Keep **every** non-macro modifier as a per-vertex candidate at each vertex it moves
+   significantly — **including gross placement axes** (whole-torso/head translate & scale,
+   measurements). There is **no footprint-size cut**: the continuous **locality metric**
+   (below) is what keeps gross axes from swamping the pull, with no magic threshold. On the
+   shipped library: ~14.3 k of 14 517 render verts covered; 280 editable modifiers; a face
+   vertex offers ~20–30 candidates (the full nose/eye/head/torso family), of which only the
+   locally-concentrated ones get meaningful drag share.
+
+**Locality metric (`locality_weight`).** The **principled** replacement for the old
+20 %-footprint cut. For a candidate modifier at a hit point, measure how **concentrated**
+its deformation is around the hit:
+`locality = Σ_v(|Δ_v|·gauss(dist(v,hit))) / Σ_v|Δ_v|` — the **fraction of the modifier's
+total +value displacement that lands near the hit**, Gaussian-weighted by footprint-vertex
+distance (`LOCALITY_SIGMA_M` ≈ 3 cm). It is in [0,1], scale-free (normalized by the
+modifier's own total), needs no per-modifier tuning, and is **continuous**: a nose-tip axis
+(all its displacement within a couple cm of the hit) scores ≈1; a whole-torso translate
+(displacement spread over the whole body, a sliver near any one hit) scores ≈0. Gross axes
+fall out by scoring ~0 — the 20 % cliff is gone, and they stay slider-editable.
 
 **Drag-decomposition math (`decompose_drag`).** Given the picked vertex, a screen-pixel
-drag vector, and the camera Basis, for each candidate modifier:
-- Project its **world +value surface-motion direction** `Δ` to screen space via the
-  camera basis: `screen_dir = (Δ·right, −Δ·up)` (y flipped: screen-y is DOWN). `ŝ` =
-  `screen_dir` normalized — the on-screen direction in which **raising** the modifier
-  pushes the surface here. (A modifier moving the surface straight toward/away from the
-  camera has `|screen_dir|≈0` — no in-screen handle — and contributes ≈0.)
-- `value_delta = clamp_to_range( current + (drag·ŝ)/px_per_unit ) − current`. So a drag
-  **along** `ŝ` raises the modifier (positive), **opposite** lowers it, **orthogonal** ≈0;
-  magnitude is **proportional to the projection**; the result is **clamped** to the
-  modifier's registry range ([-1,1] bidirectional / [0,1] unipolar). `px_per_unit`
-  (default 220) is the sensitivity. Pure 2D-screen-frame math → unit-tests viewport-free.
+drag, the camera Basis, the render-vertex world positions, and the world-metres-per-pixel
+at the hit depth (`world_per_px`), for each candidate modifier:
+- Project its **world +value surface-motion direction** `Δ` to a screen direction via the
+  camera basis: `screen_dir = (Δ·right, −Δ·up)` (y flipped: screen-y is DOWN); `ŝ` =
+  normalized. (`|screen_dir|≈0` ⇒ motion straight toward/away from the camera, no in-screen
+  handle ⇒ ≈0.)
+- **Zoom-adaptive sensitivity:** `zoom_factor = world_per_px / REFERENCE_WORLD_PER_PX`
+  (≈0.5 mm/px calibration). `raw = (drag·ŝ)·zoom_factor / px_per_unit`. Because the surface
+  moves fewer screen-pixels per unit when zoomed out (larger `world_per_px`), scaling the
+  value up by `zoom_factor` makes a pixel of drag move the **surface** a consistent number
+  of pixels at **any zoom/distance** — fixing the old fixed-global-`px_per_unit` feel.
+- **Locality-weighted share:** `w = locality^LOCALITY_POWER`; distribute the drag across
+  candidates in proportion to `w` (normalized to the strongest local candidate, below
+  `LOCALITY_FLOOR` zeroed). The **most-local axis dominates**; broad/gross axes take ~none.
+  This replaces the old equal-by-projection split — an up-drag at the nose now pulls the
+  nose family, not nose + every overlapping head/torso/measure axis equally.
+- `value_delta = clamp_to_range( current + share·raw ) − current` — along `ŝ` raises,
+  opposite lowers, orthogonal ≈0; clamped to the registry range ([-1,1]/[0,1]). Pure
+  2D-screen-frame math → unit-tests viewport-free (`world_per_px≤0` and empty positions
+  recover the calibrated, locality-off behaviour for headless callers).
 
 The creator adds each `value_delta` to `BodyState.modifiers[fullName]` (erasing keys that
 return to 0, keeping the map sparse) and re-bakes live through the existing
@@ -741,21 +759,28 @@ drags share the same `HistoryTree`; undo/redo/jump_to/branching all apply unifor
 both modes, so the camera is always reachable without leaving sculpt mode (drag empty
 space to orbit). Hover (no button) in sculpt mode drives the live region glow.
 
-**Honest first-pass rough edges.** (1) The gross-axis cut is a **footprint-fraction
-heuristic**, not a principled locality metric — a mid-scale modifier near the 20 %
-boundary could feel surprisingly broad or get cut. (2) Within the local candidate set the
-decomposition weights every candidate **equally by projection**, so a drag engages *all*
-locally-overlapping modifiers at once (e.g. an up-nose drag moves nose-trans, nose-curve,
-nose-point, nose-scale-depth together) — intuitive as "pull this region" but not a
-single-axis edit; a future refinement could bias toward the most locally-dominant axis.
-(3) The CPU raycast scans the full triangle list per pick (fine for the creator's static
-single body; would want a BVH for many bodies). (4) `px_per_unit` is a fixed global
-sensitivity, not yet depth- or zoom-adaptive.
+**Locality + zoom refinements (resolved rough edges).** The first pass flagged (a) the
+gross-axis cut as a 20 %-footprint *heuristic* not a principled metric, (b) the local set
+weighting every candidate *equally by projection* (so a drag engaged all overlapping axes),
+and (c) `px_per_unit` as a *fixed global* sensitivity. All three are now addressed:
+- **(a)+(b) → the continuous locality metric** (above). The footprint cut is gone; gross
+  axes fall out by scoring ~0 locality (no threshold), and the local set is biased so the
+  **most-local axis dominates** instead of all overlapping axes engaging equally. Verified
+  by render: an up-drag at the nose-tip vertex gives the nose family ~0.05–0.09 each while
+  head/torso/measure axes get ~0.003 (≈20× less) and torso-scale drops to 0.
+- **(c) → zoom/depth-adaptive sensitivity.** `px_per_unit` is now calibrated at
+  `REFERENCE_WORLD_PER_PX` and scaled by the actual world-metres-per-pixel at the hit depth
+  (perspective: `2·z·tan(fov_y/2)/viewport_height`), so a pixel of drag maps to a consistent
+  on-screen surface motion at any zoom. Verified: the same pixel-drag at a 4.28× deeper
+  camera produces 4.28× the value-delta — comparable on-screen reshape.
+
+**Remaining rough edge.** The CPU raycast scans the full triangle list per pick (fine for
+the creator's static single body; would want a BVH for many bodies).
 
 *Files:* `scripts/body/morph_drag.gd` (new core), `scripts/body/character_creator.gd`
 (pick/glow/mode/commit glue), `scripts/body/detail_library.gd` (`render_vertex_count()`
 getter), `tests/morph_drag_test.{gd,tscn}` (+ `SUITES` in `tests/run.sh`).
-*Verify:* `nix run .#test` all green (morph_drag = 30); render proof — region glow reads
+*Verify:* `nix run .#test` all green (morph_drag = 39); render proof — region glow reads
 soft over the nose/cheek; a programmatic up-drag at the nose engages the nose family
 (nose-trans/curve/point/scale-depth up, nose-hump down) and reshapes the nose with outward
 normals and seated proxies. *Touches gate:* **no** — morph axes are anatomy, not a verb

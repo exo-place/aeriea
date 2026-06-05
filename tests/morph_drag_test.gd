@@ -15,6 +15,11 @@
 ##       returned delta only moves up to the boundary).
 ##   (6) GLOW — glow_weights gives a soft smoothstep falloff (max at the hit, 0 past the
 ##       radius, monotonic), and covers the candidate region.
+##   (7) LOCALITY — a tightly-local modifier scores high locality and takes a strictly larger
+##       drag share than a broad/gross axis at the same hit; the gross axis gets ~0 share
+##       (subsuming the old 20%-footprint cut via the continuous metric, no threshold).
+##   (8) ZOOM-ADAPTIVITY — the same pixel drag at two camera depths yields a value-delta that
+##       scales linearly with world_per_px, so on-screen surface motion is zoom-consistent.
 ##
 ## Uses a STUB delta-library (deterministic, tiny) for the pure-math assertions so the core
 ## is exercised without the 24 MB artifact, PLUS a real-library smoke build to prove it wires
@@ -58,7 +63,8 @@ func _ready() -> void:
 	_test_determinism()
 	_test_clamping()
 	_test_glow()
-	_test_gross_axis_exclusion()
+	_test_locality_weighting()
+	_test_zoom_adaptive_sensitivity()
 	_test_real_library_smoke()
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
@@ -220,11 +226,12 @@ func _test_glow() -> void:
 		float(glow.get(10, 0.0)) > float(glow.get(11, 0.0)), "")
 
 
-func _test_gross_axis_exclusion() -> void:
-	print("--- gross placement axis excluded from drag candidacy (slider-only) ---")
-	# A registry with a LOCAL nose modifier (moves 2 verts) and a GROSS torso modifier (moves
-	# 10 verts). With render_vertex_count=12 and GROSS_FOOTPRINT_FRACTION=0.20 -> cap=2 verts.
-	# The torso modifier (10 verts > 2) is gross -> NOT a drag candidate; nose (2 verts) stays.
+func _test_locality_weighting() -> void:
+	print("--- locality-weighted decomposition (replaces the 20% gross cut) ---")
+	# A registry with a LOCAL nose modifier (moves 2 verts, both AT the hit region) and a GROSS
+	# torso axis (moves 10 verts spread across a metre of body, only ONE sliver at the hit).
+	# Both are now drag CANDIDATES at the shared vertex 0 (no footprint cut) — the continuous
+	# locality metric is what decides the pull: the nose dominates, the gross axis scores ~0.
 	var reg := {
 		"modifiers": [
 			{"full_name": "nose/nose-tip", "kind": ModifierRegistry.KIND_UNIPOLAR,
@@ -236,24 +243,102 @@ func _test_gross_axis_exclusion() -> void:
 		],
 	}
 	var lib := StubLib.new()
+	# nose-tip: verts 0 & 1 both move +Y, tightly together. Vert 1 is NOT touched by the torso.
 	lib.add("nose/nose-tip-incr.target", [[0, Vector3(0, 0.005, 0)], [1, Vector3(0, 0.005, 0)]])
-	var torso_recs := []
-	for i in range(10):   # 10 verts incl. vert 0 (shared with the nose) -> gross
+	# torso: vert 0 (shared with the nose) + verts 2..9 all move +Y — spread across the body.
+	var torso_recs := [[0, Vector3(0, 0.05, 0)]]
+	for i in range(2, 10):
 		torso_recs.append([i, Vector3(0, 0.05, 0)])
 	lib.add("torso/torso-trans-up.target", torso_recs)
 	var md := MorphDrag.new()
 	md.build_accel(reg, lib, 12)
-	# Both remain EDITABLE (slider-reachable).
+
+	# Both remain EDITABLE and both are now CANDIDATES at vertex 0 (no gross cut).
 	var ed := md.editable_names()
-	_assert("gross axis still editable (slider-only)", ed.has("torso/torso-trans-down|up"), "ed=%s" % str(ed))
-	# But vertex 0 (moved by BOTH) lists ONLY the local nose modifier as a drag candidate.
+	_assert("gross axis still editable (slider-reachable)", ed.has("torso/torso-trans-down|up"), "ed=%s" % str(ed))
 	var c0 := md.candidate_names_at(0)
-	_assert("vert 0 drag-candidate = [nose] only (gross torso axis dropped)",
-		c0.size() == 1 and c0[0] == "nose/nose-tip", "c0=%s" % str(c0))
-	# A drag at vert 0 engages the nose, never the gross torso translate.
-	var d := md.decompose_drag(0, Vector2(0, -100), Basis.IDENTITY, {}, 200.0)
-	_assert("drag at a gross+local vertex engages the LOCAL modifier, not the gross axis",
-		d.has("nose/nose-tip") and not d.has("torso/torso-trans-down|up"), "d=%s" % str(d))
+	_assert("vert 0 lists BOTH candidates (no footprint cut anymore)",
+		c0.size() == 2 and c0.has("nose/nose-tip") and c0.has("torso/torso-trans-down|up"),
+		"c0=%s" % str(c0))
+
+	# Positions: the hit is at vert 0; the nose's other vert (1) sits 5mm away (tight); the
+	# torso's other verts (2..9) march away in +X across ~1m (broad). So at the hit, nose's
+	# displacement is concentrated nearby; torso's is mostly far.
+	var positions := PackedVector3Array()
+	positions.resize(10)
+	positions[0] = Vector3(0, 1.5, 0)            # hit
+	positions[1] = Vector3(0.005, 1.5, 0)        # nose's 2nd vert — 5mm away
+	for i in range(2, 10):
+		positions[i] = Vector3(0.12 * float(i), 1.5, 0)  # torso verts marching off in +X
+	var hit := positions[0]
+
+	# LOCALITY: nose (tight) scores high, torso (broad) scores low.
+	var loc_nose := md.locality_weight("nose/nose-tip", hit, positions)
+	var loc_torso := md.locality_weight("torso/torso-trans-down|up", hit, positions)
+	_assert("tightly-local modifier scores HIGH locality (near 1)", loc_nose > 0.8,
+		"loc_nose=%.4f" % loc_nose)
+	_assert("broad/gross modifier scores LOW locality", loc_torso < 0.3,
+		"loc_torso=%.4f" % loc_torso)
+	_assert("local locality strictly exceeds gross locality", loc_nose > loc_torso,
+		"%.4f vs %.4f" % [loc_nose, loc_torso])
+
+	# DECOMPOSE with positions -> the up-drag is dominated by the LOCAL nose; the gross torso
+	# axis gets ~0 share (subsuming the old 20%-cut: the gross axis does NOT dominate).
+	var d := md.decompose_drag(0, Vector2(0, -100), Basis.IDENTITY, {},
+		MorphDrag.DEFAULT_PX_PER_UNIT, hit, positions)
+	_assert("local nose engages on the up-drag", d.has("nose/nose-tip") and float(d["nose/nose-tip"]) > 0.0,
+		"d=%s" % str(d))
+	var nose_share := float(d.get("nose/nose-tip", 0.0))
+	var torso_share := float(d.get("torso/torso-trans-down|up", 0.0))
+	_assert("local nose gets a STRICTLY larger drag share than the gross torso axis",
+		nose_share > absf(torso_share) * 4.0, "nose=%.4f torso=%.4f" % [nose_share, torso_share])
+	_assert("gross axis does NOT dominate (≈0 share via locality, not a threshold)",
+		absf(torso_share) < 0.05, "torso=%.4f" % torso_share)
+
+	# A drag AT a purely-local vertex (vert 1, only the nose touches it) engages only the nose.
+	var d1 := md.decompose_drag(1, Vector2(0, -100), Basis.IDENTITY, {},
+		MorphDrag.DEFAULT_PX_PER_UNIT, positions[1], positions)
+	_assert("purely-local vertex engages only its local modifier",
+		d1.has("nose/nose-tip") and not d1.has("torso/torso-trans-down|up"), "d1=%s" % str(d1))
+
+
+func _test_zoom_adaptive_sensitivity() -> void:
+	print("--- zoom/depth-adaptive sensitivity (world_per_px scales the pull) ---")
+	# One modifier moving +Y at the hit. The SAME pixel drag at two different camera depths
+	# should produce the same ON-SCREEN surface motion — i.e. the value-delta scales INVERSELY
+	# with world_per_px (which itself scales with depth). Zoomed OUT (more metres per pixel) ->
+	# a pixel of drag should move the value MORE (because each unit moves fewer pixels on screen).
+	var s := _stub_setup()
+	var md: MorphDrag = s[0]
+	var cam := Basis.IDENTITY
+	# nose +value at vert 10 is world +Y -> screen (0,-1). An up-drag engages it. Keep the drag
+	# small so neither depth's value clamps at the [-1,1] range end (we're testing the ratio).
+	var drag := Vector2(0, -20)
+	# Provide a hit + positions so locality = 1 (single modifier, all displacement at the hit).
+	var positions := PackedVector3Array()
+	positions.resize(60)
+	for i in 60:
+		positions[i] = Vector3(0, 1.5, 0)
+	var hit := positions[10]
+
+	# Near depth: world_per_px small (zoomed in). Far depth: world_per_px large (zoomed out).
+	var wpp_near := 0.0005   # 0.5mm per pixel at close range
+	var wpp_far := 0.002     # 2mm per pixel — 4× further / zoomed out
+	var d_near := md.decompose_drag(10, drag, cam, {}, MorphDrag.DEFAULT_PX_PER_UNIT, hit, positions, wpp_near)
+	var d_far := md.decompose_drag(10, drag, cam, {}, MorphDrag.DEFAULT_PX_PER_UNIT, hit, positions, wpp_far)
+	var v_near := float(d_near.get("nose/nose-hump-decr|incr", 0.0))
+	var v_far := float(d_far.get("nose/nose-hump-decr|incr", 0.0))
+	_assert("both depths produce a non-zero pull", v_near > 0.0 and v_far > 0.0,
+		"near=%.5f far=%.5f" % [v_near, v_far])
+	# value-delta ∝ 1/world_per_px (the surface's screen-pixel motion per unit shrinks with
+	# world_per_px). wpp_far = 4× wpp_near -> v_far should be 4× v_near.
+	_assert("value-delta scales as 1/world_per_px (depth-adaptive: zoomed-out pull = 4× zoomed-in)",
+		absf(v_far - 4.0 * v_near) < 1e-5, "near=%.6f far=%.6f ratio=%.3f" % [v_near, v_far, v_far / v_near])
+
+	# Determinism: same depth, same inputs -> identical delta.
+	var d_near2 := md.decompose_drag(10, drag, cam, {}, MorphDrag.DEFAULT_PX_PER_UNIT, hit, positions, wpp_near)
+	_assert("zoom-adaptive decomposition is deterministic",
+		JSON.stringify(d_near) == JSON.stringify(d_near2), "%s vs %s" % [str(d_near), str(d_near2)])
 
 
 func _test_real_library_smoke() -> void:

@@ -355,8 +355,19 @@ func _apply_morph_drag(drag_screen: Vector2) -> void:
 	if _morph == null or _drag_vertex < 0:
 		return
 	var cam_basis := _camera.global_transform.basis
+	# Locality bias needs the hit + render-vertex positions in ONE consistent frame; use the
+	# skeleton-local rest space (the same frame glow_weights uses), converting the world hit in.
+	var inv := _rig.skeleton.global_transform.affine_inverse()
+	var hit_local: Vector3 = inv * _drag_hit_pos
+	# ZOOM/DEPTH-ADAPTIVE sensitivity: the world-metres a screen pixel spans at the hit's depth.
+	# Perspective camera: world_per_px = 2·z·tan(fov_y/2) / viewport_height, where z is the
+	# hit's view-space depth (distance along the camera's forward -Z). So a pixel of drag maps
+	# to a CONSISTENT on-screen surface motion whether zoomed in or out.
+	var world_per_px := _world_per_pixel_at(_drag_hit_pos)
 	# Current modifier values so the core clamps against the live state.
-	var deltas: Dictionary = _morph.decompose_drag(_drag_vertex, drag_screen, cam_basis, _body_state.modifiers)
+	var deltas: Dictionary = _morph.decompose_drag(_drag_vertex, drag_screen, cam_basis,
+		_body_state.modifiers, MorphDragScript.DEFAULT_PX_PER_UNIT, hit_local, _glow_base_pos,
+		world_per_px)
 	if deltas.is_empty():
 		return
 	for full_name in deltas:
@@ -368,9 +379,29 @@ func _apply_morph_drag(drag_screen: Vector2) -> void:
 		_drag_accum[full_name] = float(_drag_accum.get(full_name, 0.0)) + float(deltas[full_name])
 	_apply_state()
 	# Keep the glow on the active region while dragging (re-pick the vertex's footprint).
-	var inv := _rig.skeleton.global_transform.affine_inverse()
-	var weights: Dictionary = _morph.glow_weights(_drag_vertex, inv * _drag_hit_pos, _glow_base_pos)
+	var weights: Dictionary = _morph.glow_weights(_drag_vertex, hit_local, _glow_base_pos)
 	_rebuild_glow_mesh(weights)
+
+
+## World metres that one screen pixel spans at `world_pos`'s DEPTH, under the current camera —
+## the zoom/depth-adaptive drag scale. Perspective: at view-space depth z (the hit's distance
+## along the camera's forward axis), the viewport's vertical extent in world units is
+## 2·z·tan(fov_y/2), so each pixel spans that over the viewport height. Falls back to a fixed
+## small value if the camera/viewport is unavailable (keeps the drag responsive, not frozen).
+func _world_per_pixel_at(world_pos: Vector3) -> float:
+	if _camera == null:
+		return 0.0
+	var vp_size := _camera.get_viewport().get_visible_rect().size
+	var vh := vp_size.y
+	if vh <= 0.0:
+		return 0.0
+	# View-space depth: project the hit onto the camera's forward (-Z) axis.
+	var fwd := -_camera.global_transform.basis.z
+	var z := absf((world_pos - _camera.global_position).dot(fwd))
+	if z <= 0.0:
+		return 0.0
+	var fov_y := deg_to_rad(_camera.fov)
+	return 2.0 * z * tan(fov_y * 0.5) / vh
 
 
 ## End a morph drag: commit ONE history node labelled by the dominant modifier(s).

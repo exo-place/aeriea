@@ -220,13 +220,14 @@ func _ready() -> void:
 	var hip_l := rig.skeleton.find_bone("upperleg01.L")
 	var rest_q := rig.skeleton.get_bone_rest(hip_l).basis.get_rotation_quaternion()
 	# HARD REQUIREMENT: a still-standing gameplay body is NEVER in the skeleton's
-	# neutral/bind pose — it holds the authored RELAXED-IDLE stance. So at rest a
+	# neutral/bind pose — it holds the captured MOCAP IDLE stance (the procedural
+	# fallback seeds its idle from the same zero-goal Neutral_ID match). So at rest a
 	# tracked joint's pose must DIFFER from its bind rotation beyond a threshold.
 	# (The old test asserted the opposite — "idle near rest" — which was the defect.)
 	var arm_l := rig.skeleton.find_bone("upperarm01.L")
 	var arm_rest := rig.skeleton.get_bone_rest(arm_l).basis.get_rotation_quaternion()
 	var arm_idle := rig.skeleton.get_bone_pose_rotation(arm_l)
-	_assert("idle is NOT the bind/rest pose (relaxed stand, arm adducted)",
+	_assert("idle is NOT the bind/rest pose (mocap stand, arm down at side)",
 		arm_rest.angle_to(arm_idle) > 0.3,
 		"upperarm.L idle vs rest angle=%.4f rad" % arm_rest.angle_to(arm_idle))
 	# The legs also settle off the spread bind pose at idle.

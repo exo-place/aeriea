@@ -38,6 +38,15 @@ extends Node
 
 const SRC_DIR_DEFAULT := "res://vendor/100style-cc-by/100STYLE"
 const OUT_DB := "res://assets/body/locomotion_mm.res"
+const RIG_PATH := "res://assets/body/base_body_rig.json"
+
+## Arm bones whose BVH bind (T-pose, arm-out) differs from the MH bind (A-pose,
+## arm-down). These retarget by SEGMENT DIRECTION (A-pose-zeroed); every other
+## mapped bone uses the full de-yawed global orientation (BVH/MH binds agree).
+const ARM_BONES := {
+	"upperarm01.L": true, "lowerarm01.L": true,
+	"upperarm01.R": true, "lowerarm01.R": true,
+}
 
 ## Sub-sample stride over the 60fps BVH (keeps the committed DB compact while
 ## preserving locomotion detail). 60fps / 4 = 15 fps sample rate.
@@ -82,6 +91,55 @@ const BONE_MAP := {
 	"lowerarm01.R":  ["RightElbow", "RightForeArm", "RightLowerArm"],
 	"clavicle.L":    ["LeftCollar", "LeftClavicle"],
 	"clavicle.R":    ["RightCollar", "RightClavicle"],
+}
+
+## For each mapped MH bone, the rig-JSON bone whose HEAD gives this bone's TAIL —
+## so head→tail is the bone's REST DIRECTION in MH space. Used to build the
+## rest-orientation alignment (BVH bind dir → MH bind dir) per bone. End bones
+## (foot/head/forearm/lowerleg) point at a representative descendant tip.
+const MH_TAIL := {
+	"root":          "spine05",
+	"spine01":       "spine02",
+	"spine03":       "neck01",
+	"neck01":        "head",
+	"head":          "__yup",        # no further child of interest; rest dir = +Y
+	"upperleg01.L":  "lowerleg01.L",
+	"lowerleg01.L":  "foot.L",
+	"foot.L":        "toe1-1.L",
+	"upperleg01.R":  "lowerleg01.R",
+	"lowerleg01.R":  "foot.R",
+	"foot.R":        "toe1-1.R",
+	"clavicle.L":    "upperarm01.L",
+	"upperarm01.L":  "lowerarm01.L",
+	"lowerarm01.L":  "wrist.L",
+	"clavicle.R":    "upperarm01.R",
+	"upperarm01.R":  "lowerarm01.R",
+	"lowerarm01.R":  "wrist.R",
+}
+
+## For each mapped MH bone, the BVH joint whose OFFSET gives the corresponding
+## bone segment's REST DIRECTION (the child joint along the same limb segment in
+## the 100STYLE skeleton). The segment dir = the child's OFFSET (joint-local, but
+## at the zero/bind pose all ancestor rotations are identity so it is also the
+## world-space bind direction of that segment).
+const BVH_TAIL := {
+	"root":          "Chest",
+	"spine01":       "Chest2",
+	"spine03":       "Neck",
+	"neck01":        "Head",
+	"head":          "__yup",
+	"upperleg01.L":  "LeftKnee",
+	"lowerleg01.L":  "LeftAnkle",
+	"foot.L":        "LeftToe",
+	"upperleg01.R":  "RightKnee",
+	"lowerleg01.R":  "RightAnkle",
+	"foot.R":        "RightToe",
+	"clavicle.L":    "LeftShoulder",
+	"upperarm01.L":  "LeftElbow",
+	"lowerarm01.L":  "LeftWrist",
+	"clavicle.R":    "RightShoulder",
+	"upperarm01.R":  "RightElbow",
+	"lowerarm01.R":  "RightWrist",
 }
 
 ## The MakeHuman-bone hierarchy among the mapped bones (nearest mapped ancestor),
@@ -399,16 +457,36 @@ func _retarget_clip(clip: Dictionary, bone_names: PackedStringArray) -> Array:
 		ch_base[k] = acc
 		acc += (joints[k]["channels"] as Array).size()
 
-	# REST capture (frame 0) — the BVH global rotation of every joint in its rest
-	# pose. Retargeting uses the DELTA from rest (G(frame)·G(rest)⁻¹), which is
-	# invariant to the two skeletons' differing rest orientations: both characters
-	# start from their own neutral pose, and we transfer the *change*.
-	var rest_global_rot := _global_rots_at_frame(joints, ch_base, motion, total_channels, 0, nj)
+	# --- FRAME-OF-REFERENCE: rest-relative LOCAL retarget ---------------------
+	# THE BUG THIS REPLACES: the old retarget used BVH MOTION frame 0 as the "rest"
+	# reference and transferred the GLOBAL rotation delta G(f)·G(0)⁻¹. But a 100STYLE
+	# MOTION frame 0 is NOT a neutral bind pose — it is an arbitrary already-posed
+	# capture frame (e.g. Neutral_ID frame 0 has the Hips yawed 74° and the left
+	# elbow bent ~100°). So every emitted pose carried the NEGATION of that arbitrary
+	# frame: a genuine still-standing idle came out with the root thrown ~65° and the
+	# forearm ~94° off — the documented contortion.
+	#
+	# THE FIX (global-orientation transfer with per-bone bind alignment): the MH mesh
+	# is bound in an A-POSE while the MH bone rest bases are world-identity (the A-pose
+	# lives in the SKIN, not the bone rests — see body_rig.gd). The BVH bind pose is a
+	# T-POSE. So we transfer the BVH joint's GLOBAL orientation, re-expressed in the MH
+	# bone's frame by R_align (the rotation carrying the BVH bind segment direction onto
+	# the MH bind segment direction), then convert to an MH-LOCAL pose via the MH parent's
+	# global. Because the MH global rest is identity for every bone, MH-local pose =
+	# (parent target global)⁻¹ · (this bone's target global). At a relaxed capture (arm
+	# hanging ≈ the A-pose mesh direction) this lands the MH arm bone near identity — no
+	# double-counted A-pose offset — which is exactly a natural stand.
+	#
+	# ROOT FACING is sim-owned (the player controller drives heading); it must NEVER be
+	# baked into a bone pose. The root's GLOBAL orientation has its world YAW stripped
+	# (lean/tilt kept) so a turned-in-capture idle stands facing forward, and the whole
+	# upper-body chain inherits the de-yawed frame (no spurious 65° root throw).
+	_build_dir_caches(jidx, joints)
 
 	var out := []
 	var fi := 0
 	while fi < frames:
-		# global rotations + transforms this frame
+		# global rotations (for the transfer) + transforms (root pos/facing + feet).
 		var res := _fk_frame(joints, ch_base, motion, total_channels, fi, nj)
 		var global_rot: Array = res["grot"]
 		var gxf: Array = res["gxf"]
@@ -424,26 +502,46 @@ func _retarget_clip(clip: Dictionary, bone_names: PackedStringArray) -> Array:
 				foot_l = (root_t.affine_inverse() * (gxf[foot_l_idx] as Transform3D)).origin * 0.01
 			if foot_r_idx >= 0:
 				foot_r = (root_t.affine_inverse() * (gxf[foot_r_idx] as Transform3D)).origin * 0.01
-			# Per mapped MH bone: GLOBAL rotation delta from rest, then convert to
-			# MH-local via the nearest mapped MH parent's delta (chain-correct).
-			var bone_delta := {}   # MH bone -> global delta quat
-			for tb in bone_names:
-				if target_to_bvh.has(tb):
-					var ji: int = target_to_bvh[tb]
-					var g: Quaternion = global_rot[ji]
-					var gr: Quaternion = rest_global_rot[ji]
-					bone_delta[tb] = g * gr.inverse()
+			# Strip the world yaw of the root's GLOBAL orientation; every mapped bone's
+			# captured direction is then re-expressed relative to this de-yawed root frame
+			# so the whole body is facing-invariant (facing is sim-owned).
+			var root_g: Quaternion = global_rot[target_to_bvh.get("root", 0)] if target_to_bvh.has("root") else Quaternion.IDENTITY
+			var yaw_inv := _yaw_only(root_g).inverse()
+			# Target MH GLOBAL orientation per mapped bone. The MH bone rests are world-
+			# identity, so for the torso/legs (whose BVH bind segment direction matches the
+			# MH bind direction) the de-yawed BVH global IS the MH target global directly —
+			# this gave a natural root/spine/legs (root ≈ 7°, legs ≈ 10° at idle). The ARMS
+			# differ: BVH binds them in a T-pose, MH binds them A-posed (in the MESH). For
+			# those bones we pre-multiply by the per-bone A_OFFSET (the A-pose↔T-pose bind
+			# rotation), so a captured arm that hangs ≈ the A-pose lands near identity
+			# instead of carrying the full T→side swing (the earlier 76° double-count).
+			var tgt_global := {}
+			for tb in MH_PARENT.keys():
+				if not target_to_bvh.has(tb):
+					tgt_global[tb] = Quaternion.IDENTITY
+					continue
+				var g: Quaternion = (yaw_inv * (global_rot[target_to_bvh[tb]] as Quaternion)).normalized()
+				if ARM_BONES.has(tb) and _mh_dir_cache.has(tb) and _bvh_dir_cache.has(tb):
+					# DIRECTION transfer (A-pose mesh dir → captured dir): the T/A bind
+					# mismatch makes the arms' full orientation transfer double-count the
+					# A-pose, so the arms map by SEGMENT DIRECTION (zeroed at the A-pose).
+					var cap_dir: Vector3 = (g * (_bvh_dir_cache[tb] as Vector3)).normalized()
+					tgt_global[tb] = _shortest_arc(_mh_dir_cache[tb], cap_dir)
 				else:
-					bone_delta[tb] = Quaternion.IDENTITY
+					# GLOBAL-ORIENTATION transfer (torso / legs / root): BVH and MH bind
+					# directions agree, so the de-yawed BVH global IS the MH target global,
+					# preserving twist (a natural root/spine/legs).
+					tgt_global[tb] = g
 			var pose := PackedFloat32Array(); pose.resize(nbones * 4)
 			for bi in nbones:
 				var tb: String = bone_names[bi]
-				var d: Quaternion = bone_delta.get(tb, Quaternion.IDENTITY)
-				var par: String = MH_PARENT.get(tb, "")
-				var q := d
-				if par != "" and bone_delta.has(par):
-					q = (bone_delta[par] as Quaternion).inverse() * d
-				q = q.normalized()
+				var q := Quaternion.IDENTITY
+				if tgt_global.has(tb) and target_to_bvh.has(tb):
+					var par: String = MH_PARENT.get(tb, "")
+					if par != "" and tgt_global.has(par):
+						q = ((tgt_global[par] as Quaternion).inverse() * (tgt_global[tb] as Quaternion)).normalized()
+					else:
+						q = (tgt_global[tb] as Quaternion)
 				pose[bi * 4 + 0] = q.x
 				pose[bi * 4 + 1] = q.y
 				pose[bi * 4 + 2] = q.z
@@ -452,6 +550,87 @@ func _retarget_clip(clip: Dictionary, bone_names: PackedStringArray) -> Array:
 				"foot_l": foot_l, "foot_r": foot_r})
 		fi += 1
 	return out
+
+
+## Normalized REST (bind) segment directions per mapped bone, in each skeleton's
+## own world-aligned bind frame. The retarget aligns the MH bone's rest direction
+## onto the captured BVH-segment direction, so these caches are the zero reference.
+var _mh_dir_cache := {}
+var _bvh_dir_cache := {}
+
+func _build_dir_caches(jidx: Dictionary, joints: Array) -> void:
+	_mh_dir_cache = {}
+	_bvh_dir_cache = {}
+	var mh_head := _load_mh_heads()
+	for tb in MH_PARENT.keys():
+		var bvh_dir := _bvh_bind_dir(tb, jidx, joints)
+		var mh_dir := _mh_bind_dir(tb, mh_head)
+		if bvh_dir.length() < 1e-5 or mh_dir.length() < 1e-5:
+			continue
+		_bvh_dir_cache[tb] = bvh_dir.normalized()
+		_mh_dir_cache[tb] = mh_dir.normalized()
+
+
+## BVH bind segment direction = the child joint's OFFSET (world dir at bind, since
+## all ancestor rotations are identity in the bind pose). Y-up cm; direction only.
+func _bvh_bind_dir(tb: String, jidx: Dictionary, joints: Array) -> Vector3:
+	var tail: String = BVH_TAIL.get(tb, "")
+	if tail == "__yup":
+		return Vector3.UP
+	if tail == "" or not jidx.has(tail):
+		return Vector3.ZERO
+	return joints[int(jidx[tail])]["offset"]
+
+
+## MH bind segment direction = head(bone) → head(tail bone), from the rig JSON.
+func _mh_bind_dir(tb: String, mh_head: Dictionary) -> Vector3:
+	var tail: String = MH_TAIL.get(tb, "")
+	if tail == "__yup":
+		return Vector3.UP
+	if not mh_head.has(tb) or not mh_head.has(tail):
+		return Vector3.ZERO
+	return (mh_head[tail] as Vector3) - (mh_head[tb] as Vector3)
+
+
+func _load_mh_heads() -> Dictionary:
+	var f := FileAccess.open(RIG_PATH, FileAccess.READ)
+	if f == null:
+		return {}
+	var data = JSON.parse_string(f.get_as_text())
+	f.close()
+	var out := {}
+	if data == null or not (data is Dictionary) or not data.has("bones"):
+		return out
+	for bd in data["bones"]:
+		var h: Array = bd["head"]
+		out[bd["name"]] = Vector3(h[0], h[1], h[2])
+	return out
+
+
+## Shortest-arc quaternion rotating unit vector a onto unit vector b.
+func _shortest_arc(a: Vector3, b: Vector3) -> Quaternion:
+	var d := a.dot(b)
+	if d >= 0.999999:
+		return Quaternion.IDENTITY
+	if d <= -0.999999:
+		# antiparallel — rotate 180° about any perpendicular axis.
+		var axis := a.cross(Vector3.UP)
+		if axis.length() < 1e-5:
+			axis = a.cross(Vector3.RIGHT)
+		return Quaternion(axis.normalized(), PI)
+	var axis2 := a.cross(b).normalized()
+	return Quaternion(axis2, acos(clampf(d, -1.0, 1.0)))
+
+
+## The YAW (twist about world UP) component of a rotation — swing/twist decomposition.
+## Multiplying a global by _yaw_only(root_global)⁻¹ removes the body's world facing.
+func _yaw_only(q: Quaternion) -> Quaternion:
+	var v := Vector3(q.x, q.y, q.z)
+	var proj := Vector3.UP * v.dot(Vector3.UP)
+	var twist := Quaternion(proj.x, proj.y, proj.z, q.w)
+	if twist.length_squared() < 1e-12:
+		return Quaternion.IDENTITY
+	return twist.normalized()
 
 
 ## Compute every BVH joint's LOCAL rotation + LOCAL position for one frame.
@@ -499,13 +678,7 @@ func _fk_frame(joints: Array, ch_base: Array, motion: PackedFloat32Array,
 		else:
 			gxf[k] = (gxf[p] as Transform3D) * lt
 			grot[k] = (grot[p] as Quaternion) * (local_rot[k] as Quaternion)
-	return {"gxf": gxf, "grot": grot}
-
-
-## Just the global rotations at a frame (for rest capture).
-func _global_rots_at_frame(joints: Array, ch_base: Array, motion: PackedFloat32Array,
-		total_channels: int, fi: int, nj: int) -> Array:
-	return _fk_frame(joints, ch_base, motion, total_channels, fi, nj)["grot"]
+	return {"gxf": gxf, "grot": grot, "lrot": local_rot}
 
 
 func _list_bvh(dir: String) -> Array:

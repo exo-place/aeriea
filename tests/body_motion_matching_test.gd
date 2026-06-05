@@ -57,6 +57,25 @@ func _ready() -> void:
 		tags.has("idle") and tags.has("walk") and tags.has("run") and tags.has("turn"),
 		str(db.clip_tags))
 
+	# --- 1b. RETARGET FRAME-OF-REFERENCE (regression) ------------------------
+	# The retarget transfers each BVH joint's DE-YAWED global orientation against the
+	# two skeletons' true BIND poses. The OLD retarget used BVH MOTION frame 0 (an
+	# arbitrary already-posed capture frame) as its "rest" reference, so a genuine
+	# still-standing idle came out with the root thrown ~65° (≈1.13 rad) and the
+	# forearm ~94° off (≈1.64 rad). These assertions pin the corrected frame: at the
+	# matched idle frame the root and forearm MH-local pose rotations must be SMALL
+	# (a natural stand). They FAIL under the old mis-framed retarget.
+	var mm0 := MotionMatcher.new(); mm0.setup(db)
+	var f_idle0 := mm0.search(Vector2.ZERO, 0.0)
+	var bi_root := db.bone_names.find("root")
+	var bi_farm := db.bone_names.find("lowerarm01.L")
+	var ang_root := _pose_angle(db, f_idle0, bi_root)
+	var ang_farm := _pose_angle(db, f_idle0, bi_farm)
+	_assert("retarget: idle root pose is upright (< 25°, was ~65° under old retarget)",
+		ang_root < deg_to_rad(25.0), "root idle angle=%.1f°" % rad_to_deg(ang_root))
+	_assert("retarget: idle forearm pose is relaxed (< 60°, was ~94° under old retarget)",
+		ang_farm < deg_to_rad(60.0), "lowerarm.L idle angle=%.1f°" % rad_to_deg(ang_farm))
+
 	# --- 2. search determinism ------------------------------------------------
 	var m1 := MotionMatcher.new(); m1.setup(db)
 	var m2 := MotionMatcher.new(); m2.setup(db)
@@ -119,9 +138,10 @@ func _ready() -> void:
 		_assert("MM walk goal poses the leg away from rest", rest_q.angle_to(walk_q) > 0.05,
 			"angle=%.4f rad, frame=%d" % [rest_q.angle_to(walk_q), rig.motion_matched_frame()])
 
-		# HARD REQUIREMENT: at a ZERO (idle) goal the gameplay body holds the authored
-		# RELAXED-IDLE stance, NEVER the skeleton's neutral/bind pose and NEVER a
-		# blend-to-rest. So a tracked joint at idle must differ from its bind rotation.
+		# HARD REQUIREMENT: at a ZERO (idle) goal the gameplay body holds the genuine
+		# captured MOCAP idle stand (Neutral_ID), NEVER the skeleton's neutral/bind pose
+		# and NEVER a blend-to-rest. So a tracked joint at idle must differ from its bind
+		# rotation. (The stand is mocap now — the authored stopgap from 66e7d47 is gone.)
 		var arm := rig.skeleton.find_bone("upperarm01.L")
 		var arm_rest := rig.skeleton.get_bone_rest(arm).basis.get_rotation_quaternion()
 		rig.set_movement_state(true, 0.0, Vector2.ZERO, 0.0)
@@ -129,7 +149,7 @@ func _ready() -> void:
 		for i in 12:
 			rig.apply_pose(1.0 / 60.0)
 		var arm_idle := rig.skeleton.get_bone_pose_rotation(arm)
-		_assert("MM idle goal holds the relaxed stand, NOT the bind/rest pose",
+		_assert("MM idle goal holds the mocap stand, NOT the bind/rest pose",
 			arm_rest.angle_to(arm_idle) > 0.3,
 			"upperarm.L idle vs rest angle=%.4f rad" % arm_rest.angle_to(arm_idle))
 		# Idle is deterministic AND alive: a fresh rig fed the same idle deltas lands
@@ -162,6 +182,14 @@ func _ready() -> void:
 			"%s == %s" % [str(frame_seq_a), str(frame_seq_b)])
 
 	_finish()
+
+
+func _pose_angle(db: MotionDB, frame: int, bone: int) -> float:
+	# The rotation magnitude of a bone's MH-local pose quat at a frame (radians).
+	if bone < 0:
+		return 0.0
+	var q := db.pose_quat(frame, bone)
+	return 2.0 * acos(clampf(absf(q.w), -1.0, 1.0))
 
 
 func _facing_change_mag(db: MotionDB, frame: int) -> float:

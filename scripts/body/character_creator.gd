@@ -59,6 +59,7 @@ var _dragging_pan: bool = false
 # ---------------------------------------------------------------------------
 const MorphDragScript := preload("res://scripts/body/morph_drag.gd")
 const DetailLibraryScript := preload("res://scripts/body/detail_library.gd")
+const CpuAccelPickerScript := preload("res://scripts/util/cpu_accel_picker.gd")
 
 var _morph                       ## MorphDrag (untyped: the class_name isn't visible at parse)
 var _sculpt_mode: bool = false
@@ -77,6 +78,10 @@ var _glow_overlay: MeshInstance3D
 var _glow_base_pos: PackedVector3Array   ## the body's rest-space vertex positions (for glow + pick)
 var _glow_tris: PackedInt32Array         ## the body's triangle index list (for pick + overlay)
 var _hover_vertex: int = -1
+
+## The picking backend (default the deterministic CPU uniform-grid). The Picker interface
+## keeps MorphDrag + the input glue backend-agnostic; _pick_body delegates to it.
+var _picker: Picker
 
 var _value_labels: Dictionary = {}   ## field -> Label showing current value
 var _sliders: Dictionary = {}        ## field -> HSlider
@@ -195,6 +200,11 @@ func _build_morph_drag() -> void:
 		var arrays := (_rig.mesh_instance.mesh as ArrayMesh).surface_get_arrays(0)
 		_glow_base_pos = arrays[Mesh.ARRAY_VERTEX]
 		_glow_tris = arrays[Mesh.ARRAY_INDEX]
+	# Build the CPU spatial-grid picker over the rest-space baked triangles. Deterministic;
+	# rebuilt lazily on the next pick after a morph bake marks it dirty (_apply_state).
+	_picker = CpuAccelPickerScript.new()
+	if not _glow_base_pos.is_empty() and not _glow_tris.is_empty():
+		(_picker as CpuAccelPicker).build(_glow_base_pos, _glow_tris)
 	_build_glow_overlay()
 
 
@@ -248,64 +258,24 @@ func _update_camera() -> void:
 # ---------------------------------------------------------------------------
 
 ## Raycast a screen position against the body mesh. Returns { vertex:int, pos:Vector3 } for
-## the nearest base vertex of the hit triangle (world space), or {} on a miss. Möller–Trumbore
-## over the cached triangle list, in the skeleton's scaled frame. Deterministic, allocation-light.
+## the nearest base vertex of the hit triangle (world space), or {} on a miss. Delegates to
+## the Picker backend (default the deterministic CPU uniform grid) and adapts its richer
+## hit shape ({render_vertex_index, world_pos, ...}) back to the {vertex, pos} the glow +
+## drag-start consumers expect. The body is static in the creator (bind pose), so the rig's
+## skeleton global_transform — the stature scale — is the only world transform.
 func _pick_body(screen_pos: Vector2) -> Dictionary:
-	if _camera == null or _glow_base_pos.is_empty() or _glow_tris.is_empty() or _rig == null or _rig.skeleton == null:
+	if _picker == null or _camera == null or _glow_base_pos.is_empty() or _glow_tris.is_empty() \
+			or _rig == null or _rig.skeleton == null:
 		return {}
-	var origin := _camera.project_ray_origin(screen_pos)
-	var dir := _camera.project_ray_normal(screen_pos)
-	var xf := _rig.skeleton.global_transform   # stature scale (+ node placement)
-	var best_t := INF
-	var best_tri := -1
-	var i := 0
-	var nt := _glow_tris.size()
-	while i < nt:
-		var a := xf * _glow_base_pos[_glow_tris[i]]
-		var b := xf * _glow_base_pos[_glow_tris[i + 1]]
-		var c := xf * _glow_base_pos[_glow_tris[i + 2]]
-		var t := _ray_tri(origin, dir, a, b, c)
-		if t >= 0.0 and t < best_t:
-			best_t = t
-			best_tri = i
-		i += 3
-	if best_tri < 0:
+	var target := {
+		"world_xf": _rig.skeleton.global_transform,
+		"rest_positions": _glow_base_pos,
+		"tris": _glow_tris,
+	}
+	var hit := _picker.pick(screen_pos, _camera, target)
+	if hit.is_empty():
 		return {}
-	# Nearest of the hit triangle's three verts to the exact hit point.
-	var hit := origin + dir * best_t
-	var verts := [_glow_tris[best_tri], _glow_tris[best_tri + 1], _glow_tris[best_tri + 2]]
-	var best_v := int(verts[0])
-	var best_d := INF
-	for vi in verts:
-		var wp := xf * _glow_base_pos[vi]
-		var d := wp.distance_squared_to(hit)
-		if d < best_d:
-			best_d = d
-			best_v = int(vi)
-	return {"vertex": best_v, "pos": hit}
-
-
-## Möller–Trumbore ray/triangle intersection. Returns the ray t (>=0) at the hit, or -1.0 on
-## a miss. Single-sided off (we test both windings — the body surface faces the camera either
-## way after the normals bake, and picking should not depend on winding).
-func _ray_tri(o: Vector3, d: Vector3, a: Vector3, b: Vector3, c: Vector3) -> float:
-	var e1 := b - a
-	var e2 := c - a
-	var p := d.cross(e2)
-	var det := e1.dot(p)
-	if absf(det) < 1e-9:
-		return -1.0
-	var inv := 1.0 / det
-	var tvec := o - a
-	var u := tvec.dot(p) * inv
-	if u < -1e-5 or u > 1.0 + 1e-5:
-		return -1.0
-	var q := tvec.cross(e1)
-	var v := d.dot(q) * inv
-	if v < -1e-5 or u + v > 1.0 + 1e-5:
-		return -1.0
-	var t := e2.dot(q) * inv
-	return t if t > 1e-5 else -1.0
+	return {"vertex": int(hit["render_vertex_index"]), "pos": hit["world_pos"]}
 
 
 ## Update the hover glow for a screen position (sculpt mode, not currently dragging). Picks
@@ -751,6 +721,10 @@ func _apply_state() -> void:
 		# in-game skinned body uses). Godot's octahedral blendshape-normal storage can't
 		# carry normal deltas, so a GPU-only morph is mis-lit (see BodyState/BodyRig).
 		_rig.apply_body_state(_body_state)
+		# The rest-space baked positions just changed → the CPU pick grid is stale. Mark it
+		# dirty; the picker rebuilds lazily on the next pick (no per-bake-frame rebuild cost).
+		if _picker is CpuAccelPicker:
+			(_picker as CpuAccelPicker).mark_dirty()
 	for field in _value_labels:
 		(_value_labels[field] as Label).text = _format_value(field)
 

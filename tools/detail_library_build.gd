@@ -22,18 +22,16 @@
 ##        72 files): the muscle/weight VARIATION per gender×age.
 ##      Together these drive the §1.3 factor-PRODUCT macro projection (replacing the old
 ##      9-target linear shortcut) so COMBINED macro morphs compose correctly, not linearly.
-##      Plus the TWO neutral proportions anchors (the female-young-averagemuscle-
-##      averageweight ideal/uncommon targets the prior AXIS_TARGETS used).
+##      - the FULL proportions cube (`macrodetails/proportions/`, 108 dense targets):
+##        gender×age×muscle×weight×{ideal,uncommon}. These move most verts (DENSE), so they
+##        grow the artifact by ~26 MB — ACCEPTED: correctness over artifact size. The prior
+##        2-anchor approximation (one ideal + one uncommon target at the neutral build) is
+##        RETIRED; proportions now composes by the SAME §1.3 factor-PRODUCT as the universal
+##        cube, weighted by the {ideal,uncommon} proportions factor val (_setBodyProportionVals).
 ##      DELIBERATELY EXCLUDED:
 ##        - the HEIGHT macro cube (`height/`): §4 — height_cm is a UNIFORM SCALE,
 ##          orthogonal to proportions; MakeHuman's coupled height cube is dropped.
 ##        - the asian/african race cubes: caucasian-only base; race axis is out of scope.
-##        - the full PROPORTIONS cube (108 dense targets, ~26 MB): proportions stays the
-##          2-anchor bidirectional approximation at the neutral build (the prior Slice-A
-##          behaviour). A full proportions factor-cube would dominate the artifact size
-##          for one axis; the doc's correctness mandate is on the COMBINED gender×age×
-##          muscle×weight macros, which the universal cube delivers. Proportions remains
-##          functional (uncommon↔base↔ideal) via its two anchors.
 ##
 ## OUTPUTS (built by `nix build .#body-detail-library`; committed gzip-compressed):
 ##   res://assets/body/base_body_detail.bin       — the packed sparse delta blob
@@ -65,13 +63,12 @@ const OUT_BIN := "res://assets/body/base_body_detail.bin"
 const OUT_INDEX := "res://assets/body/base_body_detail.index.json"
 
 ## Macro factor-cube target globs we import (relative to data/targets/). The universal
-## cube = gender×age×muscle×weight. Height/race/full-proportions cubes are excluded (see
-## header / §4). The two neutral proportions anchors are imported by explicit path.
+## cube = gender×age×muscle×weight (in macrodetails/). The FULL proportions cube =
+## gender×age×muscle×weight×{ideal,uncommon} (108 dense targets in macrodetails/proportions/)
+## is imported in full (§1.3 — correctness over artifact size; the prior 2-anchor approximation
+## is retired). Height/race cubes stay excluded (see header / §4).
 const MACRO_UNIVERSAL_DIR := "macrodetails"
-const MACRO_PROPORTIONS_ANCHORS := [
-	"macrodetails/proportions/female-young-averagemuscle-averageweight-idealproportions.target",
-	"macrodetails/proportions/female-young-averagemuscle-averageweight-uncommonproportions.target",
-]
+const MACRO_PROPORTIONS_DIR := "macrodetails/proportions"
 
 
 func _ready() -> void:
@@ -244,7 +241,9 @@ func _run() -> int:
 
 
 ## Collect the macro factor-cube target rel-paths: the universal cube (gender×age×muscle×
-## weight) + the two neutral proportions anchors. Height/race/full-proportions excluded.
+## weight) + the CAUCASIAN race (age/gender shape) cube + the FULL proportions cube
+## (gender×age×muscle×weight×{ideal,uncommon}, 108 dense targets). Height/race(asian/african)
+## excluded.
 func _collect_macro_cube(data_root: String) -> Array:
 	var out := []
 	var udir := data_root.path_join("targets").path_join(MACRO_UNIVERSAL_DIR)
@@ -258,8 +257,17 @@ func _collect_macro_cube(data_root: String) -> Array:
 				out.append("%s/%s" % [MACRO_UNIVERSAL_DIR, name])
 			name = ud.get_next()
 		ud.list_dir_end()
-	for anchor in MACRO_PROPORTIONS_ANCHORS:
-		out.append(anchor)
+	# the FULL proportions factor-cube (every gender×age×muscle×weight×{ideal,uncommon}).
+	var pdir := data_root.path_join("targets").path_join(MACRO_PROPORTIONS_DIR)
+	var pd := DirAccess.open(pdir)
+	if pd != null:
+		pd.list_dir_begin()
+		var pname := pd.get_next()
+		while pname != "":
+			if not pd.current_is_dir() and pname.ends_with(".target"):
+				out.append("%s/%s" % [MACRO_PROPORTIONS_DIR, pname])
+			pname = pd.get_next()
+		pd.list_dir_end()
 	return out
 
 

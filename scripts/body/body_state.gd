@@ -82,10 +82,11 @@ var muscle: float = 50.0
 var weight: float = 100.0
 ## Within-form proportion envelope (dimensionless). BIDIRECTIONAL about the base:
 ## 0.0 = full "uncommon" proportions, 0.5 = the base mesh (regular/average), 1.0 = full
-## "idealistic" proportions — the two MakeHuman proportions anchors. (body-
-## parameterization.md §2 frames this as idealized↔uncommon; Slice A keeps the existing
-## 0..1-about-0.5 encoding so the two imported proportions targets still drive — the
-## natural-unit re-centering is a later slice once more targets land.)
+## "idealistic" proportions. Drives the FULL MakeHuman proportions factor-cube (108 targets,
+## gender×age×muscle×weight×{ideal,uncommon}) by the §1.3 factor PRODUCT — the proportions
+## axis val (_setBodyProportionVals: idealVal=max(0,p*2-1), uncommonVal=max(0,1-p*2)) times
+## the gender/age/muscle/weight anchor vals — so proportions reshapes CORRECTLY for each
+## build, not via the retired 2-anchor (female-young-average) approximation.
 var proportions: float = 0.5
 ## Stature in CM (Slice C, §4): a REAL metric axis realized as a UNIFORM mesh scale,
 ## ORTHOGONAL to proportions BY CONSTRUCTION. MakeHuman couples height into its morph cube
@@ -160,6 +161,10 @@ const GENDER_TOKENS := {"male": true, "female": true}
 const AGE_TOKENS := {"baby": true, "child": true, "young": true, "old": true}
 const MUSCLE_TOKENS := {"maxmuscle": true, "averagemuscle": true, "minmuscle": true}
 const WEIGHT_TOKENS := {"minweight": true, "averageweight": true, "maxweight": true}
+## Proportions factor tokens (verified lib/targets.py `_cat_data` `bodyproportions`). The
+## proportions cube targets carry one of {ideal,uncommon}proportions (there is NO
+## regularproportions target — that anchor IS the base mesh, contributing no morph).
+const PROPORTIONS_TOKENS := {"idealproportions": true, "uncommonproportions": true}
 ## Race is pinned to caucasian (the base mesh ethnicity; race axis is out of scope), so the
 ## caucasian race-cube targets carry race factor val 1.0; asian/african cubes are not
 ## imported. The `universal-` cube targets carry NO race token (universal across race).
@@ -246,10 +251,22 @@ func _weight_vals() -> Dictionary:
 	var mn := maxf(0.0, 1.0 - w * 2.0)
 	return {"maxweight": mx, "minweight": mn, "averageweight": 1.0 - (mx + mn)}
 
-## Decode a macro-cube target filename (universal muscle/weight cube OR caucasian race
-## cube), e.g. "macrodetails/universal-male-old-maxmuscle-maxweight.target" or
-## "macrodetails/caucasian-female-child.target", into its factor tokens — one per
-## category in {race,gender,age,muscle,weight}. Returns a Dictionary category->token.
+## Proportions anchor vals: {ideal,uncommon} from the 2× split about the midpoint
+## (_setBodyProportionVals). proportions axis 0..1: 0=full uncommon, 0.5=base (regular,
+## no morph), 1=full ideal. idealVal = max(0, p*2-1); uncommonVal = max(0, 1-p*2).
+func _proportions_vals() -> Dictionary:
+	var p := clampf(proportions, 0.0, 1.0)
+	return {
+		"idealproportions": maxf(0.0, p * 2.0 - 1.0),
+		"uncommonproportions": maxf(0.0, 1.0 - p * 2.0),
+	}
+
+## Decode a macro-cube target filename (universal muscle/weight cube, caucasian race cube,
+## OR proportions cube), e.g. "macrodetails/universal-male-old-maxmuscle-maxweight.target",
+## "macrodetails/caucasian-female-child.target", or
+## "macrodetails/proportions/female-old-maxmuscle-maxweight-idealproportions.target", into
+## its factor tokens — one per category in {race,gender,age,muscle,weight,proportions}.
+## Returns a Dictionary category->token.
 static func _decode_macro_factors(rel_path: String) -> Dictionary:
 	var base := rel_path.get_file().trim_suffix(".target")
 	var out := {}
@@ -259,6 +276,7 @@ static func _decode_macro_factors(rel_path: String) -> Dictionary:
 		elif AGE_TOKENS.has(tok): out["age"] = tok
 		elif MUSCLE_TOKENS.has(tok): out["muscle"] = tok
 		elif WEIGHT_TOKENS.has(tok): out["weight"] = tok
+		elif PROPORTIONS_TOKENS.has(tok): out["proportions"] = tok
 	return out
 
 ## The factor-PRODUCT weight for one macro-cube target, given the anchor-val maps. weight =
@@ -267,7 +285,7 @@ static func _decode_macro_factors(rel_path: String) -> Dictionary:
 ## (caucasian=1, asian/african=0) — a non-caucasian race target gets weight 0 (not imported
 ## anyway). A category absent from the filename contributes 1 (e.g. the caucasian race cube
 ## omits muscle/weight; the universal cube omits race).
-func _universal_target_weight(rel_path: String, gv: Dictionary, av: Dictionary, mv: Dictionary, wv: Dictionary) -> float:
+func _universal_target_weight(rel_path: String, gv: Dictionary, av: Dictionary, mv: Dictionary, wv: Dictionary, pv: Dictionary) -> float:
 	var f := _decode_macro_factors(rel_path)
 	var prod := 1.0
 	if f.has("race"): prod *= (CAUCASIAN_VAL if f["race"] == "caucasian" else 0.0)
@@ -275,6 +293,7 @@ func _universal_target_weight(rel_path: String, gv: Dictionary, av: Dictionary, 
 	if f.has("age"): prod *= float(av[f["age"]])
 	if f.has("muscle"): prod *= float(mv[f["muscle"]])
 	if f.has("weight"): prod *= float(wv[f["weight"]])
+	if f.has("proportions"): prod *= float(pv[f["proportions"]])
 	return prod
 
 # ---------------------------------------------------------------------------
@@ -305,17 +324,12 @@ func is_adult_body() -> bool:
 # the natural-unit public fields are converted to the raw macro values here, internally.
 # ---------------------------------------------------------------------------
 
-## The two neutral proportions anchor target paths (uncommon / ideal). Proportions stays a
-## 2-anchor bidirectional axis at the neutral build (the full proportions factor-cube is
-## intentionally not imported — see tools/detail_library_build.gd header).
-const PROPORTIONS_IDEAL_TARGET := "macrodetails/proportions/female-young-averagemuscle-averageweight-idealproportions.target"
-const PROPORTIONS_UNCOMMON_TARGET := "macrodetails/proportions/female-young-averagemuscle-averageweight-uncommonproportions.target"
-
 ## Project this BodyState to the per-target weight map. Returns { target_path: weight } —
 ## a pure, deterministic function of the record. Keys are SPARSE-LIBRARY target file paths
 ## (the names DetailLibrary resolves), NOT GPU blendshape names: the whole morph (macro
-## factor-cube + proportions anchors + detail envelope) flows through the CPU sparse-delta
-## path (Slice C). The macro cube is the §1.3 factor-PRODUCT over gender×age×muscle×weight,
+## factor-cube + full proportions cube + detail envelope) flows through the CPU sparse-delta
+## path (Slice C). The macro cube is the §1.3 factor-PRODUCT over gender×age×muscle×weight
+## (and ×{ideal,uncommon}proportions for the proportions cube),
 ## so COMBINED macro morphs compose correctly (NOT the old linear single-anchor sum). Every
 ## weight is a continuous function of the inputs, so sweeping any axis morphs smoothly.
 ## height_cm is NOT in this map — it is a UNIFORM SCALE applied by BodyRig (§4), orthogonal.
@@ -328,20 +342,18 @@ func to_blend_weights() -> Dictionary:
 	var av := _age_vals()
 	var mv := _muscle_vals()
 	var wv := _weight_vals()
+	var pv := _proportions_vals()
+	# Every macro-cube target (universal muscle/weight cube + caucasian race cube + the FULL
+	# proportions cube gender×age×muscle×weight×{ideal,uncommon}) is weighted by the SAME
+	# §1.3 factor PRODUCT. The proportions cube targets simply carry one extra proportions
+	# factor token, so they compose by the product of ALL their decoded factors — NOT the
+	# retired 2-anchor (single female-young-average) approximation. So e.g. proportions on a
+	# heavy old male combines the OLD/MAX-WEIGHT/MALE proportions targets, not a female-young
+	# stand-in.
 	for rel in DetailLibrary.paths_of_kind("macro"):
-		if rel == PROPORTIONS_IDEAL_TARGET or rel == PROPORTIONS_UNCOMMON_TARGET:
-			continue  # proportions handled below, not as a universal factor-product target
-		var tw := _universal_target_weight(rel, gv, av, mv, wv)
+		var tw := _universal_target_weight(rel, gv, av, mv, wv, pv)
 		if tw > 1e-6:
 			w[rel] = tw
-
-	# --- Proportions: bidirectional about the base (0.5). Below 0.5 fades in the uncommon
-	# anchor; above 0.5 the ideal anchor; exactly 0.5 = base. Orthogonal to the cube. ----
-	var pr := clampf(proportions, 0.0, 1.0)
-	if pr < 0.5:
-		w[PROPORTIONS_UNCOMMON_TARGET] = (0.5 - pr) / 0.5
-	elif pr > 0.5:
-		w[PROPORTIONS_IDEAL_TARGET] = (pr - 0.5) / 0.5
 
 	# --- the DETAIL ENVELOPE (Slice B, §6): project the sparse `modifiers` map through
 	# the data-driven registry. Each non-neutral entry resolves via its registered kind
@@ -484,7 +496,7 @@ func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array,
 			morphed[vi] = morphed[vi] + dv[vi] * w
 	# (2) SPARSE DELTA LIBRARY (Slice C): every weight whose key is a target FILE PATH the
 	# library knows is applied as morphed[ri] += delta_ri * weight. This carries the macro
-	# factor-cube + the proportions anchors + the full detail envelope, all on the CPU, so
+	# factor-cube + the full proportions cube + the full detail envelope, all on the CPU, so
 	# we avoid ~531 GPU blendshapes (≈180 MB). Iterated in SORTED key order for determinism.
 	if DetailLibrary.ensure_loaded():
 		var keys := weights.keys()

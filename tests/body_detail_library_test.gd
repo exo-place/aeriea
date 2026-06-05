@@ -15,6 +15,11 @@
 ##       (the shape morph) untouched. Proportions axis is independent of height.
 ##   (5) FULL RANGES: muscle 0–100 and weight 50–150 are both functional (the lean/light
 ##       half now drives the min anchors, not just the heavy/muscular half).
+##   (6) FULL PROPORTIONS CUBE: all 108 gender×age×muscle×weight×{ideal,uncommon} targets are
+##       imported; the proportions morph weights by the §1.3 PRODUCT over the build's factor
+##       anchor vals × the proportions axis val — NOT the retired 2-anchor approximation (the
+##       regression asserts a build-specific cross-term that was ZERO under the old path now
+##       carries full weight, and a dense reshape with outward normals).
 ##
 ## Run windowed under xvfb:
 ##   xvfb-run -a godot4 --path . res://tests/body_detail_library_test.tscn --quit-after 8000
@@ -39,6 +44,7 @@ func _ready() -> void:
 	_test_detail_morph_drives_mesh()
 	_test_metric_height_uniform_scale()
 	_test_full_ranges()
+	_test_proportions_cube()
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
 
@@ -251,6 +257,135 @@ func _test_full_ranges() -> void:
 	_assert("weight 150%% drives the MAXweight anchor",
 		float(hw.get("macrodetails/universal-female-young-averagemuscle-maxweight.target", 0.0)) > 0.4,
 		"maxweight weight=%.4f" % float(hw.get("macrodetails/universal-female-young-averagemuscle-maxweight.target", 0.0)))
+
+
+# (6) full proportions factor-cube (replaces the retired 2-anchor approximation) ----
+## The §1.3 proportions cube: gender×age×muscle×weight×{ideal,uncommon} = 108 dense targets,
+## each weighted by the PRODUCT of its decoded factor anchor vals × the proportions axis val.
+## These assertions FAIL under the old 2-anchor path (which imported only the single
+## female-young-averagemuscle-averageweight ideal/uncommon targets and weighted proportions by
+## a lone (pr-0.5)/0.5 anchor — every build-specific proportions cross-term was ZERO there).
+func _test_proportions_cube() -> void:
+	print("--- (6) full proportions factor-cube (not the 2-anchor approximation) ---")
+
+	# (a) FULL IMPORT: all 108 proportions cube targets present in the library, and the
+	# build-specific cross-terms the old 2-anchor path NEVER imported now exist with deltas.
+	var present := 0
+	var genders := ["female", "male"]
+	var ages := ["child", "young", "old"]
+	var muscles := ["minmuscle", "averagemuscle", "maxmuscle"]
+	var weights := ["minweight", "averageweight", "maxweight"]
+	var props := ["idealproportions", "uncommonproportions"]
+	for g in genders:
+		for a in ages:
+			for m in muscles:
+				for wt in weights:
+					for pr in props:
+						var path := "macrodetails/proportions/%s-%s-%s-%s-%s.target" % [g, a, m, wt, pr]
+						if DetailLib.has_target(path):
+							present += 1
+	_assert("all 108 proportions cube targets imported (full cube, not 2 anchors)",
+		present == 108, "present=%d/108" % present)
+
+	# A build-specific cross-term the 2-anchor path could NOT have imported: male-old-maxmuscle-
+	# maxweight-idealproportions. Present AND dense (moves most verts).
+	var sample := "macrodetails/proportions/female-old-maxmuscle-maxweight-idealproportions.target"
+	_assert("proportions cross-term present with DENSE deltas (build-specific, not a stand-in)",
+		DetailLib.record_count(sample) > 10000,
+		"record_count=%d (source moves 19058 base verts)" % DetailLib.record_count(sample))
+
+	# (b) SAMPLE DELTA GOLDEN vs source: base vert 0 of the sample target has source delta
+	# (0,.099,0) MH units == (0,0.0099,0) m. It must appear among the stored render records.
+	var target_delta := Vector3(0.0, 0.099 * MH_TO_METERS, 0.0)
+	var found := false
+	var n := DetailLib.record_count(sample)
+	for i in n:
+		var rec := DetailLib.record_at(sample, i)
+		if rec.is_empty():
+			continue
+		if (rec[1] as Vector3).distance_to(target_delta) < 1e-6:
+			found = true
+			break
+	_assert("a stored proportions delta matches the source (base0 -> (0,0.0099,0) m)",
+		found, "looked for %s among %d records" % [str(target_delta), n])
+
+	# (c) REGRESSION — factor PRODUCT, not the 2-anchor approximation. At a fully ideal-
+	# proportioned heavy muscular OLD MALE, the proportions morph must put full weight on the
+	# MALE-OLD-MAXMUSCLE-MAXWEIGHT-IDEAL cross-term: product male(1)·old(1)·maxmuscle(1)·
+	# maxweight(1)·ideal(1) = 1.0. Under the old 2-anchor path this target was never imported
+	# and its weight was 0 — ALL proportions weight went to the female-young-average stand-in.
+	var ideal_male := BodyState.new()
+	ideal_male.masculinity = 100.0; ideal_male.age_years = 90.0
+	ideal_male.muscle = 100.0; ideal_male.weight = 150.0
+	ideal_male.proportions = 1.0
+	var imw := ideal_male.to_blend_weights()
+	var cross := "macrodetails/proportions/male-old-maxmuscle-maxweight-idealproportions.target"
+	_assert("ideal-proportioned old/heavy/muscular male -> cross-term weight = 1.0 (PRODUCT)",
+		absf(float(imw.get(cross, 0.0)) - 1.0) < 1e-4, "weight=%.4f" % float(imw.get(cross, 0.0)))
+	# And the old stand-in (female-young-average ideal) must carry ZERO here — proof the weight
+	# moved off the 2-anchor approximation onto the correct build-specific cross-term.
+	var standin := "macrodetails/proportions/female-young-averagemuscle-averageweight-idealproportions.target"
+	_assert("the old 2-anchor stand-in carries ZERO at this build (weight left the approximation)",
+		float(imw.get(standin, 0.0)) < 1e-6, "stand-in weight=%.6f" % float(imw.get(standin, 0.0)))
+
+	# (d) PARTIAL PRODUCT: proportions 0.75 -> idealVal = 0.75*2-1 = 0.5; at neutral build
+	# (female-young-averagemuscle-averageweight) the female-young-average-ideal target weight
+	# = female(0.5)·young(1)·avg(1)·avg(1)·ideal(0.5) = 0.25. The bidirectional uncommon side
+	# is zero above 0.5.
+	var half := BodyState.new()
+	half.proportions = 0.75
+	var hw := half.to_blend_weights()
+	_assert("proportions 0.75 at neutral build -> female-young-avg-ideal = 0.25 (0.5×0.5 product)",
+		absf(float(hw.get(standin, 0.0)) - 0.25) < 1e-4, "weight=%.4f" % float(hw.get(standin, 0.0)))
+	_assert("proportions 0.75 weights NO uncommon target (bidirectional, ideal side only)",
+		float(hw.get("macrodetails/proportions/female-young-averagemuscle-averageweight-uncommonproportions.target", 0.0)) < 1e-6,
+		"uncommon weight=%.6f" % float(hw.get("macrodetails/proportions/female-young-averagemuscle-averageweight-uncommonproportions.target", 0.0)))
+
+	# (e) NEUTRAL: proportions 0.5 (the base) weights NO proportions target at all.
+	var neutral := BodyState.new()
+	var nw := neutral.to_blend_weights()
+	var stray := ""
+	for k in nw:
+		if String(k).contains("proportions"):
+			stray = String(k)
+	_assert("proportions 0.5 (base) weights no proportions target", stray == "",
+		"stray proportions target: %s" % stray)
+
+	# (f) DENSE MORPH on the MESH: sweeping proportions reshapes the body (a DENSE move, unlike
+	# a localized detail morph) with OUTWARD normals preserved.
+	var mesh: ArrayMesh = load(MESH_PATH)
+	var morph_mesh := mesh.duplicate(true) as ArrayMesh
+	var mi := MeshInstance3D.new()
+	mi.mesh = morph_mesh
+	add_child(mi)
+	var base_bs := BodyState.new()
+	base_bs.apply_morph_cpu(mi)
+	var base_pos: PackedVector3Array = (morph_mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate()
+	var ideal_bs := BodyState.new()
+	ideal_bs.proportions = 1.0
+	ideal_bs.apply_morph_cpu(mi)
+	var ideal_pos: PackedVector3Array = morph_mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	var moved := 0
+	var max_disp := 0.0
+	for i in base_pos.size():
+		var d := (ideal_pos[i] - base_pos[i]).length()
+		if d > 1e-5:
+			moved += 1
+			max_disp = maxf(max_disp, d)
+	# DENSE: a proportions morph moves a large fraction of the body, not a small region.
+	_assert("ideal proportions DENSELY reshapes the body (>5000 verts move)", moved > 5000,
+		"%d verts moved, max disp=%.4f m" % [moved, max_disp])
+	# Outward normals under the dense proportions morph.
+	var mn: PackedVector3Array = morph_mesh.surface_get_arrays(0)[Mesh.ARRAY_NORMAL]
+	var cen := Vector3.ZERO
+	for p in ideal_pos: cen += p
+	cen /= float(ideal_pos.size())
+	var radial := 0.0
+	for i in ideal_pos.size():
+		radial += mn[i].dot(ideal_pos[i] - cen)
+	_assert("proportions-morph baked normals point OUTWARD (correct lighting)",
+		radial > 0.0, "Σ dot(normal,pos-centroid) = %.4f" % radial)
+	mi.queue_free()
 
 
 func _assert(name: String, cond: bool, evidence: String) -> void:

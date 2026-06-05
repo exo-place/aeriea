@@ -8,6 +8,11 @@
     "wall_cling_min_vy": -0.5
   },
 
+  "comment_vars": "§B — wall_cling is a decaying var (the cling time budget): set on latch, drains by dt, forces release via var<=0.",
+  "vars": {
+    "wall_cling": { "decay": true }
+  },
+
   "comment_inputs": "Declare the `cling` action so the interpreter samples it each tick (input_pressed reads the sampled frame). No buffer/hold — a plain held button.",
   "inputs": {
     "cling": {}
@@ -27,7 +32,7 @@
         "do": [
           { "do": "set_velocity_y", "value": 0 },
           { "do": "clamp_speed_h", "max": 0 },
-          { "do": "set_timer", "name": "wall_cling", "value": "wall_cling_max_time" }
+          { "do": "set_var", "name": "wall_cling", "value": "wall_cling_max_time" }
         ]
       }
     ]
@@ -44,7 +49,7 @@
           "to": "AIR",
           "priority": 90,
           "reenter": true,
-          "do": [ { "do": "set_timer", "name": "wall_jump_grace", "value": "wall_jump_grace" } ]
+          "do": [ { "do": "set_var", "name": "wall_jump_grace", "value": "wall_jump_grace" } ]
         },
         {
           "comment": "Cling RELEASED → drop off the wall into AIR. Arm coyote so a jump immediately after release still works (parity with leaving any surface).",
@@ -52,7 +57,7 @@
           "to": "AIR",
           "priority": 70,
           "reenter": true,
-          "do": [ { "do": "set_timer", "name": "coyote", "value": "coyote_time" } ]
+          "do": [ { "do": "set_var", "name": "coyote", "value": "coyote_time" } ]
         },
         {
           "comment": "Wall LOST (no longer near the tracked wall) → AIR.",
@@ -62,7 +67,7 @@
         },
         {
           "comment": "Cling time budget drained → forced release into AIR.",
-          "when": { "op": "timer", "name": "wall_cling", "cmp": "le", "value": 0 },
+          "when": { "op": "var", "name": "wall_cling", "cmp": "le", "value": 0 },
           "to": "AIR",
           "priority": 50
         },
@@ -84,7 +89,7 @@
         {
           "comment": "Hold the wall-facing camera roll (deliberate latch feel), signed by the tracked wall side. Render-only.",
           "do": "lerp_camera_roll", "target": "wall_run_camera_tilt",
-          "from_wall_side": true, "rate": "camera_roll_lerp_speed"
+          "sign_from": "wall_side", "rate": "camera_roll_lerp_speed"
         }
       ],
       "on_exit": []

@@ -53,7 +53,23 @@
     "camera_roll_lerp_speed": 10.0,
     "camera_roll_level": 0.0,
 
-    "kill_y": -25.0
+    "kill_y": -25.0,
+
+    "comment_thresholds": "§D — kernel-baked numbers lifted to params at their CURRENT values (so traces stay bit-identical): wall-verticality acceptance and the slope deadzone angle.",
+    "wall_max_normal_y": 0.3,
+    "slope_min_angle": 2.0
+  },
+
+  "comment_vars": "§B — declared numeric state vars generalizing timers/cooldowns/counters. decay:true (the default for undeclared names) reduces the var by dt once per tick (countdown timers). decay:false vars are counters/resources whose change is explicit: jump_hold accumulates while held, slide_steer accumulates via guarded add_var. The decay set here is identical to the pre-refactor hardcoded jump_hold/slide_steer exclusion.",
+  "vars": {
+    "coyote": { "decay": true },
+    "jump_buffer": { "decay": true },
+    "jump_hold": { "decay": false },
+    "slide": { "decay": true },
+    "slide_steer": { "decay": false },
+    "wall_run": { "decay": true },
+    "wall_jump_grace": { "decay": true },
+    "vault": { "decay": true }
   },
 
   "inputs": {
@@ -83,8 +99,8 @@
           "priority": 90,
           "do": [
             { "do": "set_velocity_y", "value": "jump_velocity" },
-            { "do": "set_timer", "name": "jump_buffer", "value": 0 },
-            { "do": "set_timer", "name": "jump_hold", "value": 0 }
+            { "do": "set_var", "name": "jump_buffer", "value": 0 },
+            { "do": "set_var", "name": "jump_hold", "value": 0 }
           ]
         },
         {
@@ -95,7 +111,7 @@
           ] },
           "to": "VAULT",
           "priority": 70,
-          "do": [ { "do": "set_timer", "name": "vault", "value": "vault_duration" } ]
+          "do": [ { "do": "set_var", "name": "vault", "value": "vault_duration" } ]
         },
         {
           "comment": "Crouch while fast → SLIDE (deliberate slide-while-running). Entry boost guarded so it can't compound; clamped to max_slide_speed.",
@@ -106,11 +122,11 @@
           "to": "SLIDE",
           "priority": 60,
           "do": [
-            { "do": "add_velocity", "space": "velocity", "vector": "slide_boost", "guard_not_in": "SLIDE" },
+            { "do": "add_velocity", "space": "velocity", "vector": "slide_boost" },
             { "do": "clamp_speed_h", "max": "max_slide_speed" },
             { "do": "set_collider_height", "value": "crouch_height" },
-            { "do": "set_timer", "name": "slide", "value": "slide_max_time" },
-            { "do": "set_timer", "name": "slide_steer", "value": 0 }
+            { "do": "set_var", "name": "slide", "value": "slide_max_time" },
+            { "do": "set_var", "name": "slide_steer", "value": 0 }
           ]
         },
         {
@@ -126,7 +142,7 @@
           "to": "AIR",
           "priority": 10,
           "reenter": true,
-          "do": [ { "do": "set_timer", "name": "coyote", "value": "coyote_time" } ]
+          "do": [ { "do": "set_var", "name": "coyote", "value": "coyote_time" } ]
         }
       ],
       "tick": [
@@ -137,7 +153,7 @@
           "speed": { "select": "sprint", "if_held": "sprint", "then": "sprint_speed", "else": "walk_speed" },
           "rate": "ground_acceleration"
         },
-        { "do": "apply_friction", "rate": "ground_friction", "only_when_no_wish": true },
+        { "do": "apply_friction", "rate": "ground_friction", "when": { "op": "not", "of": [ { "op": "wish_input" } ] } },
         { "do": "set_velocity_y", "value": "ground_snap_bias" },
         { "do": "move_and_slide" },
         { "do": "lerp_camera_height", "target": "camera_height_stand", "rate": "camera_height_lerp_speed" },
@@ -154,23 +170,23 @@
           "comment": "Coyote jump: buffered jump while still within the coyote window.",
           "when": { "op": "all", "of": [
             { "op": "input_buffered", "action": "jump" },
-            { "op": "timer", "name": "coyote", "cmp": "gt", "value": 0 }
+            { "op": "var", "name": "coyote", "cmp": "gt", "value": 0 }
           ] },
           "to": "AIR",
           "priority": 90,
           "reenter": true,
           "do": [
             { "do": "set_velocity_y", "value": "jump_velocity" },
-            { "do": "set_timer", "name": "coyote", "value": 0 },
-            { "do": "set_timer", "name": "jump_buffer", "value": 0 },
-            { "do": "set_timer", "name": "jump_hold", "value": 0 }
+            { "do": "set_var", "name": "coyote", "value": 0 },
+            { "do": "set_var", "name": "jump_buffer", "value": 0 },
+            { "do": "set_var", "name": "jump_hold", "value": 0 }
           ]
         },
         {
           "comment": "Wall-jump within the grace window after leaving a wall.",
           "when": { "op": "all", "of": [
             { "op": "input_buffered", "action": "jump" },
-            { "op": "timer", "name": "wall_jump_grace", "cmp": "gt", "value": 0 }
+            { "op": "var", "name": "wall_jump_grace", "cmp": "gt", "value": 0 }
           ] },
           "to": "AIR",
           "priority": 85,
@@ -178,8 +194,8 @@
           "do": [
             { "do": "add_velocity", "space": "wall_normal", "vector": "wall_jump_lateral", "replace": true },
             { "do": "set_velocity_y", "value": "wall_jump_up" },
-            { "do": "set_timer", "name": "wall_jump_grace", "value": 0 },
-            { "do": "set_timer", "name": "jump_buffer", "value": 0 }
+            { "do": "set_var", "name": "wall_jump_grace", "value": 0 },
+            { "do": "set_var", "name": "jump_buffer", "value": 0 }
           ]
         },
         {
@@ -194,7 +210,7 @@
           "priority": 70,
           "do": [
             { "do": "set_velocity_y_max", "value": "wall_run_vertical_boost" },
-            { "do": "set_timer", "name": "wall_run", "value": "wall_run_max_time" }
+            { "do": "set_var", "name": "wall_run", "value": "wall_run_max_time" }
           ]
         },
         {
@@ -205,7 +221,7 @@
           ] },
           "to": "VAULT",
           "priority": 60,
-          "do": [ { "do": "set_timer", "name": "vault", "value": "vault_duration" } ]
+          "do": [ { "do": "set_var", "name": "vault", "value": "vault_duration" } ]
         },
         {
           "comment": "Slide-on-landing: land FAST with crouch held → enter SLIDE directly, CARRYING horizontal momentum (do NOT zero it). This is a DEDICATED landing→slide path (priority 15, above the plain-ground landing at 10) so the momentum-carry case is decided BEFORE the plain-landing zero, never reaching it. The do-block mirrors the GROUND→SLIDE entry exactly (guarded entry boost, cap, crouch collider, slide timers) so a running-crouch landing slides identically whether the crouch was held across the landing or pressed once grounded. Guarded by speed_v<=0 like the plain landing (you land descending, not launching).",
@@ -218,11 +234,11 @@
           "to": "SLIDE",
           "priority": 15,
           "do": [
-            { "do": "add_velocity", "space": "velocity", "vector": "slide_boost", "guard_not_in": "SLIDE" },
+            { "do": "add_velocity", "space": "velocity", "vector": "slide_boost" },
             { "do": "clamp_speed_h", "max": "max_slide_speed" },
             { "do": "set_collider_height", "value": "crouch_height" },
-            { "do": "set_timer", "name": "slide", "value": "slide_max_time" },
-            { "do": "set_timer", "name": "slide_steer", "value": 0 }
+            { "do": "set_var", "name": "slide", "value": "slide_max_time" },
+            { "do": "set_var", "name": "slide_steer", "value": 0 }
           ]
         },
         {
@@ -271,7 +287,7 @@
           "to": "AIR",
           "priority": 70,
           "reenter": true,
-          "do": [ { "do": "set_timer", "name": "coyote", "value": "coyote_time" } ]
+          "do": [ { "do": "set_var", "name": "coyote", "value": "coyote_time" } ]
         },
         {
           "comment": "Exit while crouch STILL HELD → CROUCH-WALK (stay low; velocity preserved). Fires when decayed / timed-out / steered-out.",
@@ -279,27 +295,27 @@
             { "op": "input_pressed", "action": "crouch" },
             { "op": "any", "of": [
               { "op": "speed_h", "cmp": "lt", "value": "slide_exit_speed" },
-              { "op": "timer", "name": "slide", "cmp": "le", "value": 0 },
-              { "op": "timer", "name": "slide_steer", "cmp": "ge", "value": "slide_steer_exit_time" }
+              { "op": "var", "name": "slide", "cmp": "le", "value": 0 },
+              { "op": "var", "name": "slide_steer", "cmp": "ge", "value": "slide_steer_exit_time" }
             ] }
           ] },
           "to": "CROUCH",
           "priority": 45,
-          "do": [ { "do": "set_timer", "name": "slide_steer", "value": 0 } ]
+          "do": [ { "do": "set_var", "name": "slide_steer", "value": 0 } ]
         },
         {
           "comment": "Exit with crouch RELEASED or decayed/timed-out/steered-out → GROUND, stand up if headroom.",
           "when": { "op": "any", "of": [
             { "op": "not", "of": [ { "op": "input_pressed", "action": "crouch" } ] },
             { "op": "speed_h", "cmp": "lt", "value": "slide_exit_speed" },
-            { "op": "timer", "name": "slide", "cmp": "le", "value": 0 },
-            { "op": "timer", "name": "slide_steer", "cmp": "ge", "value": "slide_steer_exit_time" }
+            { "op": "var", "name": "slide", "cmp": "le", "value": 0 },
+            { "op": "var", "name": "slide_steer", "cmp": "ge", "value": "slide_steer_exit_time" }
           ] },
           "to": "GROUND",
           "priority": 40,
           "do": [
             { "do": "set_collider_height", "value": "stand_height", "require_headroom": true },
-            { "do": "set_timer", "name": "slide_steer", "value": 0 }
+            { "do": "set_var", "name": "slide_steer", "value": 0 }
           ]
         }
       ],
@@ -315,13 +331,22 @@
         },
         { "do": "apply_friction", "rate": "slide_friction" },
         {
-          "comment": "Sustained forward-aligned input accumulates slide_steer (stands you up); else decays. The steered-out exit reads this timer.",
-          "do": "add_timer", "name": "slide_steer", "by": 1.0, "else_by": 1.0,
+          "comment": "Sustained forward-aligned input accumulates slide_steer (stands you up); else decays. §A+§B: the old add_timer accumulate/else-decay is now TWO guarded add_var effects — accumulate (+dt) WHEN the alignment gate holds, decay (-dt, floored at 0) WHEN it does not. The two guards are mutually exclusive so exactly one runs per tick, numerically identical to the old single gated add_timer. The steered-out exit reads this var.",
+          "do": "add_var", "name": "slide_steer", "by": 1.0, "dt_scaled": true,
           "when": { "op": "all", "of": [
             { "op": "wish_input" },
             { "op": "speed_h", "cmp": "gt", "value": 0.001 },
             { "op": "wish_input", "aligned_with_velocity": true, "cmp": "gt", "value": 0.5 }
           ] }
+        },
+        {
+          "comment": "Else-branch decay of slide_steer toward 0 (matches the old add_timer's maxf(0, t - dt)). Runs only WHEN the accumulate gate above is false (the negated alignment condition).",
+          "do": "add_var", "name": "slide_steer", "by": -1.0, "dt_scaled": true, "clamp_min": 0,
+          "when": { "op": "not", "of": [ { "op": "all", "of": [
+            { "op": "wish_input" },
+            { "op": "speed_h", "cmp": "gt", "value": 0.001 },
+            { "op": "wish_input", "aligned_with_velocity": true, "cmp": "gt", "value": 0.5 }
+          ] } ] }
         },
         { "do": "set_velocity_y", "value": "ground_snap_bias" },
         { "do": "move_and_slide" },
@@ -341,7 +366,7 @@
           "to": "AIR",
           "priority": 80,
           "reenter": true,
-          "do": [ { "do": "set_timer", "name": "coyote", "value": "coyote_time" } ]
+          "do": [ { "do": "set_var", "name": "coyote", "value": "coyote_time" } ]
         },
         {
           "comment": "Sped up enough → re-enter SLIDE (e.g. arrived from a slide and pushed back up to speed).",
@@ -349,8 +374,8 @@
           "to": "SLIDE",
           "priority": 60,
           "do": [
-            { "do": "set_timer", "name": "slide", "value": "slide_max_time" },
-            { "do": "set_timer", "name": "slide_steer", "value": 0 }
+            { "do": "set_var", "name": "slide", "value": "slide_max_time" },
+            { "do": "set_var", "name": "slide_steer", "value": 0 }
           ]
         },
         {
@@ -367,7 +392,7 @@
           "comment": "Fully steerable at reduced top speed; friction when no input.",
           "do": "accelerate_toward", "space": "wish", "speed": "crouch_walk_speed", "rate": "ground_acceleration"
         },
-        { "do": "apply_friction", "rate": "ground_friction", "only_when_no_wish": true },
+        { "do": "apply_friction", "rate": "ground_friction", "when": { "op": "not", "of": [ { "op": "wish_input" } ] } },
         { "do": "set_velocity_y", "value": "ground_snap_bias" },
         { "do": "move_and_slide" },
         { "do": "lerp_camera_height", "target": "camera_height_crouch", "rate": "camera_height_lerp_speed" },
@@ -388,8 +413,8 @@
           "do": [
             { "do": "add_velocity", "space": "wall_normal", "vector": "wall_jump_lateral", "replace": true },
             { "do": "set_velocity_y", "value": "wall_jump_up" },
-            { "do": "set_timer", "name": "wall_jump_grace", "value": 0 },
-            { "do": "set_timer", "name": "jump_buffer", "value": 0 }
+            { "do": "set_var", "name": "wall_jump_grace", "value": 0 },
+            { "do": "set_var", "name": "jump_buffer", "value": 0 }
           ]
         },
         {
@@ -397,21 +422,21 @@
           "when": { "op": "not", "of": [ { "op": "wall_still_near" } ] },
           "to": "AIR",
           "priority": 70,
-          "do": [ { "do": "set_timer", "name": "wall_jump_grace", "value": "wall_jump_grace" } ]
+          "do": [ { "do": "set_var", "name": "wall_jump_grace", "value": "wall_jump_grace" } ]
         },
         {
           "comment": "Wall-run timed out → AIR.",
-          "when": { "op": "timer", "name": "wall_run", "cmp": "le", "value": 0 },
+          "when": { "op": "var", "name": "wall_run", "cmp": "le", "value": 0 },
           "to": "AIR",
           "priority": 60,
-          "do": [ { "do": "set_timer", "name": "wall_jump_grace", "value": "wall_jump_grace" } ]
+          "do": [ { "do": "set_var", "name": "wall_jump_grace", "value": "wall_jump_grace" } ]
         },
         {
           "comment": "No movement input at all → step off the wall.",
           "when": { "op": "not", "of": [ { "op": "wish_input" } ] },
           "to": "AIR",
           "priority": 55,
-          "do": [ { "do": "set_timer", "name": "wall_jump_grace", "value": "wall_jump_grace" } ]
+          "do": [ { "do": "set_var", "name": "wall_jump_grace", "value": "wall_jump_grace" } ]
         },
         {
           "comment": "Landed → GROUND.",
@@ -443,7 +468,7 @@
         {
           "comment": "Wall-run camera tilt (issue #4): roll the camera toward the wall. Magnitude is data (wall_run_camera_tilt); the SIGN is -wall_side (computed deterministically by the interpreter from the tracked wall) via from_wall_side. Render-only (excluded from the trajectory hash). The level states below lerp it back to 0.",
           "do": "lerp_camera_roll", "target": "wall_run_camera_tilt",
-          "from_wall_side": true, "rate": "camera_roll_lerp_speed"
+          "sign_from": "wall_side", "rate": "camera_roll_lerp_speed"
         }
       ],
       "on_exit": []
@@ -455,7 +480,7 @@
       "transitions": [
         {
           "comment": "Vault complete (timer drained) → GROUND.",
-          "when": { "op": "timer", "name": "vault", "cmp": "le", "value": 0 },
+          "when": { "op": "var", "name": "vault", "cmp": "le", "value": 0 },
           "to": "GROUND",
           "priority": 50
         }

@@ -121,15 +121,15 @@ func setup(p_kit: MovementKit, p_body: CharacterBody3D) -> void:
 	body = p_body
 	gravity = ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)
 	active_state = kit.initial
-	# Initialise every timer this kit references to 0.
+	# Initialise every var this kit references to 0.
 	timers = {}
 	for action in kit.inputs:
 		timers[action] = 0.0
-	# Pre-declare the well-known timers the base kit uses; unknown names are
-	# created on first set_timer anyway.
-	for t in ["coyote", "jump_buffer", "jump_hold", "slide", "slide_steer",
-			"wall_run", "wall_jump_grace", "vault"]:
-		timers[t] = 0.0
+	# Pre-declare the kit's declared numeric state vars (§B). Unknown names are
+	# created on first set_var anyway; declaring them here keeps the decay-loop
+	# iteration set stable for the trajectory hash.
+	for vn in kit.vars:
+		timers[vn] = 0.0
 	for action in kit.inputs:
 		_held_last[action] = false
 
@@ -159,13 +159,14 @@ func step(dt: float) -> void:
 			active_state = tr.to_state
 			return
 
-	# 2b. Pre-tick: decrement all named countdown timers by dt, in one place.
-	#    jump_hold accumulates while held (handled in _sample_input); slide_steer
-	#    is driven by an explicit add_timer effect, so neither is decremented here.
+	# 2b. Pre-tick: decrement all DECAYING numeric vars by dt, in one place (§B).
+	#    A var is decaying unless the kit declares decay:false (counters/resources:
+	#    jump_hold accumulates in _sample_input; slide_steer is driven by an explicit
+	#    add_var; air_jumps is consumed/refilled). The decay set is identical to the
+	#    legacy hardcoded jump_hold/slide_steer exclusion, now data-driven.
 	for name in timers:
-		if name == "jump_hold" or name == "slide_steer":
-			continue
-		timers[name] = maxf(0.0, float(timers[name]) - dt)
+		if _is_decaying(name):
+			timers[name] = maxf(0.0, float(timers[name]) - dt)
 
 	# 3. Evaluate the active state's transitions in sorted order; first match wins.
 	#    Loop to honour reenter (a transition may chain into the target's tick the
@@ -195,6 +196,16 @@ func step(dt: float) -> void:
 	# 4. Run the active state's tick effects in listed order.
 	var active: MovementKit.MovementState = kit.states[active_state]
 	_run_effects(active.tick, frame, dt)
+
+## Whether a numeric var auto-decays once per tick. Undeclared vars (input buffers,
+## the well-known countdown timers) default to decaying; only vars the kit declares
+## with decay:false (jump_hold, slide_steer, air_jumps) are skipped — exactly the
+## legacy hardcoded jump_hold/slide_steer exclusion, expressed as data.
+func _is_decaying(name: String) -> bool:
+	var vdef: Variant = kit.vars.get(name, null)
+	if typeof(vdef) == TYPE_DICTIONARY:
+		return bool(vdef.get("decay", true))
+	return true
 
 # ---------------------------------------------------------------------------
 # §3 step 1 — input sampling. The ONLY place Input.* is read.
@@ -266,7 +277,7 @@ func _eval_condition(cond: Dictionary, frame: InputFrame) -> bool:
 			return _cmp(_speed_h(), str(cond.get("cmp", "")), _resolve_value(cond.get("value"), frame))
 		"speed_v":
 			return _cmp(body.velocity.y, str(cond.get("cmp", "")), _resolve_value(cond.get("value"), frame))
-		"timer":
+		"var":
 			var t: float = float(timers.get(str(cond.get("name", "")), 0.0))
 			return _cmp(t, str(cond.get("cmp", "")), _resolve_value(cond.get("value"), frame))
 		"input_pressed":
@@ -336,6 +347,14 @@ func _run_effects(effects: Array, frame: InputFrame, dt: float) -> void:
 		_run_effect(e, frame, dt)
 
 func _run_effect(e: Dictionary, frame: InputFrame, dt: float) -> void:
+	# Guarded effect (§A, adopted from interaction_interpreter.gd:362): an effect
+	# may carry a top-level `when` Condition and is skipped when it is false. This is
+	# the SHORT-CIRCUIT POINT before any state write — exactly where the retired
+	# bespoke gates (apply_friction's only_when_no_wish skip, the slide-entry
+	# guard_not_in) bailed. Subsumes those one-offs as one general mechanism.
+	if e.has("when") and typeof(e["when"]) == TYPE_DICTIONARY:
+		if not _eval_condition(e["when"], frame):
+			return
 	var op: String = str(e.get("do", ""))
 	match op:
 		"set_velocity_y":
@@ -344,23 +363,25 @@ func _run_effect(e: Dictionary, frame: InputFrame, dt: float) -> void:
 			# velocity.y = max(velocity.y, value) — the wall-run vertical boost
 			# ("don't reduce upward speed") from PlayerController._check_wall_run.
 			body.velocity.y = maxf(body.velocity.y, _resolve_value(e.get("value"), frame))
-		"set_timer":
+		"set_var":
 			timers[str(e.get("name", ""))] = _resolve_value(e.get("value"), frame)
-		"add_timer":
-			# Accumulate/decay a timer by a delta scaled by dt, optionally gated by a
-			# condition. Used for slide_steer ("pushing into motion stands you up"):
-			#   when the gate holds, advance by +dt; otherwise decay toward 0 by -dt.
+		"add_var":
+			# Add a delta to a numeric var (§B). `by` is the per-call increment; if
+			# `dt_scaled` is true the increment is multiplied by dt (the slide_steer
+			# accumulate). With `clamp_min` the result is floored (matches the legacy
+			# add_timer else-branch maxf(0, …) decay). A guarding `when` (§A) selects
+			# whether this add runs at all — the accumulate/else-decay of the old
+			# add_timer is now TWO guarded add_var effects (accumulate when gate holds;
+			# decay when it does not), each numerically identical to the old branch.
 			var name := str(e.get("name", ""))
 			var cur := float(timers.get(name, 0.0))
-			var gate_ok := true
-			var gate: Variant = e.get("when", null)
-			if typeof(gate) == TYPE_DICTIONARY:
-				gate_ok = _eval_condition(gate, frame)
-			if gate_ok:
-				timers[name] = cur + _resolve_value(e.get("by"), frame) * dt
-			else:
-				# Decay back to 0 (matches PlayerController's max(0, t - delta)).
-				timers[name] = maxf(0.0, cur - _resolve_value(e.get("else_by", e.get("by")), frame) * dt)
+			var delta := _resolve_value(e.get("by"), frame)
+			if bool(e.get("dt_scaled", false)):
+				delta *= dt
+			var nv := cur + delta
+			if e.has("clamp_min"):
+				nv = maxf(_resolve_value(e.get("clamp_min"), frame), nv)
+			timers[name] = nv
 		"add_velocity":
 			_eff_add_velocity(e, frame)
 		"accelerate_toward":
@@ -392,14 +413,16 @@ func _run_effect(e: Dictionary, frame: InputFrame, dt: float) -> void:
 		"lerp_fov":
 			body.host_lerp_fov(_resolve_value(e.get("target"), frame), _resolve_value(e.get("rate"), frame), dt)
 		"lerp_camera_roll":
-			# `target` is the roll magnitude (degrees). With `from_wall_side` true, the
-			# SIGN comes from the currently-tracked wall (-wall_side * magnitude), so a
-			# right-wall (+1) rolls one way and a left-wall (-1) the other — the
-			# Warframe/Mirror's-Edge wall-run tilt. Sign is computed here (deterministic,
-			# from sampled wall_side), magnitude stays data; the host owns only the lerp.
+			# `target` is the roll magnitude (degrees). With the `sign_from` modifier
+			# (§C, the general "sign from a state var" that subsumes the retired one-off
+			# `from_wall_side`), the SIGN is taken from a named state var: a right-wall
+			# (+1) rolls one way, a left-wall (-1) the other — the Warframe/Mirror's-Edge
+			# wall-run tilt. Render-only (excluded from the trajectory hash); the host
+			# owns only the lerp.
 			var roll_target := _resolve_value(e.get("target"), frame)
-			if bool(e.get("from_wall_side", false)):
-				roll_target = -wall_side * roll_target
+			var sign_var := str(e.get("sign_from", ""))
+			if sign_var != "":
+				roll_target = signf(_read_state_scalar(sign_var)) * roll_target
 			body.host_lerp_camera_roll(roll_target, _resolve_value(e.get("rate"), frame), dt)
 		"tween_position":
 			_eff_tween_position(e, frame)
@@ -411,16 +434,15 @@ func _run_effect(e: Dictionary, frame: InputFrame, dt: float) -> void:
 			push_error("MovementInterpreter: unhandled effect op '%s'" % op)
 
 func _eff_add_velocity(e: Dictionary, frame: InputFrame) -> void:
-	# Add a magnitude along a named space to velocity. For the slide entry boost,
-	# `guard_not_in` names a state from which the boost must NOT re-apply (so it
-	# never compounds while already sliding), and the add is along the *current
-	# horizontal velocity direction* (space "velocity"), clamped via a later
-	# clamp_speed_h effect. Mirrors PlayerController._begin_slide.
-	var guard_state := str(e.get("guard_not_in", ""))
-	if guard_state != "" and active_state == guard_state:
-		return
+	# Add a magnitude along a named space to velocity. The slide entry boost adds
+	# along the *current horizontal velocity direction* (space "velocity"), clamped
+	# via a later clamp_speed_h effect. Mirrors PlayerController._begin_slide. (The
+	# retired `guard_not_in` gate is gone: the boost transitions fire only from
+	# GROUND/AIR, never from SLIDE, so the guard was structurally a no-op — see
+	# docs/decisions/movement-substrate.md §A.)
 	var mag := _resolve_value(e.get("vector"), frame)
-	var space := str(e.get("space", "world"))
+	var space_raw: Variant = e.get("space", "world")
+	var space := str(space_raw) if typeof(space_raw) != TYPE_DICTIONARY else "<obj>"
 	if space == "velocity":
 		var horiz := Vector3(body.velocity.x, 0.0, body.velocity.z)
 		if horiz.length_squared() < 0.001:
@@ -429,7 +451,7 @@ func _eff_add_velocity(e: Dictionary, frame: InputFrame) -> void:
 		body.velocity.x += dir.x * mag
 		body.velocity.z += dir.z * mag
 		return
-	var v := _resolve_space(space, frame) * mag
+	var v := _resolve_space(space_raw, frame) * mag
 	# include_y: also apply the vertical component of the (3D) space vector. Default
 	# false → horizontal-only, exactly as before (every existing add_velocity is
 	# 2D and unaffected). The `aim`/look space is 3D, so bullet jump launches along
@@ -524,9 +546,9 @@ func _eff_air_strafe(e: Dictionary, frame: InputFrame, dt: float) -> void:
 		body.velocity.z = horiz.z
 
 func _eff_apply_friction(e: Dictionary, frame: InputFrame, dt: float) -> void:
-	# only_when_no_wish: skip if there is wish input (accelerate_toward owns that case).
-	if bool(e.get("only_when_no_wish", false)) and frame.wish_dir.length_squared() >= 0.001:
-		return
+	# The "skip friction when there is wish input" case (accelerate_toward owns it) is
+	# now a general guarded effect `when:{not wish_input}` (§A) handled in _run_effect's
+	# top-level skip — the retired `only_when_no_wish` arg is gone.
 	var rate := _resolve_value(e.get("rate"), frame)
 	var horiz := Vector3(body.velocity.x, 0.0, body.velocity.z)
 	horiz = horiz.move_toward(Vector3.ZERO, rate * dt)
@@ -562,7 +584,9 @@ func _eff_slope_accelerate(e: Dictionary, frame: InputFrame, dt: float) -> void:
 		return
 	var floor_normal := body.get_floor_normal()
 	var ang := rad_to_deg(acos(clampf(floor_normal.dot(Vector3.UP), -1.0, 1.0)))
-	if ang <= 2.0:
+	# Slope deadzone (§D): parameterized via slope_min_angle (default 2.0 = the prior
+	# hardcoded literal), so the configuration is data, not a baked kernel number.
+	if ang <= float(kit.params.get("slope_min_angle", 2.0)):
 		return
 	var rate := _resolve_value(e.get("rate"), frame)
 	var ref_angle := _resolve_value(e.get("ref_angle"), frame)
@@ -608,7 +632,7 @@ func _probe_walls(side: String) -> bool:
 		var hit: Dictionary = body.host_wall_ray(s, dist)
 		if not hit.is_empty():
 			var normal: Vector3 = hit["normal"]
-			if absf(normal.y) < 0.3:
+			if absf(normal.y) < float(kit.params.get("wall_max_normal_y", 0.3)):
 				wall_normal = normal
 				wall_side = s
 				return true
@@ -620,7 +644,7 @@ func _wall_still_near() -> bool:
 	if not hit.is_empty():
 		var normal: Vector3 = hit["normal"]
 		wall_normal = normal
-		return absf(normal.y) < 0.3
+		return absf(normal.y) < float(kit.params.get("wall_max_normal_y", 0.3))
 	return false
 
 # ---------------------------------------------------------------------------
@@ -698,10 +722,27 @@ func _resolve_curve(d: Dictionary, frame: InputFrame) -> float:
 	push_error("MovementInterpreter: unknown curve '%s'" % kind)
 	return 0.0
 
-## Resolve a named direction space to a unit-ish vector for this tick.
-## `wish` / `forward` (Slice 1) + `wall_tangent` / `wall_normal` (Slice 2).
-func _resolve_space(space: String, frame: InputFrame) -> Vector3:
-	match space:
+## Resolve a space to a direction vector for this tick. A space is EITHER a bare
+## name (`wish` / `forward` / `aim` / `wall_tangent` / `wall_normal`) OR a modifier
+## object `{ base: <space>, clamp_y_min?: <value>, sign_from?: <var> }` (§C). The
+## modifiers are pure functions of the sampled vector → deterministic.
+func _resolve_space(space: Variant, frame: InputFrame) -> Vector3:
+	if typeof(space) == TYPE_DICTIONARY:
+		var base: Vector3 = _resolve_space(str(space.get("base", "")), frame)
+		# clamp_y_min: forbid a downward (or below-threshold) vertical component, then
+		# renormalize — bullet-jump-never-face-down is clamp_y_min:0 on the aim space.
+		if space.has("clamp_y_min"):
+			var ymin := _resolve_value(space.get("clamp_y_min"), frame)
+			if base.y < ymin:
+				base.y = ymin
+				if base.length() > 0.0001:
+					base = base.normalized()
+		# sign_from: multiply by the sign of a named state scalar.
+		var sf := str(space.get("sign_from", ""))
+		if sf != "":
+			base = base * signf(_read_state_scalar(sf))
+		return base
+	match str(space):
 		"wish":
 			return frame.wish_dir
 		"forward":
@@ -727,6 +768,17 @@ func _resolve_space(space: String, frame: InputFrame) -> Vector3:
 			return wall_normal
 	push_error("MovementInterpreter: unknown space '%s'" % space)
 	return Vector3.ZERO
+
+## Read a named scalar from the sim state for the `sign_from` space/roll modifier
+## (§C). `wall_side` is the tracked wall side (±1); any other name falls back to a
+## numeric var. The minus sign that the retired `from_wall_side` baked in is folded
+## into this single source: wall-tilt leans by signf(-wall_side), preserving the
+## prior Warframe/Mirror's-Edge direction (right wall → roll left, left wall → roll
+## right) with no per-effect special-case.
+func _read_state_scalar(name: String) -> float:
+	if name == "wall_side":
+		return -wall_side
+	return float(timers.get(name, 0.0))
 
 func _speed_h() -> float:
 	return Vector3(body.velocity.x, 0.0, body.velocity.z).length()

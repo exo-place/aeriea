@@ -9,13 +9,18 @@
     "bullet_jump_buffer_time": 0.15
   },
 
+  "comment_vars": "§B — bullet_jump_cd is now a plain DECAYING var (the cooldown is identical: set to bullet_jump_cooldown on launch, drains by dt each tick, gates re-fire via a var<=0 condition). No bespoke timer-guard idiom.",
+  "vars": {
+    "bullet_jump_cd": { "decay": true }
+  },
+
   "add_transitions": {
     "SLIDE": [
       {
         "comment": "Bullet jump out of a slide: jump input while in SLIDE. Priority 95. Stands up (with headroom), sets the guaranteed base-up FIRST, then bursts along the full aim vector (forward+vertical), arms the cooldown. set_velocity_y(base_up) then add_velocity(aim, include_y) => vy = base_up + aim.y*impulse, so level→up arc, up→strong up, down→dive (negative vy).",
         "when": { "op": "all", "of": [
           { "op": "input_buffered", "action": "jump" },
-          { "op": "timer", "name": "bullet_jump_cd", "cmp": "le", "value": 0 }
+          { "op": "var", "name": "bullet_jump_cd", "cmp": "le", "value": 0 }
         ] },
         "to": "AIR",
         "priority": 95,
@@ -23,10 +28,10 @@
           { "do": "set_collider_height", "value": "stand_height", "require_headroom": true },
           { "do": "set_velocity_y", "value": "bullet_jump_base_up" },
           { "do": "add_velocity", "space": "aim", "vector": "bullet_jump_impulse", "include_y": true },
-          { "do": "set_timer", "name": "bullet_jump_cd", "value": "bullet_jump_cooldown" },
-          { "do": "set_timer", "name": "jump_buffer", "value": 0 },
-          { "do": "set_timer", "name": "jump_hold", "value": 0 },
-          { "do": "set_timer", "name": "slide_steer", "value": 0 }
+          { "do": "set_var", "name": "bullet_jump_cd", "value": "bullet_jump_cooldown" },
+          { "do": "set_var", "name": "jump_buffer", "value": 0 },
+          { "do": "set_var", "name": "jump_hold", "value": 0 },
+          { "do": "set_var", "name": "slide_steer", "value": 0 }
         ]
       }
     ],
@@ -35,7 +40,7 @@
         "comment": "Bullet jump out of a crouch: jump input while in CROUCH. Priority 95. Stands up, sets the guaranteed base-up FIRST, then bursts along the full aim vector (forward+vertical), arms the cooldown. Same along-aim launch as the slide variant.",
         "when": { "op": "all", "of": [
           { "op": "input_buffered", "action": "jump" },
-          { "op": "timer", "name": "bullet_jump_cd", "cmp": "le", "value": 0 }
+          { "op": "var", "name": "bullet_jump_cd", "cmp": "le", "value": 0 }
         ] },
         "to": "AIR",
         "priority": 95,
@@ -43,9 +48,9 @@
           { "do": "set_collider_height", "value": "stand_height", "require_headroom": true },
           { "do": "set_velocity_y", "value": "bullet_jump_base_up" },
           { "do": "add_velocity", "space": "aim", "vector": "bullet_jump_impulse", "include_y": true },
-          { "do": "set_timer", "name": "bullet_jump_cd", "value": "bullet_jump_cooldown" },
-          { "do": "set_timer", "name": "jump_buffer", "value": 0 },
-          { "do": "set_timer", "name": "jump_hold", "value": 0 }
+          { "do": "set_var", "name": "bullet_jump_cd", "value": "bullet_jump_cooldown" },
+          { "do": "set_var", "name": "jump_buffer", "value": 0 },
+          { "do": "set_var", "name": "jump_hold", "value": 0 }
         ]
       }
     ]

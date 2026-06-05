@@ -24,7 +24,7 @@ extends RefCounted
 ## are an engine change reviewed against "collapse asymmetries to primitives" —
 ## never a per-verb hack.
 const COND_OPS := [
-	"on_ground", "airborne", "speed_h", "speed_v", "timer",
+	"on_ground", "airborne", "speed_h", "speed_v", "var",
 	"input_pressed", "input_buffered", "wish_input",
 	"wall_detected", "wall_still_near", "ledge_vaultable", "headroom",
 	"slope_angle", "below_y",
@@ -39,7 +39,7 @@ const EFFECT_OPS := [
 	"accelerate_toward", "air_strafe", "apply_friction", "apply_gravity",
 	"set_velocity_y", "set_velocity_y_max", "add_velocity", "carve",
 	"slope_accelerate", "clamp_speed_h", "zero_velocity_h", "set_collider_height",
-	"set_timer", "add_timer",
+	"set_var", "add_var",
 	"lerp_camera_height", "lerp_fov", "lerp_camera_roll",
 	"tween_position", "respawn", "move_and_slide",
 ]
@@ -79,6 +79,14 @@ class InputSpec:
 # ---------------------------------------------------------------------------
 
 var params: Dictionary = {}             # name -> float (Vec3 support is a later leaf)
+## Declared numeric state vars (generalize timers/cooldowns/counters; §B). Each
+## entry: name -> { "decay": bool }. Decaying vars are reduced by dt once per tick
+## (today's countdown timers); non-decaying vars (counters / resources like
+## jump_hold, slide_steer, air_jumps) accumulate/consume explicitly and are never
+## auto-decremented. Vars not declared here default to DECAYING (matches the legacy
+## behavior where every timer except jump_hold/slide_steer was decremented), so the
+## decay set is bit-identical to the pre-refactor hardcoded exclusion list.
+var vars: Dictionary = {}               # name -> { decay: bool }
 var inputs: Dictionary = {}             # action -> InputSpec
 var initial: String = ""
 var states: Dictionary = {}             # name -> MovementState
@@ -147,6 +155,8 @@ static func compose(base: Dictionary, patches: Array) -> Dictionary:
 	var out: Dictionary = base.duplicate(true)
 	if typeof(out.get("params")) != TYPE_DICTIONARY:
 		out["params"] = {}
+	if typeof(out.get("vars")) != TYPE_DICTIONARY:
+		out["vars"] = {}
 	if typeof(out.get("inputs")) != TYPE_DICTIONARY:
 		out["inputs"] = {}
 	if typeof(out.get("states")) != TYPE_ARRAY:
@@ -166,6 +176,12 @@ static func compose(base: Dictionary, patches: Array) -> Dictionary:
 		if typeof(p_params) == TYPE_DICTIONARY:
 			for k in p_params:
 				out["params"][k] = p_params[k]
+		# Merge var declarations (verb vars add/override; the multi-jump air_jumps
+		# resource var arrives this way).
+		var p_vars: Variant = patch.get("vars", {})
+		if typeof(p_vars) == TYPE_DICTIONARY:
+			for k in p_vars:
+				out["vars"][k] = p_vars[k]
 		# Merge inputs.
 		var p_inputs: Variant = patch.get("inputs", {})
 		if typeof(p_inputs) == TYPE_DICTIONARY:
@@ -249,6 +265,21 @@ func _load_from_dict(data: Dictionary) -> void:
 			params[k] = float(raw_params[k])
 	else:
 		_err("params must be an object")
+
+	# Declared numeric state vars (§B). Each: name -> { decay: bool }. Undeclared
+	# vars default to decaying; declaring decay:false makes a counter/resource.
+	var raw_vars: Variant = data.get("vars", {})
+	if typeof(raw_vars) == TYPE_DICTIONARY:
+		for vn in raw_vars:
+			var vdef: Variant = raw_vars[vn]
+			var decay := true
+			if typeof(vdef) == TYPE_DICTIONARY:
+				decay = bool(vdef.get("decay", true))
+			else:
+				_err("var '%s' must be an object { decay: bool }" % str(vn))
+			vars[str(vn)] = { "decay": decay }
+	elif raw_vars != null:
+		_err("vars must be an object")
 
 	# Inputs
 	var raw_inputs: Variant = data.get("inputs", {})
@@ -367,8 +398,27 @@ func _load_effects(raw: Variant, ctx: String) -> Array:
 		var op: String = str(e.get("do", ""))
 		if not EFFECT_OPS.has(op):
 			_err("%s: unknown effect op '%s' (one of %s)" % [ctx, op, str(EFFECT_OPS)])
+		# Guarded effect (§A, adopted from interaction): an effect may carry a
+		# top-level `when` Condition; it is skipped when the guard is false. Validate
+		# it as a condition (mirrors interaction_kit.gd's per-effect when validation).
+		if e.has("when") and typeof(e["when"]) == TYPE_DICTIONARY:
+			_validate_condition(e["when"], "%s effect '%s'.when" % [ctx, op])
+		# Space modifiers (§C): a `space` may be a bare name or an object
+		# { base: <space>, <modifier>: … }. Validate the modifier shape.
+		if e.has("space") and typeof(e["space"]) == TYPE_DICTIONARY:
+			_validate_space(e["space"], "%s effect '%s'.space" % [ctx, op])
 		out.append(e)
 	return out
+
+## Validate a space modifier object { base: <name>, clamp_y_min?: <value>,
+## sign_from?: <var-name> }. Bare-string spaces need no validation (resolver checks).
+func _validate_space(s: Dictionary, ctx: String) -> void:
+	if str(s.get("base", "")) == "":
+		_err("%s: space modifier needs a 'base' space name" % ctx)
+	if s.has("clamp_y_min"):
+		_validate_value(s.get("clamp_y_min"), ctx)
+	if s.has("sign_from") and str(s.get("sign_from", "")) == "":
+		_err("%s: space modifier 'sign_from' needs a state-var name" % ctx)
 
 func _validate_condition(cond: Dictionary, ctx: String) -> void:
 	var op: String = str(cond.get("op", ""))
@@ -391,9 +441,9 @@ func _validate_condition(cond: Dictionary, ctx: String) -> void:
 			_validate_value(cond.get("value"), ctx)
 		"below_y":
 			_validate_value(cond.get("value"), ctx)
-		"timer":
+		"var":
 			if str(cond.get("name", "")) == "":
-				_err("%s: timer condition needs a 'name'" % ctx)
+				_err("%s: var condition needs a 'name'" % ctx)
 			_validate_cmp(cond, ctx)
 			_validate_value(cond.get("value"), ctx)
 		"input_pressed", "input_buffered":

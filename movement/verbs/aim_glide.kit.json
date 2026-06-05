@@ -10,6 +10,11 @@
     "glide_max_time": 2.5
   },
 
+  "comment_vars": "§B — glide is a decaying var (the glide time budget): set on entry, drains by dt, ends the float via var<=0.",
+  "vars": {
+    "glide": { "decay": true }
+  },
+
   "comment_inputs": "Declare the `aim` action so the interpreter samples it each tick (input_pressed reads the sampled frame). No buffer/hold — a plain held button.",
   "inputs": {
     "aim": {}
@@ -26,7 +31,7 @@
         ] },
         "to": "GLIDE",
         "priority": 45,
-        "do": [ { "do": "set_timer", "name": "glide", "value": "glide_max_time" } ]
+        "do": [ { "do": "set_var", "name": "glide", "value": "glide_max_time" } ]
       }
     ]
   },
@@ -40,15 +45,15 @@
           "comment": "Coyote/buffered jump out of a glide (reuse the air-jump idiom): a buffered jump while gliding cancels the float into a normal jump. Highest priority.",
           "when": { "op": "all", "of": [
             { "op": "input_buffered", "action": "jump" },
-            { "op": "timer", "name": "coyote", "cmp": "gt", "value": 0 }
+            { "op": "var", "name": "coyote", "cmp": "gt", "value": 0 }
           ] },
           "to": "AIR",
           "priority": 90,
           "reenter": true,
           "do": [
             { "do": "set_velocity_y", "value": "jump_velocity" },
-            { "do": "set_timer", "name": "coyote", "value": 0 },
-            { "do": "set_timer", "name": "jump_buffer", "value": 0 }
+            { "do": "set_var", "name": "coyote", "value": 0 },
+            { "do": "set_var", "name": "jump_buffer", "value": 0 }
           ]
         },
         {
@@ -60,7 +65,7 @@
         },
         {
           "comment": "Glide budget drained → resume normal fall.",
-          "when": { "op": "timer", "name": "glide", "cmp": "le", "value": 0 },
+          "when": { "op": "var", "name": "glide", "cmp": "le", "value": 0 },
           "to": "AIR",
           "priority": 60
         },

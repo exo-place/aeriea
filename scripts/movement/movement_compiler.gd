@@ -149,8 +149,8 @@ func _emit_setup() -> void:
 	_line("\ttimers = {}")
 	_line("\tfor action in kit.inputs:")
 	_line("\t\ttimers[action] = 0.0")
-	_line("\tfor t in [\"coyote\", \"jump_buffer\", \"jump_hold\", \"slide\", \"slide_steer\", \"wall_run\", \"wall_jump_grace\", \"vault\"]:")
-	_line("\t\ttimers[t] = 0.0")
+	_line("\tfor vn in kit.vars:")
+	_line("\t\ttimers[vn] = 0.0")
 	_line("\tfor action in kit.inputs:")
 	_line("\t\t_held_last[action] = false")
 	_line("")
@@ -179,11 +179,10 @@ func _emit_step() -> void:
 		_line("\t\tactive_state = %s" % _quote(tr.to_state))
 		_line("\t\treturn")
 	_line("")
-	_line("\t# Decrement countdown timers (jump_hold / slide_steer excluded).")
+	_line("\t# Decrement DECAYING numeric vars (decay:false counters excluded), §B.")
 	_line("\tfor tname in timers:")
-	_line("\t\tif tname == \"jump_hold\" or tname == \"slide_steer\":")
-	_line("\t\t\tcontinue")
-	_line("\t\ttimers[tname] = maxf(0.0, float(timers[tname]) - dt)")
+	_line("\t\tif _is_decaying(tname):")
+	_line("\t\t\ttimers[tname] = maxf(0.0, float(timers[tname]) - dt)")
 	_line("")
 	_line("\t# Transition evaluation with bounded reenter loop, then tick.")
 	_line("\tvar guard := 0")
@@ -304,7 +303,7 @@ func _lower_condition(cond: Dictionary) -> String:
 			return _lower_cmp("_speed_h()", str(cond.get("cmp", "")), cond.get("value"))
 		"speed_v":
 			return _lower_cmp("body.velocity.y", str(cond.get("cmp", "")), cond.get("value"))
-		"timer":
+		"var":
 			var tn := _quote(str(cond.get("name", "")))
 			return _lower_cmp("float(timers.get(%s, 0.0))" % tn, str(cond.get("cmp", "")), cond.get("value"))
 		"input_pressed":
@@ -349,6 +348,20 @@ func _lower_condition(cond: Dictionary) -> String:
 			return "true"
 	push_error("MovementCompiler: unhandled condition op '%s'" % op)
 	return "false"
+
+## Lower a `space` argument (bare name or modifier object, §C) to a GDScript literal
+## the kernels resolve via _resolve_space(space, frame). A bare name → a quoted
+## string; a modifier object → a Dictionary literal with constant-folded values.
+func _lower_space(space: Variant) -> String:
+	if typeof(space) == TYPE_DICTIONARY:
+		var parts: Array = []
+		parts.append("\"base\": %s" % _quote(str(space.get("base", ""))))
+		if space.has("clamp_y_min"):
+			parts.append("\"clamp_y_min\": %s" % _lower_value(space.get("clamp_y_min")))
+		if space.has("sign_from"):
+			parts.append("\"sign_from\": %s" % _quote(str(space.get("sign_from"))))
+		return "{ " + ", ".join(parts) + " }"
+	return _quote(str(space))
 
 func _lower_cmp(lhs: String, op: String, value: Variant) -> String:
 	var rhs := _lower_value(value)
@@ -431,21 +444,29 @@ func _emit_effects(effects: Array, indent: String) -> void:
 	for e: Variant in effects:
 		_emit_effect(e, indent)
 
-func _emit_effect(e: Dictionary, indent: String) -> void:
+func _emit_effect(e: Dictionary, base_indent: String) -> void:
+	# Guarded effect (§A): a top-level `when` wraps the emitted body in an `if`,
+	# mirroring the interpreter's _run_effect early-skip exactly — the body runs only
+	# when the guard holds, short-circuiting before any state write.
+	var indent := base_indent
+	var guard: Variant = e.get("when", null)
+	if typeof(guard) == TYPE_DICTIONARY:
+		_line("%sif %s:" % [base_indent, _lower_condition(guard)])
+		indent = base_indent + "\t"
 	var op: String = str(e.get("do", ""))
 	match op:
 		"set_velocity_y":
 			_line("%sbody.velocity.y = %s" % [indent, _lower_value(e.get("value"))])
 		"set_velocity_y_max":
 			_line("%sbody.velocity.y = maxf(body.velocity.y, %s)" % [indent, _lower_value(e.get("value"))])
-		"set_timer":
+		"set_var":
 			_line("%stimers[%s] = %s" % [indent, _quote(str(e.get("name", ""))), _lower_value(e.get("value"))])
-		"add_timer":
-			_emit_add_timer(e, indent)
+		"add_var":
+			_emit_add_var(e, indent)
 		"add_velocity":
-			_line("%s_k_add_velocity(frame, %s, %s, %s, %s, %s)" % [
-				indent, _lower_value(e.get("vector")), _quote(str(e.get("space", "world"))),
-				_quote(str(e.get("guard_not_in", ""))), str(bool(e.get("replace", false))).to_lower(),
+			_line("%s_k_add_velocity(frame, %s, %s, %s, %s)" % [
+				indent, _lower_value(e.get("vector")), _lower_space(e.get("space", "world")),
+				str(bool(e.get("replace", false))).to_lower(),
 				str(bool(e.get("include_y", false))).to_lower()])
 		"accelerate_toward":
 			_line("%s_k_accelerate_toward(frame, dt, %s, %s, %s)" % [
@@ -456,8 +477,8 @@ func _emit_effect(e: Dictionary, indent: String) -> void:
 				indent, _quote(str(e.get("space", "wish"))),
 				_lower_value(e.get("cap")), _lower_value(e.get("rate"))])
 		"apply_friction":
-			_line("%s_k_apply_friction(frame, dt, %s, %s)" % [
-				indent, _lower_value(e.get("rate")), str(bool(e.get("only_when_no_wish", false))).to_lower()])
+			_line("%s_k_apply_friction(frame, dt, %s)" % [
+				indent, _lower_value(e.get("rate"))])
 		"apply_gravity":
 			var min_vy := "INF" if not e.has("min_vy") else _lower_value(e.get("min_vy"))
 			var has_min := str(e.has("min_vy")).to_lower()
@@ -483,10 +504,12 @@ func _emit_effect(e: Dictionary, indent: String) -> void:
 			_line("%sbody.host_lerp_fov(%s, %s, dt)" % [
 				indent, _lower_value(e.get("target")), _lower_value(e.get("rate"))])
 		"lerp_camera_roll":
-			# target is the roll magnitude; from_wall_side -> sign -wall_side*mag.
-			if bool(e.get("from_wall_side", false)):
-				_line("%sbody.host_lerp_camera_roll(-wall_side * %s, %s, dt)" % [
-					indent, _lower_value(e.get("target")), _lower_value(e.get("rate"))])
+			# target is the roll magnitude; the `sign_from` modifier (§C) takes the sign
+			# from a named state scalar via _read_state_scalar, mirroring the interpreter.
+			var sign_var := str(e.get("sign_from", ""))
+			if sign_var != "":
+				_line("%sbody.host_lerp_camera_roll(signf(_read_state_scalar(%s)) * %s, %s, dt)" % [
+					indent, _quote(sign_var), _lower_value(e.get("target")), _lower_value(e.get("rate"))])
 			else:
 				_line("%sbody.host_lerp_camera_roll(%s, %s, dt)" % [
 					indent, _lower_value(e.get("target")), _lower_value(e.get("rate"))])
@@ -500,19 +523,18 @@ func _emit_effect(e: Dictionary, indent: String) -> void:
 		_:
 			push_error("MovementCompiler: unhandled effect op '%s'" % op)
 
-func _emit_add_timer(e: Dictionary, indent: String) -> void:
-	# Lower add_timer with its optional gate condition inline.
+func _emit_add_var(e: Dictionary, indent: String) -> void:
+	# Lower add_var (§B): cur + by[*dt], optionally floored by clamp_min. Mirrors the
+	# interpreter's add_var arithmetic exactly. Any guarding `when` was already emitted
+	# as an `if` wrapper by _emit_effect, so here we only emit the add itself.
 	var name := _quote(str(e.get("name", "")))
-	var by := _lower_value(e.get("by"))
-	var else_by := _lower_value(e.get("else_by", e.get("by")))
-	var gate: Variant = e.get("when", null)
-	var gate_expr := "true"
-	if typeof(gate) == TYPE_DICTIONARY:
-		gate_expr = _lower_condition(gate)
-	_line("%sif %s:" % [indent, gate_expr])
-	_line("%s\ttimers[%s] = float(timers.get(%s, 0.0)) + %s * dt" % [indent, name, name, by])
-	_line("%selse:" % indent)
-	_line("%s\ttimers[%s] = maxf(0.0, float(timers.get(%s, 0.0)) - %s * dt)" % [indent, name, name, else_by])
+	var delta := _lower_value(e.get("by"))
+	if bool(e.get("dt_scaled", false)):
+		delta = "(%s) * dt" % delta
+	var expr := "float(timers.get(%s, 0.0)) + (%s)" % [name, delta]
+	if e.has("clamp_min"):
+		expr = "maxf(%s, %s)" % [_lower_value(e.get("clamp_min")), expr]
+	_line("%stimers[%s] = %s" % [indent, name, expr])
 
 # ---------------------------------------------------------------------------
 # Kernels — copied from MovementInterpreter so numerics are bit-identical.
@@ -546,8 +568,31 @@ func _wish_aligned(frame: InputFrame, cmp: String, value: float) -> bool:
 		"eq": return is_equal_approx(dot, value)
 	return false
 
-func _resolve_space(space: String, frame: InputFrame) -> Vector3:
-	match space:
+func _read_state_scalar(name: String) -> float:
+	if name == "wall_side":
+		return -wall_side
+	return float(timers.get(name, 0.0))
+
+func _is_decaying(name: String) -> bool:
+	var vdef: Variant = kit.vars.get(name, null)
+	if typeof(vdef) == TYPE_DICTIONARY:
+		return bool(vdef.get("decay", true))
+	return true
+
+func _resolve_space(space: Variant, frame: InputFrame) -> Vector3:
+	if typeof(space) == TYPE_DICTIONARY:
+		var base: Vector3 = _resolve_space(str(space.get("base", "")), frame)
+		if space.has("clamp_y_min"):
+			var ymin: float = float(space.get("clamp_y_min"))
+			if base.y < ymin:
+				base.y = ymin
+				if base.length() > 0.0001:
+					base = base.normalized()
+		var sf := str(space.get("sign_from", ""))
+		if sf != "":
+			base = base * signf(_read_state_scalar(sf))
+		return base
+	match str(space):
 		"wish":
 			return frame.wish_dir
 		"forward":
@@ -594,7 +639,7 @@ func _probe_walls(side: String) -> bool:
 		var hit: Dictionary = body.host_wall_ray(s, dist)
 		if not hit.is_empty():
 			var normal: Vector3 = hit["normal"]
-			if absf(normal.y) < 0.3:
+			if absf(normal.y) < float(kit.params.get("wall_max_normal_y", 0.3)):
 				wall_normal = normal
 				wall_side = s
 				return true
@@ -606,12 +651,11 @@ func _wall_still_near() -> bool:
 	if not hit.is_empty():
 		var normal: Vector3 = hit["normal"]
 		wall_normal = normal
-		return absf(normal.y) < 0.3
+		return absf(normal.y) < float(kit.params.get("wall_max_normal_y", 0.3))
 	return false
 
-func _k_add_velocity(frame: InputFrame, mag: float, space: String, guard_not_in: String, replace: bool, include_y: bool) -> void:
-	if guard_not_in != "" and active_state == guard_not_in:
-		return
+func _k_add_velocity(frame: InputFrame, mag: float, space_raw: Variant, replace: bool, include_y: bool) -> void:
+	var space := str(space_raw) if typeof(space_raw) != TYPE_DICTIONARY else "<obj>"
 	if space == "velocity":
 		var horiz := Vector3(body.velocity.x, 0.0, body.velocity.z)
 		if horiz.length_squared() < 0.001:
@@ -620,7 +664,7 @@ func _k_add_velocity(frame: InputFrame, mag: float, space: String, guard_not_in:
 		body.velocity.x += dir.x * mag
 		body.velocity.z += dir.z * mag
 		return
-	var v := _resolve_space(space, frame) * mag
+	var v := _resolve_space(space_raw, frame) * mag
 	if replace:
 		body.velocity.x = v.x
 		body.velocity.z = v.z
@@ -682,9 +726,7 @@ func _k_air_strafe(frame: InputFrame, dt: float, space: String, cap: float, rate
 		body.velocity.x = horiz.x
 		body.velocity.z = horiz.z
 
-func _k_apply_friction(frame: InputFrame, dt: float, rate: float, only_when_no_wish: bool) -> void:
-	if only_when_no_wish and frame.wish_dir.length_squared() >= 0.001:
-		return
+func _k_apply_friction(frame: InputFrame, dt: float, rate: float) -> void:
 	var horiz := Vector3(body.velocity.x, 0.0, body.velocity.z)
 	horiz = horiz.move_toward(Vector3.ZERO, rate * dt)
 	body.velocity.x = horiz.x
@@ -711,7 +753,7 @@ func _k_slope_accelerate(dt: float, rate: float, ref_angle: float) -> void:
 		return
 	var floor_normal := body.get_floor_normal()
 	var ang := rad_to_deg(acos(clampf(floor_normal.dot(Vector3.UP), -1.0, 1.0)))
-	if ang <= 2.0:
+	if ang <= float(kit.params.get("slope_min_angle", 2.0)):
 		return
 	if ref_angle <= 0.0:
 		ref_angle = 45.0

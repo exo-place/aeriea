@@ -62,6 +62,7 @@ const P_camera_height_lerp_speed := 12.0
 const P_camera_height_stand := 0.85
 const P_camera_roll_lerp_speed := 10.0
 const P_camera_roll_level := 0.0
+const P_comment_thresholds := 0.0
 const P_coyote_time := 0.12
 const P_crouch_height := 0.6
 const P_crouch_walk_speed := 2.8
@@ -88,6 +89,7 @@ const P_slide_max_time := 1.8
 const P_slide_steer_accel := 16.0
 const P_slide_steer_exit_time := 0.18
 const P_slope_acceleration := 18.0
+const P_slope_min_angle := 2.0
 const P_sprint_speed := 10.0
 const P_stand_height := 0.9
 const P_vault_duration := 0.28
@@ -100,6 +102,7 @@ const P_wall_detect_distance := 0.65
 const P_wall_jump_grace := 0.12
 const P_wall_jump_lateral := 6.5
 const P_wall_jump_up := 8.0
+const P_wall_max_normal_y := 0.3
 const P_wall_run_camera_tilt := 8.0
 const P_wall_run_gravity_ramp := 1.8
 const P_wall_run_gravity_scale := 0.15
@@ -117,8 +120,8 @@ func setup(p_kit: MovementKit, p_body: CharacterBody3D) -> void:
 	timers = {}
 	for action in kit.inputs:
 		timers[action] = 0.0
-	for t in ["coyote", "jump_buffer", "jump_hold", "slide", "slide_steer", "wall_run", "wall_jump_grace", "vault"]:
-		timers[t] = 0.0
+	for vn in kit.vars:
+		timers[vn] = 0.0
 	for action in kit.inputs:
 		_held_last[action] = false
 
@@ -138,11 +141,10 @@ func step(dt: float) -> void:
 		active_state = "AIR"
 		return
 
-	# Decrement countdown timers (jump_hold / slide_steer excluded).
+	# Decrement DECAYING numeric vars (decay:false counters excluded), §B.
 	for tname in timers:
-		if tname == "jump_hold" or tname == "slide_steer":
-			continue
-		timers[tname] = maxf(0.0, float(timers[tname]) - dt)
+		if _is_decaying(tname):
+			timers[tname] = maxf(0.0, float(timers[tname]) - dt)
 
 	# Transition evaluation with bounded reenter loop, then tick.
 	var guard := 0
@@ -203,7 +205,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			active_state = "VAULT"
 			return false
 		elif (frame.is_pressed("crouch") and (_speed_h() >= P_slide_entry_speed)):
-			_k_add_velocity(frame, P_slide_boost, "velocity", "SLIDE", false, false)
+			_k_add_velocity(frame, P_slide_boost, "velocity", false, false)
 			_k_clamp_speed_h(P_max_slide_speed)
 			body.host_set_collider_height(P_crouch_height, false)
 			timers["slide"] = P_slide_max_time
@@ -228,7 +230,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			active_state = "AIR"
 			return true
 		elif ((float(timers.get("jump", 0.0)) > 0.0) and (float(timers.get("wall_jump_grace", 0.0)) > 0.0)):
-			_k_add_velocity(frame, P_wall_jump_lateral, "wall_normal", "", true, false)
+			_k_add_velocity(frame, P_wall_jump_lateral, "wall_normal", true, false)
 			body.velocity.y = P_wall_jump_up
 			timers["wall_jump_grace"] = 0.0
 			timers["jump_buffer"] = 0.0
@@ -254,7 +256,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			active_state = "GLIDE"
 			return false
 		elif (body.is_on_floor() and (body.velocity.y <= 0.0) and frame.is_pressed("crouch") and (_speed_h() >= P_slide_entry_speed)):
-			_k_add_velocity(frame, P_slide_boost, "velocity", "SLIDE", false, false)
+			_k_add_velocity(frame, P_slide_boost, "velocity", false, false)
 			_k_clamp_speed_h(P_max_slide_speed)
 			body.host_set_collider_height(P_crouch_height, false)
 			timers["slide"] = P_slide_max_time
@@ -271,7 +273,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 		if ((float(timers.get("jump", 0.0)) > 0.0) and (float(timers.get("bullet_jump_cd", 0.0)) <= 0.0)):
 			body.host_set_collider_height(P_stand_height, true)
 			body.velocity.y = P_bullet_jump_base_up
-			_k_add_velocity(frame, P_bullet_jump_impulse, "aim", "", false, true)
+			_k_add_velocity(frame, P_bullet_jump_impulse, "aim", false, true)
 			timers["bullet_jump_cd"] = P_bullet_jump_cooldown
 			timers["jump_buffer"] = 0.0
 			timers["jump_hold"] = 0.0
@@ -296,7 +298,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 		if ((float(timers.get("jump", 0.0)) > 0.0) and (float(timers.get("bullet_jump_cd", 0.0)) <= 0.0)):
 			body.host_set_collider_height(P_stand_height, true)
 			body.velocity.y = P_bullet_jump_base_up
-			_k_add_velocity(frame, P_bullet_jump_impulse, "aim", "", false, true)
+			_k_add_velocity(frame, P_bullet_jump_impulse, "aim", false, true)
 			timers["bullet_jump_cd"] = P_bullet_jump_cooldown
 			timers["jump_buffer"] = 0.0
 			timers["jump_hold"] = 0.0
@@ -318,7 +320,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 		return false
 	elif active_state == "WALL_RUN":
 		if (float(timers.get("jump", 0.0)) > 0.0):
-			_k_add_velocity(frame, P_wall_jump_lateral, "wall_normal", "", true, false)
+			_k_add_velocity(frame, P_wall_jump_lateral, "wall_normal", true, false)
 			body.velocity.y = P_wall_jump_up
 			timers["wall_jump_grace"] = 0.0
 			timers["jump_buffer"] = 0.0
@@ -386,7 +388,8 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 func _run_tick(frame: InputFrame, dt: float) -> void:
 	if active_state == "GROUND":
 		_k_accelerate_toward(frame, dt, "wish", (P_sprint_speed if frame.is_pressed("sprint") else P_walk_speed), P_ground_acceleration)
-		_k_apply_friction(frame, dt, P_ground_friction, true)
+		if (not (frame.wish_dir.length_squared() >= 0.001)):
+			_k_apply_friction(frame, dt, P_ground_friction)
 		body.velocity.y = P_ground_snap_bias
 		body.move_and_slide()
 		body.host_lerp_camera_height(P_camera_height_stand, P_camera_height_lerp_speed, dt)
@@ -401,18 +404,19 @@ func _run_tick(frame: InputFrame, dt: float) -> void:
 		_k_slope_accelerate(dt, P_slope_acceleration, 45.0)
 		_k_clamp_speed_h(P_max_slide_speed)
 		_k_carve(frame, dt, P_slide_steer_accel)
-		_k_apply_friction(frame, dt, P_slide_friction, false)
+		_k_apply_friction(frame, dt, P_slide_friction)
 		if ((frame.wish_dir.length_squared() >= 0.001) and (_speed_h() > 0.001) and _wish_aligned(frame, "gt", 0.5)):
-			timers["slide_steer"] = float(timers.get("slide_steer", 0.0)) + 1.0 * dt
-		else:
-			timers["slide_steer"] = maxf(0.0, float(timers.get("slide_steer", 0.0)) - 1.0 * dt)
+			timers["slide_steer"] = float(timers.get("slide_steer", 0.0)) + ((1.0) * dt)
+		if (not ((frame.wish_dir.length_squared() >= 0.001) and (_speed_h() > 0.001) and _wish_aligned(frame, "gt", 0.5))):
+			timers["slide_steer"] = maxf(0.0, float(timers.get("slide_steer", 0.0)) + ((-1.0) * dt))
 		body.velocity.y = P_ground_snap_bias
 		body.move_and_slide()
 		body.host_lerp_camera_height(P_camera_height_crouch, P_camera_height_lerp_speed, dt)
 		body.host_lerp_camera_roll(P_camera_roll_level, P_camera_roll_lerp_speed, dt)
 	elif active_state == "CROUCH":
 		_k_accelerate_toward(frame, dt, "wish", P_crouch_walk_speed, P_ground_acceleration)
-		_k_apply_friction(frame, dt, P_ground_friction, true)
+		if (not (frame.wish_dir.length_squared() >= 0.001)):
+			_k_apply_friction(frame, dt, P_ground_friction)
 		body.velocity.y = P_ground_snap_bias
 		body.move_and_slide()
 		body.host_lerp_camera_height(P_camera_height_crouch, P_camera_height_lerp_speed, dt)
@@ -421,7 +425,7 @@ func _run_tick(frame: InputFrame, dt: float) -> void:
 		_k_apply_gravity(dt, _curve_ramp("wall_run", P_wall_run_max_time, P_wall_run_gravity_scale, 1.0, P_wall_run_gravity_ramp), true, -9.8)
 		_k_accelerate_toward(frame, dt, "wall_tangent", P_wall_run_speed, P_wall_run_speed_rate)
 		body.move_and_slide()
-		body.host_lerp_camera_roll(-wall_side * P_wall_run_camera_tilt, P_camera_roll_lerp_speed, dt)
+		body.host_lerp_camera_roll(signf(_read_state_scalar("wall_side")) * P_wall_run_camera_tilt, P_camera_roll_lerp_speed, dt)
 	elif active_state == "VAULT":
 		_k_tween_position("vault", P_vault_duration)
 	elif active_state == "GLIDE":
@@ -432,7 +436,7 @@ func _run_tick(frame: InputFrame, dt: float) -> void:
 	elif active_state == "WALL_CLING":
 		_k_apply_gravity(dt, P_wall_cling_gravity_scale, true, P_wall_cling_min_vy)
 		body.move_and_slide()
-		body.host_lerp_camera_roll(-wall_side * P_wall_run_camera_tilt, P_camera_roll_lerp_speed, dt)
+		body.host_lerp_camera_roll(signf(_read_state_scalar("wall_side")) * P_wall_run_camera_tilt, P_camera_roll_lerp_speed, dt)
 
 
 func _speed_h() -> float:
@@ -459,8 +463,31 @@ func _wish_aligned(frame: InputFrame, cmp: String, value: float) -> bool:
 		"eq": return is_equal_approx(dot, value)
 	return false
 
-func _resolve_space(space: String, frame: InputFrame) -> Vector3:
-	match space:
+func _read_state_scalar(name: String) -> float:
+	if name == "wall_side":
+		return -wall_side
+	return float(timers.get(name, 0.0))
+
+func _is_decaying(name: String) -> bool:
+	var vdef: Variant = kit.vars.get(name, null)
+	if typeof(vdef) == TYPE_DICTIONARY:
+		return bool(vdef.get("decay", true))
+	return true
+
+func _resolve_space(space: Variant, frame: InputFrame) -> Vector3:
+	if typeof(space) == TYPE_DICTIONARY:
+		var base: Vector3 = _resolve_space(str(space.get("base", "")), frame)
+		if space.has("clamp_y_min"):
+			var ymin: float = float(space.get("clamp_y_min"))
+			if base.y < ymin:
+				base.y = ymin
+				if base.length() > 0.0001:
+					base = base.normalized()
+		var sf := str(space.get("sign_from", ""))
+		if sf != "":
+			base = base * signf(_read_state_scalar(sf))
+		return base
+	match str(space):
 		"wish":
 			return frame.wish_dir
 		"forward":
@@ -507,7 +534,7 @@ func _probe_walls(side: String) -> bool:
 		var hit: Dictionary = body.host_wall_ray(s, dist)
 		if not hit.is_empty():
 			var normal: Vector3 = hit["normal"]
-			if absf(normal.y) < 0.3:
+			if absf(normal.y) < float(kit.params.get("wall_max_normal_y", 0.3)):
 				wall_normal = normal
 				wall_side = s
 				return true
@@ -519,12 +546,11 @@ func _wall_still_near() -> bool:
 	if not hit.is_empty():
 		var normal: Vector3 = hit["normal"]
 		wall_normal = normal
-		return absf(normal.y) < 0.3
+		return absf(normal.y) < float(kit.params.get("wall_max_normal_y", 0.3))
 	return false
 
-func _k_add_velocity(frame: InputFrame, mag: float, space: String, guard_not_in: String, replace: bool, include_y: bool) -> void:
-	if guard_not_in != "" and active_state == guard_not_in:
-		return
+func _k_add_velocity(frame: InputFrame, mag: float, space_raw: Variant, replace: bool, include_y: bool) -> void:
+	var space := str(space_raw) if typeof(space_raw) != TYPE_DICTIONARY else "<obj>"
 	if space == "velocity":
 		var horiz := Vector3(body.velocity.x, 0.0, body.velocity.z)
 		if horiz.length_squared() < 0.001:
@@ -533,7 +559,7 @@ func _k_add_velocity(frame: InputFrame, mag: float, space: String, guard_not_in:
 		body.velocity.x += dir.x * mag
 		body.velocity.z += dir.z * mag
 		return
-	var v := _resolve_space(space, frame) * mag
+	var v := _resolve_space(space_raw, frame) * mag
 	if replace:
 		body.velocity.x = v.x
 		body.velocity.z = v.z
@@ -595,9 +621,7 @@ func _k_air_strafe(frame: InputFrame, dt: float, space: String, cap: float, rate
 		body.velocity.x = horiz.x
 		body.velocity.z = horiz.z
 
-func _k_apply_friction(frame: InputFrame, dt: float, rate: float, only_when_no_wish: bool) -> void:
-	if only_when_no_wish and frame.wish_dir.length_squared() >= 0.001:
-		return
+func _k_apply_friction(frame: InputFrame, dt: float, rate: float) -> void:
 	var horiz := Vector3(body.velocity.x, 0.0, body.velocity.z)
 	horiz = horiz.move_toward(Vector3.ZERO, rate * dt)
 	body.velocity.x = horiz.x
@@ -624,7 +648,7 @@ func _k_slope_accelerate(dt: float, rate: float, ref_angle: float) -> void:
 		return
 	var floor_normal := body.get_floor_normal()
 	var ang := rad_to_deg(acos(clampf(floor_normal.dot(Vector3.UP), -1.0, 1.0)))
-	if ang <= 2.0:
+	if ang <= float(kit.params.get("slope_min_angle", 2.0)):
 		return
 	if ref_angle <= 0.0:
 		ref_angle = 45.0

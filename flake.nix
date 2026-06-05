@@ -50,6 +50,17 @@
           godot = pkgs.godot_4;
         };
 
+        # Nix-reproducible PROXY GEOMETRY (eyes/teeth/tongue/genitals): from the PINNED
+        # MakeHuman source it imports the eye low-poly proxy + the helper teeth/tongue/
+        # genital groups as rigged, morph-following Godot mesh pieces, so the face is
+        # complete (eyeballs in sockets, teeth + tongue in the mouth) and the NSFW-first
+        # genital piece renders. Separate from body-assets so base_body.res stays byte-stable.
+        #   nix build .#body-proxies   →   result/base_body_proxies.{res,index.json} + detail
+        packages.body-proxies = import ./nix/body-proxies.nix {
+          inherit pkgs;
+          godot = pkgs.godot_4;
+        };
+
         # Nix-reproducible Motion-Matching feature DB (Slice 4 of
         # docs/decisions/body-and-locomotion-slice.md): fetches the PINNED
         # 100STYLE BVH archive (CC BY 4.0) and runs the in-repo GDScript ingest

@@ -48,6 +48,30 @@ data/rigs/default.mhskel                                           (116 KB)  ske
 data/rigs/default_weights.mhw                                      (898 KB)  per-vertex LBS skin weights (Slice 3)
 ```
 
+Proxy geometry — eyes / teeth / tongue / genitals (the *rigged, morph-following*
+face/organ pieces built by `tools/body_proxy_build.gd`; see
+`docs/decisions/body-parameterization.md` §11). The **teeth, tongue and genitals**
+are NOT separate files — they are `helper-*` groups already inside `base.obj`
+(above), so nothing extra is vendored for them. Only the **eye** proxy is a
+standalone asset, plus the **genital detail-morph** targets:
+
+```
+data/eyes/low-poly/low-poly.obj                  (6.6 KB)  eyeball proxy mesh (96 verts)
+data/eyes/low-poly/low-poly.mhclo                (1.3 KB)  eye→base-mesh fitting (single-index)
+data/eyes/materials/brown.mhmat                  (1.2 KB)  eye material definition
+data/eyes/materials/brown_eye.png                (597 KB)  sclera+iris texture (→ assets/body/eye_brown.png)
+data/targets/genitals/penis-{circ,length,testicles}-{decr,incr}.target  (~13 KB)  genital detail morphs
+```
+
+Each of these carries an explicit per-file `# This asset was explicitly released as
+CC0 in september 2020` header (mesh/mhclo/mhmat) or is covered by `LICENSE.md` §C
+("The base mesh and **proxies**", "**Targets**") for the PNG/targets — all CC0 1.0.
+Verified byte-identical to the pinned `v1.3.0` source by `cmp`. **NSFW caveat:** the
+genital *targets* and *helper geometry* are vendored so the NSFW-first full-body goal
+is served; the Layer-1 body gate (DESIGN.md / `body-parameterization.md` §5) is
+unaffected — it guards the NSFW *verb* affordances on adult body-state, independent of
+whether the genital mesh renders.
+
 Modifier-definition JSON (Slice B — the data-driven modifier registry,
 `docs/decisions/body-parameterization.md` §6; parsed by
 `scripts/body/modifier_registry.gd` into `assets/body/modifier_registry.json`).

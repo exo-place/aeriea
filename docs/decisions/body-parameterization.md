@@ -689,3 +689,86 @@ serialization migration; UI progressive-disclosure defaults; the import
 tiering/handling for ~1,280 blendshapes (flagged as a Phase-C implementation
 concern, not decided here); whether to add a subtle height-macro contribution on
 top of uniform scale (deferred).
+
+---
+
+## 11. Proxy geometry — eyes / teeth / tongue / genitals (rigged, morph-following)
+
+**Problem.** The body pipeline (§8, `tools/body_converter.gd`) renders ONLY
+`base.obj`'s `g body` group. MakeHuman keeps the **eyeballs, teeth, tongue,
+eyebrows, eyelashes and genitals** as SEPARATE geometry, so the rendered face had
+**hollow eye sockets and an empty open mouth** (a repeated user defect report). This
+slice imports the eye/teeth/tongue/genital geometry as additional **rigged,
+morph-following** mesh pieces so the face is complete and the NSFW-first full-body
+goal is served. Eyebrows/eyelashes are deferred (the base v1.3.0 repo ships only
+their *thumbnails*, not CC0 geometry — the meshes live in the community asset DB,
+whose per-asset license is NOT uniformly CC0, so they are **not** vendored).
+
+**Where the geometry comes from `[V]`** (pinned `v1.3.0`):
+
+| piece | source | render verts / tris | CC0 |
+|---|---|---|---|
+| eyes | `data/eyes/low-poly/low-poly.obj` + `.mhclo` (96 v, 86 quads) | 96 / 172 | per-file header |
+| teeth | `base.obj` `helper-upper-teeth` + `helper-lower-teeth` (96 quads) | 136 / 192 | base.obj header |
+| tongue | `base.obj` `helper-tongue` (224 quads) | 253 / 448 | base.obj header |
+| genitals | `base.obj` `helper-genital` (182 quads) | 242 / 364 | base.obj header |
+
+The teeth/tongue/genitals are `helper-*` groups **already inside `base.obj`**, in the
+SAME vertex space as `g body` — so they share the base mesh's skin weights and macro/
+detail `.target` deltas for free. The eyes are a dedicated proxy with their own UVs +
+CC0 iris texture (`brown_eye.png` → `assets/body/eye_brown.png`), so the eye reads as a
+sclera+iris eyeball, not flat skin.
+
+**The `.mhclo` fitting format `[V]`.** A proxy vertex is bound to the base mesh as a
+barycentric combination of 3 base verts plus a scaled offset:
+
+```
+verts <firstBaseIdx>
+B0 B1 B2  w0 w1 w2  dx dy dz      # proxy_pos = w0·V[B0]+w1·V[B1]+w2·V[B2] + scale·(dx,dy,dz)
+<B>                               # SINGLE-INDEX form: proxy_pos = V[B] exactly (no offset)
+```
+
+The header `x_scale/y_scale/z_scale "<vA> <vB> <ref>"` rescales the offset by
+`dist(V[vA],V[vB]) / ref` so it tracks the body's local scale (inert for single-index
+entries, which have no offset). The **low-poly eyes use the single-index form** (each
+proxy vert == one base vert), so the eyeballs are an exact attachment to the
+`helper-l-eye` / `helper-r-eye` base verts (14598..14742).
+
+**Rigging + morph-following are BOTH derived from the binding** (`tools/body_proxy_build.gd`):
+- **Skin weights** — each proxy render vert inherits the top-4 LBS influences of the
+  base vert(s) it is bound to (blended by the barycentric weights, re-collapsed to
+  top-4, renormalized), indexing the SAME `Skeleton3D` bone order as the body. So the
+  proxies follow the skeleton exactly as the surrounding flesh does (verified: eyes →
+  `eye.L`/`eye.R`, teeth → `jaw`/`head`, tongue → `tongue*`, genitals → `pelvis`/spine/legs).
+- **Morphs** — a per-proxy SPARSE DELTA LIBRARY (the SAME ADLB binary format as
+  `tools/detail_library_build.gd`) carries, for every macro/detail target, the
+  per-proxy-render-vertex displacement obtained by pushing each base vertex's `.target`
+  delta THROUGH the binding (`Σ_k w_k · base_delta[B_k]`), keyed by a GLOBAL proxy-vertex
+  index spanning all four surfaces. At runtime `scripts/body/proxy_morph.gd` resolves a
+  `BodyState`'s `to_blend_weights()` (the SAME projection the body uses) into morphed
+  positions per surface, recomputes OUTWARD normals (the body's `(c-a)×(b-a)` convention),
+  and bakes both into a per-instance copy — so the eyes/teeth/tongue/genitals follow age/
+  masculinity/proportions/detail morphs and stay seated + correctly lit. Verified by
+  render across baby→child→adult→old and by `tests/body_proxy_test.gd`.
+
+**Attachment (`scripts/body/body_rig.gd`).** A single multi-surface skinned
+`MeshInstance3D` (`Proxies`) is added as a child of the body `Skeleton3D`, sharing the
+SAME body `Skin`. Each surface gets a sensible override material (eyes: CC0 iris texture;
+teeth: hard off-white; tongue: muted pink; genitals: skin tone). `ProxyMorph.apply()`
+rebuilds the surfaces on each morph (ArrayMesh has no in-place per-surface update), so the
+materials are re-asserted after every bake. **Visibility:** eyes/teeth/tongue are ON by
+default (the face must look complete); the genital piece is the NSFW-first attachable —
+its machinery always builds, but visibility follows `BodyRig.show_genitals` (default OFF;
+`set_proxy_visible("genitals", true)` turns it on, rendering correctly).
+
+**Artifacts (separate from `base_body.res` — the base mesh stays byte-stable):**
+`assets/body/base_body_proxies.{res,index.json}`,
+`base_body_proxies_detail.{bin,index.json}`, `eye_brown.png`. Built by
+`nix build .#body-proxies` — byte-reproducible (verified identical to the committed
+copies against the pinned `fetchFromGitHub` source).
+
+**Gate note (HARD constraint).** The genital mesh + its morph targets are imported so
+the engine represents the full body orthogonally (DESIGN.md: do not cripple primitives).
+This is independent of the **Layer-1 NSFW gate** (§5), which guards NSFW *verb*
+affordances on `is_adult_body()` at the affordance-substrate layer — rendering the
+genital mesh is geometry, not an intimate verb, and does not touch the gate.

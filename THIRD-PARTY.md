@@ -17,7 +17,16 @@ external asset is added (see `docs/decisions/body-and-locomotion-slice.md`).
   data-driven modifier registry (`scripts/body/modifier_registry.gd`,
   `tools/modifier_registry_build.gd`, `nix/modifier-registry.nix`) parses into
   `assets/body/modifier_registry.json` (Slice B,
-  `docs/decisions/body-parameterization.md` §6).
+  `docs/decisions/body-parameterization.md` §6); and the **proxy geometry** for the
+  eyes/teeth/tongue/genitals — the standalone **eye low-poly proxy**
+  (`data/eyes/low-poly/low-poly.{obj,mhclo}`, `data/eyes/materials/brown.mhmat` +
+  `brown_eye.png` iris texture) and the **genital detail-morph targets**
+  (`data/targets/genitals/*.target`); the teeth/tongue/genital *meshes* are the
+  `helper-*` groups already inside `base.obj`. `tools/body_proxy_build.gd` /
+  `nix/body-proxies.nix` compile these into the rigged, morph-following pieces
+  `assets/body/base_body_proxies.{res,index.json}` +
+  `base_body_proxies_detail.{bin,index.json}` + `eye_brown.png`
+  (`docs/decisions/body-parameterization.md` §11).
 - **Source:** MakeHuman — <https://github.com/makehumancommunity/makehuman>,
   tag `v1.3.0` (pinned `fetchFromGitHub` hash
   `sha256-x0v/SkwtOl1lkVi2TRuIgx2Xgz4JcWD3He7NhU44Js4=`). A minimal CC0 subset is

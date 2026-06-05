@@ -29,6 +29,15 @@ extends Node3D
 
 const MESH_PATH := "res://assets/body/base_body.res"
 const RIG_PATH := "res://assets/body/base_body_rig.json"
+## The rigged, morph-following EYE/TEETH/TONGUE/GENITAL proxy pieces (built by
+## tools/body_proxy_build.gd). Without these the face renders with hollow eye sockets
+## and an empty open mouth — they ARE the eyeballs/teeth/tongue. ONE multi-surface
+## ArrayMesh; ProxyMorph re-bakes its morphed positions/normals on apply_body_state.
+const ProxyMorph := preload("res://scripts/body/proxy_morph.gd")
+const PROXY_MESH_PATH := "res://assets/body/base_body_proxies.res"
+## Pieces hidden by default. The face must look complete, so eyes/teeth/tongue are ON;
+## genitals are an attachable piece whose default visibility follows the NSFW flag.
+const PROXY_DEFAULT_HIDDEN := {"genitals": true}
 ## Slice 4 — the committed Motion-Matching feature DB (100STYLE CC BY 4.0). When
 ## present, MM drives the gross body pose (replacing the procedural sine cycle);
 ## foot-IK stays the ground-adaptation layer on top. When absent, the Slice-3
@@ -57,6 +66,16 @@ const ROOT_BONE := "root"
 
 var skeleton: Skeleton3D
 var mesh_instance: MeshInstance3D
+## The proxy pieces (eyes/teeth/tongue/genitals) as a single skinned MeshInstance3D
+## sharing `skeleton` + the body Skin. Null if the proxy artifact is absent (the body
+## still renders, just without eyeballs/teeth/tongue — graceful degradation).
+var proxy_instance: MeshInstance3D
+## Map: piece name -> surface index in the proxy mesh (for show/hide + tests).
+var _proxy_surface := {}
+## NSFW-first full-body goal: the genitals piece is attachable. OFF by default (SFW face
+## focus); flip and re-apply to render it. The MACHINERY always builds — only visibility
+## follows this flag (DESIGN.md NSFW-first; the genital piece renders correctly when on).
+@export var show_genitals: bool = false
 
 ## The body's morph parameters (the single source of truth, BodyState). Default is the
 ## neutral young-adult base. Set via apply_body_state() to re-morph the SKINNED body.
@@ -169,6 +188,14 @@ func build() -> bool:
 	mesh_instance.skin = skin
 	mesh_instance.skeleton = mesh_instance.get_path_to(skeleton)
 
+	# --- proxy pieces: eyes / teeth / tongue / genitals ----------------------
+	# A second skinned MeshInstance3D sharing THIS skeleton + the SAME body Skin (the
+	# proxy verts carry ARRAY_BONES indexing the same bone order). It completes the face
+	# (eyeballs in sockets, teeth + tongue in the mouth) and serves the NSFW-first
+	# full-body goal (genitals, attachable). Morph-followed via ProxyMorph in
+	# apply_body_state(). Absent artifact => skipped (body still renders).
+	_build_proxies(skin)
+
 	# Slice 4 — load the committed Motion-Matching DB if present and wire the
 	# deterministic matcher. Absent DB => graceful degradation to the Slice-3
 	# procedural cycle (decision doc §3.2). RENDER-SIDE only.
@@ -203,6 +230,13 @@ func apply_body_state(state: BodyState) -> void:
 	if mesh_instance == null or mesh_instance.mesh == null:
 		return
 	body_state.apply_morph_cpu(mesh_instance)
+	# Morph-follow the proxy pieces (eyes/teeth/tongue/genitals) through the SAME
+	# BodyState projection, so they stay seated + correctly lit under every morph.
+	if proxy_instance != null and proxy_instance.mesh != null:
+		ProxyMorph.apply(body_state, proxy_instance)
+		# ProxyMorph rebuilds the ArrayMesh surfaces (no in-place update exists), which
+		# resets the instance's surface-override materials — re-assert them after each bake.
+		_apply_proxy_materials()
 	# METRIC HEIGHT (§4): height_cm is a UNIFORM SCALE orthogonal to the shape morphs, applied
 	# to the skeleton (mesh + bones) about the foot origin (y=0). The mesh has feet at local
 	# y=0, so a uniform scale about the node origin scales stature while keeping feet planted.
@@ -252,6 +286,102 @@ func head_top() -> float:
 	for v in verts:
 		mx = maxf(mx, v.y)
 	return mx if mx > -INF else ab.position.y + ab.size.y
+
+
+## Build the proxy MeshInstance3D (eyes/teeth/tongue/genitals) as a child of `skeleton`
+## sharing `skin`. One multi-surface mesh; each surface gets a sensible material and a
+## per-piece visibility (genitals follow `show_genitals`; eyes/teeth/tongue always on).
+## Hidden pieces are made invisible by collapsing their triangles via a transparent
+## material is fragile — instead we DROP hidden surfaces' material to transparent AND
+## flag them; for a clean hide we set the surface override material's alpha. The simplest
+## robust hide: keep the surface but make its material fully transparent + no shadow. We
+## use that for genitals-off so the single MeshInstance stays one draw with stable indices.
+func _build_proxies(skin: Skin) -> void:
+	var pmesh = load(PROXY_MESH_PATH)
+	if pmesh == null or not (pmesh is ArrayMesh):
+		return   # no proxy artifact — body renders without eyeballs/teeth/tongue
+	# PER-INSTANCE copy (ProxyMorph bakes morphed positions/normals in place, like the body).
+	var mesh := (pmesh as ArrayMesh).duplicate(true)
+	proxy_instance = MeshInstance3D.new()
+	proxy_instance.name = "Proxies"
+	proxy_instance.mesh = mesh
+	for si in mesh.get_surface_count():
+		_proxy_surface[str(mesh.surface_get_name(si))] = si
+	skeleton.add_child(proxy_instance)
+	proxy_instance.skin = skin
+	proxy_instance.skeleton = proxy_instance.get_path_to(skeleton)
+	_apply_proxy_materials()
+
+
+## (Re)assign each proxy surface's override material + visibility. Called on build and
+## after every ProxyMorph bake (which rebuilds the surfaces and drops instance overrides).
+## eyes/teeth/tongue are always visible (the face must look complete); genitals follow
+## `show_genitals` (the NSFW-first attachable piece).
+func _apply_proxy_materials() -> void:
+	if proxy_instance == null or proxy_instance.mesh == null:
+		return
+	var mesh := proxy_instance.mesh as ArrayMesh
+	var surfaces := ProxyMorph.surfaces()
+	for si in mesh.get_surface_count():
+		var sname := str(mesh.surface_get_name(si))
+		var mat_kind := "default"
+		for s in surfaces:
+			if String(s["name"]) == sname:
+				mat_kind = String(s["material"])
+				break
+		var visible := true
+		if sname == "genitals":
+			visible = show_genitals
+		proxy_instance.set_surface_override_material(si, _proxy_material(mat_kind, visible))
+
+
+## A sensible material per proxy kind. Eyes get a real CC0 eye texture (white sclera +
+## brown iris) so they read as eyeballs, not flat skin; teeth a hard off-white; tongue a
+## muted pink; genitals a skin tone. `visible=false` returns a fully transparent material
+## (the surface stays in the single-draw mesh with stable indices, but renders nothing).
+func _proxy_material(kind: String, visible: bool) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	if not visible:
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.albedo_color = Color(0, 0, 0, 0)
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.no_depth_test = false
+		return mat
+	match kind:
+		"eye":
+			var tex := load("res://assets/body/eye_brown.png")
+			if tex != null:
+				mat.albedo_texture = tex
+			mat.albedo_color = Color(1, 1, 1)
+			mat.roughness = 0.25
+			mat.metallic_specular = 0.6
+		"teeth":
+			mat.albedo_color = Color(0.93, 0.92, 0.86)
+			mat.roughness = 0.4
+		"tongue":
+			mat.albedo_color = Color(0.82, 0.36, 0.40)
+			mat.roughness = 0.55
+		"genitals":
+			mat.albedo_color = Color(0.84, 0.62, 0.55)
+			mat.roughness = 0.7
+		_:
+			mat.albedo_color = Color(0.86, 0.68, 0.58)
+			mat.roughness = 0.7
+	return mat
+
+
+## Show/hide a proxy piece at runtime (e.g. toggling genitals). Re-applies the material.
+func set_proxy_visible(piece: String, visible: bool) -> void:
+	if proxy_instance == null or not _proxy_surface.has(piece):
+		return
+	if piece == "genitals":
+		show_genitals = visible   # so a later morph re-bake keeps the chosen visibility
+	var si: int = _proxy_surface[piece]
+	var kind := "default"
+	for s in ProxyMorph.surfaces():
+		if String(s["name"]) == piece:
+			kind = String(s["material"]); break
+	proxy_instance.set_surface_override_material(si, _proxy_material(kind, visible))
 
 
 func _load_rig_json() -> Dictionary:

@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://morph_drag_test_v1"]
+
+[ext_resource type="Script" path="res://tests/morph_drag_test.gd" id="1_morphdrag"]
+
+[node name="MorphDragTest" type="Node"]
+script = ExtResource("1_morphdrag")

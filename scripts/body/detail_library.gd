@@ -65,6 +65,13 @@ static func base_height_cm() -> float:
 	return _base_height_cm
 
 
+## The render-vertex count of the base mesh (the index space the sparse deltas key into). 0
+## if no library. Used e.g. by MorphDrag to size its gross-axis footprint threshold.
+static func render_vertex_count() -> int:
+	ensure_loaded()
+	return _render_vertex_count
+
+
 ## True iff the library knows this target path (whether or not it has any deltas).
 static func has_target(path: String) -> bool:
 	ensure_loaded()

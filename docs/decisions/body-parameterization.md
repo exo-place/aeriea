@@ -666,6 +666,103 @@ natural-unit API and the registry can land before the heavy full import.
 
 ---
 
+## 9b. Slice D — drag-to-modify with region glow (IMPLEMENTED)
+
+The Asian-MMO-style **direct-manipulation** creator: grab the body surface and pull;
+the modifiers that produce that surface motion engage. **Additive** to the Slice-A
+slider panel + the undo-tree history — both coexist and share one history. Core math
+lives in a **scene-free RefCounted** module (`scripts/body/morph_drag.gd`) so it
+unit-tests headlessly (`tests/morph_drag_test.gd`, 30 assertions); input/UI glue
+(raycast, glow overlay, mouse events, history commit) lives in
+`scripts/body/character_creator.gd` around it.
+
+**Pick.** A CPU raycast (Möller–Trumbore over the body's baked rest-space triangle
+list, in the skeleton's scaled frame — the body is static in the creator) returns the
+hit triangle; the **nearest of its three base verts** to the exact hit point is the
+picked render vertex. Render-vertex index == the sparse-delta-library index (Slice C
+keys deltas by render vertex), so the pick maps straight into the accel structure.
+
+**Acceleration structure (`build_accel`).** A **per-render-vertex → candidate-modifier**
+index, **built once at load** from the parsed registry (§6) + the sparse `DetailLibrary`
+(§ Slice C), **not** a committed artifact (so no new asset; `base_body*.{res,bin}` stay
+byte-unchanged). Two passes, deterministic (modifiers sorted by `fullName`; candidate
+lists sorted per vertex), so the same library+registry always build the same structure:
+1. For each **non-macro** modifier (headline macro axes keep their sliders; excluded)
+   whose **+value target** (bidirectional MAX pole / unipolar single target) is in the
+   library, gather its significant per-vertex deltas (≥ `SIGNIFICANT_DELTA_M` = 0.2 mm)
+   as its **footprint** + the candidate record `{render_vertex, world +value Δ}`.
+2. **Drop GROSS placement axes** — any modifier whose footprint exceeds
+   `GROSS_FOOTPRINT_FRACTION` (20 %) of the render-vertex total (whole-torso/head
+   translate & scale, body measurements). They stay **slider-editable** but are **not**
+   per-vertex drag candidates — otherwise (having the largest screen motion everywhere)
+   they swamp the local detail axes and an up-drag at the nose translates the whole upper
+   body. This is a **heuristic split**, tuned so per-feature axes (nose/eyes/mouth/cheek/
+   breast/…) stay grabbable while gross axes drop out. On the shipped library: ~14.3 k of
+   14 517 render verts covered; 280 editable modifiers; a face vertex offers ~9–12 local
+   candidates (nose/eye/head-age family) after the gross drop.
+
+**Drag-decomposition math (`decompose_drag`).** Given the picked vertex, a screen-pixel
+drag vector, and the camera Basis, for each candidate modifier:
+- Project its **world +value surface-motion direction** `Δ` to screen space via the
+  camera basis: `screen_dir = (Δ·right, −Δ·up)` (y flipped: screen-y is DOWN). `ŝ` =
+  `screen_dir` normalized — the on-screen direction in which **raising** the modifier
+  pushes the surface here. (A modifier moving the surface straight toward/away from the
+  camera has `|screen_dir|≈0` — no in-screen handle — and contributes ≈0.)
+- `value_delta = clamp_to_range( current + (drag·ŝ)/px_per_unit ) − current`. So a drag
+  **along** `ŝ` raises the modifier (positive), **opposite** lowers it, **orthogonal** ≈0;
+  magnitude is **proportional to the projection**; the result is **clamped** to the
+  modifier's registry range ([-1,1] bidirectional / [0,1] unipolar). `px_per_unit`
+  (default 220) is the sensitivity. Pure 2D-screen-frame math → unit-tests viewport-free.
+
+The creator adds each `value_delta` to `BodyState.modifiers[fullName]` (erasing keys that
+return to 0, keeping the map sparse) and re-bakes live through the existing
+correct-normals CPU path (`BodyRig.apply_body_state`), so eyes/teeth/genital proxies
+morph-follow and lighting stays correct (verified: outward normals under the drag).
+
+**Hover glow (`glow_weights`).** A sparse `{render_vertex → weight∈[0,1]}` map = the
+union of (a) a **smoothstep spatial falloff** around the hit point (radius
+`GLOW_RADIUS_M` = 4.5 cm) and (b) a soft floor over the **candidate modifiers' moved-vertex
+footprint** (out to 2× radius, scaled by each modifier's relative move strength). Fed to a
+sibling overlay `MeshInstance3D` (a copy of the body triangles, **unshaded + additive**,
+per-vertex COLOR alpha = glow weight, cyan tint) parented to the skeleton so it inherits
+stature scale. Reads as a **soft region glow**, not a hard mask (verified by render: the
+nose/cheek region glows softly when the cursor is on the nose).
+
+**History.** **One** undo-tree node per **completed drag** (committed on drag-end,
+debounced — never per frame), labelled by the **dominant modifier(s)** (largest
+|accumulated Δ|), e.g. `"sculpt: nose-trans +0.55, nose-curve +0.55"`. Slider edits and
+drags share the same `HistoryTree`; undo/redo/jump_to/branching all apply uniformly.
+
+**Camera-vs-morph disambiguation (the chosen scheme).** A **"Sculpt mode" toggle**
+(panel button + the **`M`** key) gates morph editing. OFF = pure orbit/pan/zoom viewer
+(unchanged Slice-A). ON = the **left button discriminates by what it hits**: left-press
+**on the body** (raycast hits a triangle) starts a morph **drag**; left-press on the
+**background** (ray misses) **orbits** as before. Right-drag pans and scroll zooms in
+both modes, so the camera is always reachable without leaving sculpt mode (drag empty
+space to orbit). Hover (no button) in sculpt mode drives the live region glow.
+
+**Honest first-pass rough edges.** (1) The gross-axis cut is a **footprint-fraction
+heuristic**, not a principled locality metric — a mid-scale modifier near the 20 %
+boundary could feel surprisingly broad or get cut. (2) Within the local candidate set the
+decomposition weights every candidate **equally by projection**, so a drag engages *all*
+locally-overlapping modifiers at once (e.g. an up-nose drag moves nose-trans, nose-curve,
+nose-point, nose-scale-depth together) — intuitive as "pull this region" but not a
+single-axis edit; a future refinement could bias toward the most locally-dominant axis.
+(3) The CPU raycast scans the full triangle list per pick (fine for the creator's static
+single body; would want a BVH for many bodies). (4) `px_per_unit` is a fixed global
+sensitivity, not yet depth- or zoom-adaptive.
+
+*Files:* `scripts/body/morph_drag.gd` (new core), `scripts/body/character_creator.gd`
+(pick/glow/mode/commit glue), `scripts/body/detail_library.gd` (`render_vertex_count()`
+getter), `tests/morph_drag_test.{gd,tscn}` (+ `SUITES` in `tests/run.sh`).
+*Verify:* `nix run .#test` all green (morph_drag = 30); render proof — region glow reads
+soft over the nose/cheek; a programmatic up-drag at the nose engages the nose family
+(nose-trans/curve/point/scale-depth up, nose-hump down) and reshapes the nose with outward
+normals and seated proxies. *Touches gate:* **no** — morph axes are anatomy, not a verb
+(§5); drag-editing reshapes the same continuous morph space the sliders do.
+
+---
+
 ## 10. Verified vs assumed — summary
 
 **Verified `[V]` against the pinned source:** the 1,280-target count and 122 MB

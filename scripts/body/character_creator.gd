@@ -40,6 +40,44 @@ var _distance: float = 3.2     ## metres
 var _dragging_orbit: bool = false
 var _dragging_pan: bool = false
 
+# ---------------------------------------------------------------------------
+# DRAG-TO-MODIFY (Slice D, body-parameterization.md). Asian-MMO-style direct
+# manipulation: hover the body to GLOW the region a modifier would edit, then drag the
+# surface to engage exactly the modifiers that produce that motion. The geometry core
+# (pick + drag-decomposition) lives in the scene-free MorphDrag module; THIS script is
+# the input/UI glue (raycast, glow overlay, mouse events, history commit).
+#
+# CAMERA-vs-MORPH disambiguation (the chosen scheme, documented in the decision doc):
+#   - A "Sculpt mode" TOGGLE (button + the M key) gates morph editing. OFF = the body is
+#     a pure orbit/pan/zoom viewer (unchanged Slice-A behaviour).
+#   - In Sculpt mode, the LEFT button discriminates by WHAT IT HITS: left-press ON THE
+#     BODY starts a morph DRAG (raycast hits a triangle -> pick the nearest vertex ->
+#     decompose the drag across that vertex's candidate modifiers). Left-press on the
+#     BACKGROUND (ray misses the body) ORBITS as before. Right-drag still pans, scroll
+#     still zooms, in both modes — so the camera is always reachable without leaving
+#     sculpt mode (drag empty space to orbit).
+# ---------------------------------------------------------------------------
+const MorphDragScript := preload("res://scripts/body/morph_drag.gd")
+const DetailLibraryScript := preload("res://scripts/body/detail_library.gd")
+
+var _morph                       ## MorphDrag (untyped: the class_name isn't visible at parse)
+var _sculpt_mode: bool = false
+var _sculpt_btn: Button
+
+## A morph drag in progress: the picked render-vertex, its world hit position, and the
+## accumulated modifier value-deltas (so ONE history node is committed on drag-end).
+var _dragging_morph: bool = false
+var _drag_vertex: int = -1
+var _drag_hit_pos: Vector3 = Vector3.ZERO
+var _drag_accum: Dictionary = {}    ## full_name -> total applied delta this drag (for the label)
+
+## The hover-glow overlay: a copy of the body triangles, unshaded + additive, with per-vertex
+## alpha driven by MorphDrag.glow_weights. Rebuilt cheaply on hover move (sparse highlight).
+var _glow_overlay: MeshInstance3D
+var _glow_base_pos: PackedVector3Array   ## the body's rest-space vertex positions (for glow + pick)
+var _glow_tris: PackedInt32Array         ## the body's triangle index list (for pick + overlay)
+var _hover_vertex: int = -1
+
 var _value_labels: Dictionary = {}   ## field -> Label showing current value
 var _sliders: Dictionary = {}        ## field -> HSlider
 
@@ -69,6 +107,7 @@ func _ready() -> void:
 	_history = HistoryTreeScript.new(_body_state.to_dict(), "initial")
 	_build_environment()
 	_build_body()
+	_build_morph_drag()
 	_build_camera()
 	_build_ui()
 	_update_camera()
@@ -140,6 +179,47 @@ func _build_body() -> void:
 	add_child(_rig)
 
 
+## Build the drag-to-modify core: the MorphDrag accel structure (per-render-vertex ->
+## candidate modifiers, from the registry + sparse DetailLibrary) and the hover-glow
+## overlay mesh. The accel structure is built ONCE here (deterministic, cached). The body
+## mesh's rest-space positions + triangle list are cached for CPU picking + glow.
+func _build_morph_drag() -> void:
+	_morph = MorphDragScript.new()
+	var reg := BodyState.registry()
+	if not reg.is_empty() and DetailLibraryScript.ensure_loaded():
+		_morph.build_accel(reg, DetailLibraryScript, DetailLibraryScript.render_vertex_count())
+	# Cache the body's baked rest-space positions + triangle index list for CPU raycast +
+	# glow. The creator holds the body in bind pose, so the morphed surface arrays ARE the
+	# pickable geometry (skeleton scale is the only world transform — applied at pick time).
+	if _rig != null and _rig.mesh_instance != null and _rig.mesh_instance.mesh is ArrayMesh:
+		var arrays := (_rig.mesh_instance.mesh as ArrayMesh).surface_get_arrays(0)
+		_glow_base_pos = arrays[Mesh.ARRAY_VERTEX]
+		_glow_tris = arrays[Mesh.ARRAY_INDEX]
+	_build_glow_overlay()
+
+
+## The hover-glow overlay: a sibling MeshInstance3D under the body's skeleton (so it inherits
+## the same stature scale), sharing the body's triangle topology, rendered UNSHADED + ADDITIVE
+## with per-vertex alpha from the glow weights. A soft additive glow reads as a region
+## highlight, not a hard mask. Starts empty (no glow until hover).
+func _build_glow_overlay() -> void:
+	if _rig == null or _rig.skeleton == null:
+		return
+	_glow_overlay = MeshInstance3D.new()
+	_glow_overlay.name = "MorphGlow"
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.vertex_color_use_as_albedo = true
+	mat.albedo_color = Color(0.35, 0.85, 1.0, 1.0)   # cyan glow tint
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.no_depth_test = false
+	_glow_overlay.material_override = mat
+	_glow_overlay.visible = false
+	_rig.skeleton.add_child(_glow_overlay)
+
+
 func _build_camera() -> void:
 	_camera = Camera3D.new()
 	_camera.name = "OrbitCamera"
@@ -162,6 +242,196 @@ func _update_camera() -> void:
 
 
 # ---------------------------------------------------------------------------
+# Drag-to-modify picking + glow (Slice D). CPU raycast against the body's baked rest-space
+# triangles (the body is static in the creator), nearest-vertex pick, glow overlay update,
+# and the per-drag modifier application.
+# ---------------------------------------------------------------------------
+
+## Raycast a screen position against the body mesh. Returns { vertex:int, pos:Vector3 } for
+## the nearest base vertex of the hit triangle (world space), or {} on a miss. Möller–Trumbore
+## over the cached triangle list, in the skeleton's scaled frame. Deterministic, allocation-light.
+func _pick_body(screen_pos: Vector2) -> Dictionary:
+	if _camera == null or _glow_base_pos.is_empty() or _glow_tris.is_empty() or _rig == null or _rig.skeleton == null:
+		return {}
+	var origin := _camera.project_ray_origin(screen_pos)
+	var dir := _camera.project_ray_normal(screen_pos)
+	var xf := _rig.skeleton.global_transform   # stature scale (+ node placement)
+	var best_t := INF
+	var best_tri := -1
+	var i := 0
+	var nt := _glow_tris.size()
+	while i < nt:
+		var a := xf * _glow_base_pos[_glow_tris[i]]
+		var b := xf * _glow_base_pos[_glow_tris[i + 1]]
+		var c := xf * _glow_base_pos[_glow_tris[i + 2]]
+		var t := _ray_tri(origin, dir, a, b, c)
+		if t >= 0.0 and t < best_t:
+			best_t = t
+			best_tri = i
+		i += 3
+	if best_tri < 0:
+		return {}
+	# Nearest of the hit triangle's three verts to the exact hit point.
+	var hit := origin + dir * best_t
+	var verts := [_glow_tris[best_tri], _glow_tris[best_tri + 1], _glow_tris[best_tri + 2]]
+	var best_v := int(verts[0])
+	var best_d := INF
+	for vi in verts:
+		var wp := xf * _glow_base_pos[vi]
+		var d := wp.distance_squared_to(hit)
+		if d < best_d:
+			best_d = d
+			best_v = int(vi)
+	return {"vertex": best_v, "pos": hit}
+
+
+## Möller–Trumbore ray/triangle intersection. Returns the ray t (>=0) at the hit, or -1.0 on
+## a miss. Single-sided off (we test both windings — the body surface faces the camera either
+## way after the normals bake, and picking should not depend on winding).
+func _ray_tri(o: Vector3, d: Vector3, a: Vector3, b: Vector3, c: Vector3) -> float:
+	var e1 := b - a
+	var e2 := c - a
+	var p := d.cross(e2)
+	var det := e1.dot(p)
+	if absf(det) < 1e-9:
+		return -1.0
+	var inv := 1.0 / det
+	var tvec := o - a
+	var u := tvec.dot(p) * inv
+	if u < -1e-5 or u > 1.0 + 1e-5:
+		return -1.0
+	var q := tvec.cross(e1)
+	var v := d.dot(q) * inv
+	if v < -1e-5 or u + v > 1.0 + 1e-5:
+		return -1.0
+	var t := e2.dot(q) * inv
+	return t if t > 1e-5 else -1.0
+
+
+## Update the hover glow for a screen position (sculpt mode, not currently dragging). Picks
+## the body; if hit, builds the glow overlay from MorphDrag.glow_weights at the hit vertex;
+## on a miss, hides the glow. Cheap (a sparse highlight).
+func _update_hover_glow(screen_pos: Vector2) -> void:
+	if _morph == null or not _morph.is_built():
+		return
+	var hit := _pick_body(screen_pos)
+	if hit.is_empty():
+		_hover_vertex = -1
+		if _glow_overlay != null:
+			_glow_overlay.visible = false
+		return
+	_hover_vertex = int(hit["vertex"])
+	# glow_weights works in the SAME space as the positions we pass — use rest-space positions
+	# (the overlay is a child of the skeleton, so it inherits the scale; weights are computed in
+	# rest space and the hit pos is converted back to rest space for a consistent radius).
+	var inv := _rig.skeleton.global_transform.affine_inverse()
+	var hit_local: Vector3 = inv * (hit["pos"] as Vector3)
+	var weights: Dictionary = _morph.glow_weights(_hover_vertex, hit_local, _glow_base_pos)
+	_rebuild_glow_mesh(weights)
+
+
+## Rebuild the glow overlay ArrayMesh from a sparse {render_vertex -> weight} map: the body's
+## triangles, with per-vertex COLOR alpha = the glow weight (0 for unlit verts). Triangles with
+## all-zero alpha contribute nothing (additive). Empty map -> hide. Rest-space positions (the
+## overlay is parented to the scaled skeleton).
+func _rebuild_glow_mesh(weights: Dictionary) -> void:
+	if _glow_overlay == null:
+		return
+	if weights.is_empty():
+		_glow_overlay.visible = false
+		return
+	var n := _glow_base_pos.size()
+	var colors := PackedColorArray()
+	colors.resize(n)
+	for i in n:
+		var w := float(weights.get(i, 0.0))
+		colors[i] = Color(1, 1, 1, w)   # tinted by the material albedo; alpha = glow strength
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = _glow_base_pos
+	arrays[Mesh.ARRAY_INDEX] = _glow_tris
+	arrays[Mesh.ARRAY_COLOR] = colors
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_glow_overlay.mesh = mesh
+	_glow_overlay.visible = true
+
+
+## Apply a morph drag step: decompose the screen drag across the picked vertex's candidates,
+## add the deltas to the BodyState.modifiers map (clamped by the core), re-bake LIVE, and
+## accumulate per-modifier totals for the drag-end history label. NOT committed per frame.
+func _apply_morph_drag(drag_screen: Vector2) -> void:
+	if _morph == null or _drag_vertex < 0:
+		return
+	var cam_basis := _camera.global_transform.basis
+	# Current modifier values so the core clamps against the live state.
+	var deltas: Dictionary = _morph.decompose_drag(_drag_vertex, drag_screen, cam_basis, _body_state.modifiers)
+	if deltas.is_empty():
+		return
+	for full_name in deltas:
+		var nv := float(_body_state.modifiers.get(full_name, 0.0)) + float(deltas[full_name])
+		if absf(nv) < 1e-6:
+			_body_state.modifiers.erase(full_name)
+		else:
+			_body_state.modifiers[full_name] = nv
+		_drag_accum[full_name] = float(_drag_accum.get(full_name, 0.0)) + float(deltas[full_name])
+	_apply_state()
+	# Keep the glow on the active region while dragging (re-pick the vertex's footprint).
+	var inv := _rig.skeleton.global_transform.affine_inverse()
+	var weights: Dictionary = _morph.glow_weights(_drag_vertex, inv * _drag_hit_pos, _glow_base_pos)
+	_rebuild_glow_mesh(weights)
+
+
+## End a morph drag: commit ONE history node labelled by the dominant modifier(s).
+func _end_morph_drag() -> void:
+	_dragging_morph = false
+	if _drag_accum.is_empty():
+		_drag_vertex = -1
+		return
+	# Dominant modifier(s): the largest |accumulated delta|. Label with the top 1–2.
+	var names := _drag_accum.keys()
+	names.sort_custom(func(a, b): return absf(_drag_accum[a]) > absf(_drag_accum[b]))
+	var top := []
+	for i in mini(2, names.size()):
+		top.append("%s %+.2f" % [_short_modifier_name(String(names[i])), float(_drag_accum[names[i]])])
+	var label := "sculpt: " + ", ".join(top)
+	if not _suspend_commit:
+		_history.commit(_body_state.to_dict(), label)
+		_refresh_history_panel()
+	_drag_accum = {}
+	_drag_vertex = -1
+
+
+## A compact display name for a modifier fullName ("nose/nose-hump-decr|incr" -> "nose-hump").
+func _short_modifier_name(full_name: String) -> String:
+	var name := full_name.get_slice("/", 1)
+	if name == "":
+		name = full_name
+	# strip the "-decr|incr" bidirectional suffix for readability.
+	var bar := name.find("-decr|incr")
+	if bar < 0:
+		bar = name.find("|")
+		if bar >= 0:
+			# generic "<a>|<b>" -> trim from the last '-' before the bar
+			var dash := name.rfind("-", bar)
+			if dash >= 0:
+				return name.substr(0, dash)
+	return name.substr(0, bar) if bar >= 0 else name
+
+
+## Toggle sculpt mode (the camera-vs-morph gate). Updates the button + hint label; clears any
+## stale glow when leaving the mode.
+func _set_sculpt_mode(on: bool) -> void:
+	_sculpt_mode = on
+	if _sculpt_btn != null:
+		_sculpt_btn.button_pressed = on
+		_sculpt_btn.text = "Sculpt mode: ON (drag body to morph)" if on else "Sculpt mode: OFF (press M)"
+	if not on and _glow_overlay != null:
+		_glow_overlay.visible = false
+		_hover_vertex = -1
+
+
+# ---------------------------------------------------------------------------
 # Input — orbit (left drag), pan (right drag), zoom (scroll wheel)
 # ---------------------------------------------------------------------------
 
@@ -176,11 +446,33 @@ func _unhandled_input(event: InputEvent) -> void:
 				_do_undo()
 			get_viewport().set_input_as_handled()
 			return
+		# M toggles sculpt mode (the camera-vs-morph gate).
+		if k.pressed and not k.echo and k.keycode == KEY_M and not k.ctrl_pressed:
+			_set_sculpt_mode(not _sculpt_mode)
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		match mb.button_index:
 			MOUSE_BUTTON_LEFT:
-				_dragging_orbit = mb.pressed
+				if mb.pressed:
+					# In sculpt mode, a left-press ON THE BODY starts a morph drag; a press on
+					# the BACKGROUND (ray misses) falls through to orbit. Outside sculpt mode
+					# the left button always orbits (Slice-A behaviour).
+					if _sculpt_mode:
+						var hit := _pick_body(mb.position)
+						if not hit.is_empty():
+							_dragging_morph = true
+							_drag_vertex = int(hit["vertex"])
+							_drag_hit_pos = hit["pos"]
+							_drag_accum = {}
+							get_viewport().set_input_as_handled()
+							return
+					_dragging_orbit = true
+				else:
+					if _dragging_morph:
+						_end_morph_drag()
+					_dragging_orbit = false
 			MOUSE_BUTTON_RIGHT:
 				_dragging_pan = mb.pressed
 			MOUSE_BUTTON_WHEEL_UP:
@@ -193,7 +485,9 @@ func _unhandled_input(event: InputEvent) -> void:
 					_update_camera()
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		if _dragging_orbit:
+		if _dragging_morph:
+			_apply_morph_drag(mm.relative)
+		elif _dragging_orbit:
 			_yaw = wrapf(_yaw - mm.relative.x * ORBIT_SPEED, -PI, PI)
 			_pitch = clampf(_pitch - mm.relative.y * ORBIT_SPEED, MIN_PITCH, MAX_PITCH)
 			_update_camera()
@@ -203,6 +497,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			var up := _camera.global_transform.basis.y
 			_pivot += (-right * mm.relative.x + up * mm.relative.y) * PAN_SPEED * _distance
 			_update_camera()
+		elif _sculpt_mode:
+			# Hover (no button) in sculpt mode -> live region glow under the cursor.
+			_update_hover_glow(mm.position)
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +527,23 @@ func _build_ui() -> void:
 	vbox.add_child(title)
 
 	var hint := Label.new()
-	hint.text = "drag: orbit   right-drag: pan   scroll: zoom"
+	hint.text = "drag: orbit   right-drag: pan   scroll: zoom   M: sculpt mode"
 	hint.add_theme_font_size_override("font_size", 11)
 	vbox.add_child(hint)
+
+	# Sculpt-mode toggle (Slice D): the camera-vs-morph gate. ON => left-drag ON the body
+	# morphs (drag-to-modify with region glow); left-drag on the BACKGROUND still orbits.
+	_sculpt_btn = Button.new()
+	_sculpt_btn.toggle_mode = true
+	_sculpt_btn.text = "Sculpt mode: OFF (press M)"
+	_sculpt_btn.toggled.connect(func(on: bool) -> void: _set_sculpt_mode(on))
+	vbox.add_child(_sculpt_btn)
+
+	var sculpt_hint := Label.new()
+	sculpt_hint.text = "sculpt: hover body to glow the editable region, then drag the surface to pull it"
+	sculpt_hint.add_theme_font_size_override("font_size", 10)
+	sculpt_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(sculpt_hint)
 
 	vbox.add_child(HSeparator.new())
 

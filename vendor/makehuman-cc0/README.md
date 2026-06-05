@@ -53,7 +53,12 @@ face/organ pieces built by `tools/body_proxy_build.gd`; see
 `docs/decisions/body-parameterization.md` §11). The **teeth, tongue and genitals**
 are NOT separate files — they are `helper-*` groups already inside `base.obj`
 (above), so nothing extra is vendored for them. Only the **eye** proxy is a
-standalone asset, plus the **genital detail-morph** targets:
+standalone asset, plus the **genital detail-morph** targets. (**Eyebrows + eyelashes**
+are NOT vendored from MakeHuman: the pinned v1.3.0 *core* ships no CC0 eyebrow mesh —
+only `data/eyebrows/clear.thumb` + brow morph targets, the meshes being community-DB
+assets without uniform CC0 — so aeriea AUTHORS its own brow/lash geometry in-repo
+[`tools/body_proxy_build.gd` `_build_authored_face_hair`], which carries no
+third-party licence; see §11.1.):
 
 ```
 data/eyes/low-poly/low-poly.obj                  (6.6 KB)  eyeball proxy mesh (96 verts)

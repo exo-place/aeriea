@@ -39,7 +39,13 @@ external asset is added (see `docs/decisions/body-and-locomotion-slice.md`).
   attribution is legally required; recorded here for provenance.
 - **Scope caveat:** only *core bundled* MakeHuman assets are CC0. Community-DB
   assets (user-contributed clothes/hair/morphs) are **not** uniformly CC0 and are
-  out of scope.
+  out of scope. In particular the **eyebrow/eyelash meshes are community-DB** (the
+  pinned v1.3.0 core ships only a `data/eyebrows/clear.thumb` thumbnail + brow morph
+  targets, no CC0 mesh; verified against the pinned `fetchFromGitHub` tree). aeriea
+  therefore does **not** vendor any third-party brow/lash mesh — the eyebrow +
+  eyelash geometry is **project-authored in-repo** (`tools/body_proxy_build.gd`
+  `_build_authored_face_hair`), our own work, carrying no third-party licence
+  obligation (`docs/decisions/body-parameterization.md` §11.1).
 
 ---
 

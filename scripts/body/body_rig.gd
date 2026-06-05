@@ -35,9 +35,14 @@ const RIG_PATH := "res://assets/body/base_body_rig.json"
 ## ArrayMesh; ProxyMorph re-bakes its morphed positions/normals on apply_body_state.
 const ProxyMorph := preload("res://scripts/body/proxy_morph.gd")
 const PROXY_MESH_PATH := "res://assets/body/base_body_proxies.res"
-## Pieces hidden by default. The face must look complete, so eyes/teeth/tongue are ON;
-## genitals are an attachable piece whose default visibility follows the NSFW flag.
+## Pieces hidden by default. The face must look complete, so eyes/teeth/tongue/
+## eyebrows/eyelashes are ON; genitals are an attachable piece whose default
+## visibility follows the NSFW flag.
 const PROXY_DEFAULT_HIDDEN := {"genitals": true}
+## The single SKIN tone, shared by the body mesh AND the genital proxy so the genitals
+## follow skin tone/masculinity (not a fixed paler colour) — fixing the pale-genital seam.
+const SKIN_ALBEDO := Color(0.86, 0.68, 0.58)
+const SKIN_ROUGHNESS := 0.7
 ## Slice 4 — the committed Motion-Matching feature DB (100STYLE CC BY 4.0). When
 ## present, MM drives the gross body pose (replacing the procedural sine cycle);
 ## foot-IK stays the ground-adaptation layer on top. When absent, the Slice-3
@@ -66,6 +71,8 @@ const ROOT_BONE := "root"
 
 var skeleton: Skeleton3D
 var mesh_instance: MeshInstance3D
+## The body SKIN material, shared by the genital proxy so its tone tracks the body skin.
+var _skin_material: StandardMaterial3D
 ## The proxy pieces (eyes/teeth/tongue/genitals) as a single skinned MeshInstance3D
 ## sharing `skeleton` + the body Skin. Null if the proxy artifact is absent (the body
 ## still renders, just without eyeballs/teeth/tongue — graceful degradation).
@@ -179,11 +186,13 @@ func build() -> bool:
 	# arrays) is unchanged by the bake, so LBS still composes correctly on top.
 	mesh = (mesh as ArrayMesh).duplicate(true)
 	mesh_instance.mesh = mesh
-	# A simple skin material so the body reads as a body (not a flat silhouette).
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.86, 0.68, 0.58)
-	mat.roughness = 0.7
-	mesh_instance.material_override = mat
+	# A simple skin material so the body reads as a body (not a flat silhouette). The
+	# genital proxy shares THIS material (see _proxy_material) so its tone follows the
+	# body skin, eliminating the former pale-genital mismatch at the seam.
+	_skin_material = StandardMaterial3D.new()
+	_skin_material.albedo_color = SKIN_ALBEDO
+	_skin_material.roughness = SKIN_ROUGHNESS
+	mesh_instance.material_override = _skin_material
 	skeleton.add_child(mesh_instance)
 	mesh_instance.skin = skin
 	mesh_instance.skeleton = mesh_instance.get_path_to(skeleton)
@@ -355,6 +364,14 @@ func _proxy_material(kind: String, visible: bool) -> StandardMaterial3D:
 			mat.albedo_color = Color(1, 1, 1)
 			mat.roughness = 0.25
 			mat.metallic_specular = 0.6
+		"lashes", "brows":
+			# A dark keratin tone for the PROJECT-AUTHORED brow/lash hair strips. These are
+			# thin 2-sided cards, so cull is disabled (visible from either face); rough +
+			# no specular so they read as matte hair mass, not plastic.
+			mat.albedo_color = Color(0.14, 0.10, 0.08)
+			mat.roughness = 0.9
+			mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+			mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		"teeth":
 			mat.albedo_color = Color(0.93, 0.92, 0.86)
 			mat.roughness = 0.4
@@ -362,11 +379,16 @@ func _proxy_material(kind: String, visible: bool) -> StandardMaterial3D:
 			mat.albedo_color = Color(0.82, 0.36, 0.40)
 			mat.roughness = 0.55
 		"genitals":
-			mat.albedo_color = Color(0.84, 0.62, 0.55)
-			mat.roughness = 0.7
+			# SHARE the body skin material so the genital tone tracks skin tone exactly
+			# (no fixed paler colour → no tone mismatch at the seam). Falls back to the
+			# skin colour if the body material hasn't been built yet.
+			if _skin_material != null:
+				return _skin_material
+			mat.albedo_color = SKIN_ALBEDO
+			mat.roughness = SKIN_ROUGHNESS
 		_:
-			mat.albedo_color = Color(0.86, 0.68, 0.58)
-			mat.roughness = 0.7
+			mat.albedo_color = SKIN_ALBEDO
+			mat.roughness = SKIN_ROUGHNESS
 	return mat
 
 

@@ -789,7 +789,7 @@ top of uniform scale (deferred).
 
 ---
 
-## 11. Proxy geometry — eyes / teeth / tongue / genitals (rigged, morph-following)
+## 11. Proxy geometry — eyes / brows / lashes / teeth / tongue / genitals (rigged, morph-following)
 
 **Problem.** The body pipeline (§8, `tools/body_converter.gd`) renders ONLY
 `base.obj`'s `g body` group. MakeHuman keeps the **eyeballs, teeth, tongue,
@@ -797,18 +797,64 @@ eyebrows, eyelashes and genitals** as SEPARATE geometry, so the rendered face ha
 **hollow eye sockets and an empty open mouth** (a repeated user defect report). This
 slice imports the eye/teeth/tongue/genital geometry as additional **rigged,
 morph-following** mesh pieces so the face is complete and the NSFW-first full-body
-goal is served. Eyebrows/eyelashes are deferred (the base v1.3.0 repo ships only
-their *thumbnails*, not CC0 geometry — the meshes live in the community asset DB,
-whose per-asset license is NOT uniformly CC0, so they are **not** vendored).
+goal is served.
 
 **Where the geometry comes from `[V]`** (pinned `v1.3.0`):
 
 | piece | source | render verts / tris | CC0 |
 |---|---|---|---|
 | eyes | `data/eyes/low-poly/low-poly.obj` + `.mhclo` (96 v, 86 quads) | 96 / 172 | per-file header |
+| eyebrows | **PROJECT-AUTHORED** (see below) | 32 / 56 | our own work |
+| eyelashes | **PROJECT-AUTHORED** (see below) | 32 / 56 | our own work |
 | teeth | `base.obj` `helper-upper-teeth` + `helper-lower-teeth` (96 quads) | 136 / 192 | base.obj header |
 | tongue | `base.obj` `helper-tongue` (224 quads) | 253 / 448 | base.obj header |
 | genitals | `base.obj` `helper-genital` (182 quads) | 242 / 364 | base.obj header |
+
+### 11.1 Polish pass — tongue seating, genital tone/seam, eyebrows + eyelashes
+
+A second pass refined three first-pass caveats:
+
+**Eyebrows + eyelashes are PROJECT-AUTHORED (CC0-clean, our own geometry).** The
+pinned MakeHuman v1.3.0 *core* ships **no CC0 eyebrow mesh** — only a `clear.thumb`
+thumbnail under `data/eyebrows/` plus brow *morph targets* under
+`data/targets/eyebrows/`; the actual brow meshes live in the community asset DB,
+whose per-asset license is NOT uniformly CC0 (verified by inspecting the pinned
+`fetchFromGitHub` tree: no `.obj`/`.mhclo` named eyebrow/eyelash anywhere, no
+`helper-*-eyebrow` group in `base.obj`). The `base.obj` `helper-*-eyelashes-{1,2}`
+groups **are** CC0 (covered by base.obj's CC0 header) but are sparse alpha-texture
+*cards* — without their lash texture they render as opaque pale sheets. So rather
+than vendor any non-CC0 community asset OR ship an ugly untextured lash mesh, both
+brows and lashes are **authored in-repo** (`tools/body_proxy_build.gd`
+`_build_authored_face_hair`, `kind: "authored_face_hair"`): a thin arched dark
+ribbon along the brow / upper-lash line, built per eye against the LEFT/RIGHT split
+of the eye-helper base verts (14598..14742) so it is symmetric, and **bound** — each
+authored vertex single-index-bound to its nearest eye-helper base vert (weight 1).
+That nearest-vert bind hands each strip the same skin weights + macro/detail morph
+deltas as the eye region, so the brows/lashes are **rigged + morph-following through
+the exact same pipeline** as the helper pieces, deterministically (nearest-vert is a
+pure function of the pinned base mesh). They are ON by default. Material: a matte
+dark keratin tone, cull-disabled (2-sided thin cards). *Residual:* the brow arch has
+a slight notch at the peak (the forward bow creates a small self-occlusion crease) —
+a readable first-pass brow, refinable later with a proper hair-card texture.
+
+**Tongue seating.** The MakeHuman base tongue rest shape sits low/recessed in the
+cavity (dorsum below the teeth, tip behind the incisors) so at a front open-mouth
+angle it looked swallowed. `_apply_seating` lifts the dorsum + eases the tip forward
+by a small **tapered** raw-MH-space nudge (full at the tip/dorsum, zero at the root —
+no throat clipping) applied AFTER the binding, so skin weights + the morph
+delta-library are untouched: the tongue stays rigged + fully morph-following, just
+re-seated. Verified: tongue dorsum now reaches the teeth band and the tip juts to the
+teeth front (asserted in `tests/body_proxy_test.gd`).
+
+**Genital tone + seam.** The genital piece formerly used a fixed paler skin colour —
+a tone mismatch at the body boundary. It now **shares the body's exact skin
+material** (`BodyRig._skin_material`, also the body `material_override`), so its tone
+tracks skin tone/masculinity with zero mismatch. The genital helper verts ARE base
+verts (shared positions with the body), so there is no positional gap; the residual
+is only a faint **normal-discontinuity lighting crease** at the boundary (the helper
+surface is not vertex-welded into the body surface, so boundary normals differ).
+Full vertex-welding across the two surfaces is out of scope; the tone+position match
+makes the seam minimal in practice.
 
 The teeth/tongue/genitals are `helper-*` groups **already inside `base.obj`**, in the
 SAME vertex space as `g body` — so they share the base mesh's skin weights and macro/

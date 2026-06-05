@@ -37,6 +37,7 @@ func _ready() -> void:
 	_test_morph_following()
 	_test_normals_outward()
 	_test_rig_attach()
+	_test_polish()
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
 
@@ -59,8 +60,9 @@ func _test_import() -> void:
 			"verts": (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(),
 			"tris": (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3,
 		}
-	_assert("four pieces present (eyes/teeth/tongue/genitals)",
-		names.has("eyes") and names.has("teeth") and names.has("tongue") and names.has("genitals"),
+	_assert("six pieces present (eyes/eyebrows/eyelashes/teeth/tongue/genitals)",
+		names.has("eyes") and names.has("eyebrows") and names.has("eyelashes")
+			and names.has("teeth") and names.has("tongue") and names.has("genitals"),
 		str(names))
 	# eye low-poly proxy: 96 verts (no UV seams in the low-poly eyes obj), 86 quads/tris
 	# corner-expanded. The source low-poly.obj has 96 `v` and 86 `f` (all quads => 172 tris).
@@ -83,7 +85,7 @@ func _test_import() -> void:
 
 	# surface index table parsed by ProxyMorph
 	var surfs := ProxyMorphS.surfaces()
-	_assert("ProxyMorph surface table has 4 entries", surfs.size() == 4, "n=%d" % surfs.size())
+	_assert("ProxyMorph surface table has 6 entries", surfs.size() == 6, "n=%d" % surfs.size())
 
 
 # (2) mhclo binding: barycentric combo == proxy rest position ------------------
@@ -229,6 +231,87 @@ func _test_rig_attach() -> void:
 			var gmat2 := rig.proxy_instance.get_surface_override_material(gen_si) as StandardMaterial3D
 			_assert("set_proxy_visible('genitals', true) makes it opaque",
 				gmat2 != null and gmat2.albedo_color.a > 0.99, "alpha=%.2f" % (gmat2.albedo_color.a if gmat2 else -1.0))
+	rig.queue_free()
+
+
+# (6) polish: tongue seating, genital skin material, eyebrows/eyelashes seated + bound --
+func _test_polish() -> void:
+	print("--- (6) polish: tongue seating + genital skin-share + brows/lashes seated ---")
+	# Bake the neutral proxy mesh and read per-piece extents.
+	var mi := MeshInstance3D.new()
+	mi.mesh = (load(PROXY_MESH) as ArrayMesh).duplicate(true)
+	add_child(mi)
+	ProxyMorphS.apply(BodyState.new(), mi)
+	var am := mi.mesh as ArrayMesh
+	var ext := {}
+	for n in ["eyes", "eyebrows", "eyelashes", "teeth", "tongue", "genitals"]:
+		var si := _surface_index(am, n)
+		if si < 0:
+			continue
+		var v: PackedVector3Array = am.surface_get_arrays(si)[Mesh.ARRAY_VERTEX]
+		var ab := AABB(v[0], Vector3.ZERO)
+		for p in v:
+			ab = ab.expand(p)
+		ext[n] = ab
+
+	# SEATING: the polished tongue is lifted+eased-forward so its dorsum sits up in the
+	# cavity (not recessed). Assert its TOP reaches the upper-teeth band (no longer buried
+	# below the teeth) and its TIP juts forward to ~the front of the teeth (visible, not
+	# swallowed). Both are the seated-vs-recessed invariant the polish establishes.
+	if ext.has("tongue") and ext.has("teeth"):
+		var tongue: AABB = ext["tongue"]
+		var teeth: AABB = ext["teeth"]
+		var tongue_top := tongue.position.y + tongue.size.y
+		var teeth_top := teeth.position.y + teeth.size.y
+		_assert("tongue dorsum reaches the teeth band (seated, not recessed below them)",
+			tongue_top >= teeth_top - 0.004, "tongue_top=%.4f teeth_top=%.4f" % [tongue_top, teeth_top])
+		var tongue_front := tongue.position.z + tongue.size.z
+		var teeth_front := teeth.position.z + teeth.size.z
+		_assert("tongue tip juts forward to the teeth front (visible in an open mouth)",
+			tongue_front >= teeth_front - 0.004, "tongue_z=%.4f teeth_z=%.4f" % [tongue_front, teeth_front])
+
+	# EYEBROWS/EYELASHES seated: above / on the eye, in front of it (so they read at all).
+	if ext.has("eyes") and ext.has("eyebrows"):
+		var eyes: AABB = ext["eyes"]
+		var brows: AABB = ext["eyebrows"]
+		_assert("eyebrows sit ABOVE the eyes (brow bottom >= eye centre)",
+			brows.position.y >= eyes.position.y + eyes.size.y * 0.4,
+			"brow_y0=%.4f eye_cy=%.4f" % [brows.position.y, eyes.position.y + eyes.size.y * 0.5])
+		_assert("eyebrows sit IN FRONT of the eyes (proud of the skin, not z-buried)",
+			brows.position.z + brows.size.z >= eyes.position.z + eyes.size.z - 0.002,
+			"brow_zf=%.4f eye_zf=%.4f" % [brows.position.z + brows.size.z, eyes.position.z + eyes.size.z])
+	if ext.has("eyes") and ext.has("eyelashes"):
+		var eyes2: AABB = ext["eyes"]
+		var lashes: AABB = ext["eyelashes"]
+		var lash_cy := lashes.position.y + lashes.size.y * 0.5
+		var eye_cy := eyes2.position.y + eyes2.size.y * 0.5
+		_assert("eyelashes sit on the UPPER lid (above the eye centre, near the eye top)",
+			lash_cy >= eye_cy, "lash_cy=%.4f eye_cy=%.4f" % [lash_cy, eye_cy])
+
+	# Brows/lashes are RIGGED + morph-following (authored verts bound to eye-helper base
+	# verts): a strong morph must displace them, exactly like the helper pieces.
+	var neutral_brow: PackedVector3Array = am.surface_get_arrays(_surface_index(am, "eyebrows"))[Mesh.ARRAY_VERTEX]
+	var aged := BodyState.new(); aged.age_years = 70.0; aged.masculinity = 90.0
+	ProxyMorphS.apply(aged, mi)
+	var aged_brow: PackedVector3Array = (mi.mesh as ArrayMesh).surface_get_arrays(_surface_index(mi.mesh as ArrayMesh, "eyebrows"))[Mesh.ARRAY_VERTEX]
+	var brow_disp := 0.0
+	for i in mini(neutral_brow.size(), aged_brow.size()):
+		brow_disp = maxf(brow_disp, neutral_brow[i].distance_to(aged_brow[i]))
+	_assert("eyebrows follow the macro morph (bound, not static) — displaces > 1 mm",
+		brow_disp > 0.001, "max brow disp=%.4f m" % brow_disp)
+	mi.queue_free()
+
+	# GENITALS share the BODY SKIN material (so tone tracks skin, not a fixed paler colour).
+	var rig := BodyRigS.new()
+	rig.show_genitals = true
+	add_child(rig)
+	var am2 := rig.proxy_instance.mesh as ArrayMesh
+	var gsi := _surface_index(am2, "genitals")
+	rig.set_proxy_visible("genitals", true)
+	var gmat := rig.proxy_instance.get_surface_override_material(gsi)
+	_assert("genitals share the EXACT body skin material (no separate paler tone)",
+		gmat != null and gmat == rig.mesh_instance.material_override,
+		"gen_mat==body_mat: %s" % str(gmat == rig.mesh_instance.material_override))
 	rig.queue_free()
 
 

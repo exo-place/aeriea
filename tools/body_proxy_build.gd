@@ -28,8 +28,9 @@
 ##
 ## OUTPUTS (built by `nix build .#body-proxies`; committed, byte-deterministic):
 ##   res://assets/body/base_body_proxies.res         — ArrayMesh, ONE SURFACE per
-##                                                      proxy piece (eyes, teeth,
-##                                                      tongue, genitals), each with
+##                                                      proxy piece (eyes, eyebrows,
+##                                                      eyelashes, teeth, tongue,
+##                                                      genitals), each with
 ##                                                      ARRAY_BONES/ARRAY_WEIGHTS.
 ##   res://assets/body/base_body_proxies.index.json  — surface i -> {name, material,
 ##                                                      vert_offset, vert_count} +
@@ -75,9 +76,25 @@ const PIECES := [
 	{"name": "eyes", "kind": "proxy",
 		"obj": "eyes/low-poly/low-poly.obj", "mhclo": "eyes/low-poly/low-poly.mhclo",
 		"material": "eye"},
+	# eyebrows + eyelashes are PROJECT-AUTHORED (CC0-clean, our own geometry). The pinned
+	# MakeHuman v1.3.0 core ships NO CC0 eyebrow mesh (only a `clear.thumb` + brow morph
+	# targets; the meshes are community-DB, not uniform CC0); the base.obj `helper-*-eyelashes`
+	# groups ARE CC0 but are sparse cards meant for an alpha lash texture and render as opaque
+	# pale sheets without it. So we author both as thin dark strips along the brow/lash line,
+	# seated + rigged + morph-following by binding to the symmetric eye-helper base verts.
+	{"name": "eyebrows", "kind": "authored_face_hair", "material": "brows"},
+	{"name": "eyelashes", "kind": "authored_face_hair", "material": "lashes"},
 	{"name": "teeth", "kind": "helper_multi",
 		"groups": ["helper-upper-teeth", "helper-lower-teeth"], "material": "teeth"},
-	{"name": "tongue", "kind": "helper", "group": "helper-tongue", "material": "tongue"},
+	{"name": "tongue", "kind": "helper", "group": "helper-tongue", "material": "tongue",
+		# SEATING (polish): the MakeHuman base tongue rest shape sits low/recessed in
+		# the cavity — its dorsum reads below the teeth and its tip falls behind the
+		# incisors, so at a front open-mouth angle it looks swallowed. We lift the
+		# dorsum + ease the tip forward by a small RAW-MH-space nudge applied AFTER the
+		# binding (so skin weights + the morph delta-library are untouched: the tongue
+		# stays rigged + fully morph-following — it is just re-seated higher/forward in
+		# its rest pose). Tuned against the open-mouth render. MH units (×0.1 = metres).
+		"seat_up": 0.16, "seat_fwd": 0.18},
 	{"name": "genitals", "kind": "helper", "group": "helper-genital", "material": "genitals"},
 ]
 
@@ -144,9 +161,15 @@ func _run() -> int:
 		var built: Dictionary
 		if piece["kind"] == "proxy":
 			built = _build_proxy_piece(piece, data_root, base_verts, group_faces)
+		elif piece["kind"] == "authored_face_hair":
+			built = _build_authored_face_hair(String(piece["name"]), base_verts)
 		else:
 			var groups: Array = piece.get("groups", [piece.get("group", "")])
 			built = _build_helper_piece(groups, base_verts, base_uvs, group_faces)
+			# SEATING nudge (tongue): a tapered RAW-MH-space re-seat applied to the bound
+			# rest positions only — binding (skin weights + morph deltas) is unchanged.
+			if not built.is_empty() and (piece.has("seat_up") or piece.has("seat_fwd")):
+				_apply_seating(built, float(piece.get("seat_up", 0.0)), float(piece.get("seat_fwd", 0.0)))
 		if built.is_empty():
 			push_error("body_proxy_build: piece '%s' produced no geometry" % piece["name"])
 			return 1
@@ -270,6 +293,130 @@ func _build_helper_piece(groups: Array, base_verts: PackedVector3Array, base_uvs
 			return {}
 		for face in faces:
 			_emit_face_tris(face, corner, tris)
+	if render_pos.is_empty() or tris.is_empty():
+		return {}
+	return {"render_pos_raw": render_pos, "render_uv": render_uv, "tris": tris, "binding": binding}
+
+
+## SEATING re-pose (tongue): lift + ease-forward the bound rest positions of a helper
+## piece, TAPERED so the front/dorsum moves most and the back/root stays anchored (no
+## throat clipping). Pure raw-MH-space edit of render_pos_raw; the binding (skin weights,
+## morph delta library) is derived from the UNCHANGED base verts, so the piece stays fully
+## rigged + morph-following — it is only re-seated higher/forward in its rest pose. The
+## taper weight is the normalised front-ness (z) × upper-ness (y) of each vert within the
+## piece's own bbox, so the tip+dorsum rise into the cavity and the root holds.
+func _apply_seating(built: Dictionary, up_mh: float, fwd_mh: float) -> void:
+	var pos: PackedVector3Array = built["render_pos_raw"]
+	if pos.is_empty():
+		return
+	var ab := AABB(pos[0], Vector3.ZERO)
+	for p in pos:
+		ab = ab.expand(p)
+	var z0 := ab.position.z
+	var zr := maxf(ab.size.z, 1e-6)
+	var y0 := ab.position.y
+	var yr := maxf(ab.size.y, 1e-6)
+	for i in pos.size():
+		var fwdness := clampf((pos[i].z - z0) / zr, 0.0, 1.0)        # 0 back -> 1 front/tip
+		var upness := clampf((pos[i].y - y0) / yr, 0.0, 1.0)         # 0 floor -> 1 dorsum
+		# lift the dorsum (blend of fwd+up so the whole upper surface rises), ease the tip fwd.
+		var lift := up_mh * (0.45 + 0.55 * maxf(fwdness, upness))
+		var push := fwd_mh * (fwdness * fwdness)                      # strongest at the very tip
+		pos[i] = pos[i] + Vector3(0.0, lift, push)
+	built["render_pos_raw"] = pos
+
+
+## Build a PROJECT-AUTHORED face-hair piece (eyebrows OR eyelashes). These are NOT from
+## MakeHuman: the pinned v1.3.0 core ships NO CC0 eyebrow mesh (only a `clear.thumb` + brow
+## morph targets — the meshes are community-DB, not uniform CC0), and while the base.obj
+## `helper-*-eyelashes` groups ARE CC0 they are sparse alpha-texture cards that render as
+## opaque pale sheets without their lash texture. So we author both ourselves (our own work,
+## no third-party licence) — a thin arched dark ribbon along the brow / upper-lash line —
+## seated on the symmetric LEFT/RIGHT eye-helper base verts (14598..14742) and bound, per
+## authored vertex, to the NEAREST eye-helper base vert (single-index, weight 1). Binding to
+## the eye-helper set (rather than the whole mesh) keeps L/R anchoring SYMMETRIC and stable,
+## and hands each strip the same skin weights + macro/detail morph deltas as the eye region,
+## so the strips are rigged + morph-following through the SAME pipeline as the helper pieces,
+## deterministically (nearest-vert is a pure function of the pinned base mesh).
+func _build_authored_face_hair(piece_name: String, base_verts: PackedVector3Array) -> Dictionary:
+	# Split the eye-helper verts into LEFT (x<0) and RIGHT (x>=0) and bbox each, so each
+	# brow/lash is built + anchored against ITS OWN eye — symmetric by construction.
+	var lo := PackedInt32Array(); var ro := PackedInt32Array()
+	for i in range(14598, 14743):
+		if base_verts[i].x < 0.0:
+			lo.append(i)
+		else:
+			ro.append(i)
+	if lo.is_empty() or ro.is_empty():
+		return {}
+
+	var render_pos := PackedVector3Array()
+	var render_uv := PackedVector2Array()
+	var tris := PackedInt32Array()
+	var binding := []
+	var segs := 7
+	for eye_idx in [lo, ro]:
+		var eb := AABB(base_verts[eye_idx[0]], Vector3.ZERO)
+		for i in eye_idx:
+			eb = eb.expand(base_verts[i])
+		# nearest among THIS eye's helper verts -> rigid, symmetric, region-correct binding.
+		var nearest := func(p: Vector3) -> int:
+			var best: int = eye_idx[0]
+			var bd := INF
+			for vi in eye_idx:
+				var d := base_verts[vi].distance_squared_to(p)
+				if d < bd:
+					bd = d; best = vi
+			return best
+		var add_vert := func(p: Vector3, uv: Vector2) -> int:
+			var ri := render_pos.size()
+			render_pos.append(p)
+			render_uv.append(uv)
+			binding.append([[nearest.call(p), 1.0]])
+			return ri
+		# Geometry params in this eye's local bbox frame. The brow/lash spans the FULL eye
+		# width (x0..x1), centred on the eye, so it reads at human proportions (~3cm wide),
+		# arched, sitting a touch proud of the skin so it isn't z-buried. x sweeps from the
+		# nasal corner (x0) to the temporal corner (x1) for whichever eye this is.
+		var x0 := eb.position.x + eb.size.x * 0.04
+		var x1 := eb.position.x + eb.size.x * 0.96
+		var front := eb.position.z + eb.size.z
+		var row_bottom := PackedInt32Array()
+		var row_top := PackedInt32Array()
+		for s in range(segs + 1):
+			var t: float = float(s) / float(segs)          # 0 -> 1 across the eye width
+			var x: float = lerpf(x0, x1, t)
+			# proud-of-skin: the strip bows FORWARD at mid-span (parabola) so it floats just
+			# off the curved brow/lid instead of clipping into it.
+			var bow: float = (1.0 - pow(2.0 * t - 1.0, 2.0))
+			if piece_name == "eyebrows":
+				# arched ribbon just ABOVE the eye opening. It must float PROUD of the convex
+				# forehead at every point (else the middle z-buries behind the skin and the
+				# brow breaks into disconnected wedges) — so z follows the brow-ridge bulge:
+				# most-forward at mid-span (bow), easing back toward the temple + nose. A gentle
+				# arch; bottom edge near the upper-lid crease.
+				var brow_y: float = eb.position.y + eb.size.y * 0.96 + eb.size.y * 0.12 * bow
+				var thick: float = eb.size.y * 0.24
+				var z: float = front + eb.size.z * (0.22 + 0.05 * bow)
+				row_bottom.append(add_vert.call(Vector3(x, brow_y, z), Vector2(t, 1.0)))
+				row_top.append(add_vert.call(Vector3(x, brow_y + thick, z), Vector2(t, 0.0)))
+			else:
+				# eyelashes: a slim dark rim on the UPPER lid edge, flared forward + proud of
+				# the lid so it isn't z-buried (same convex-surface reasoning as the brow).
+				var lash_y: float = eb.position.y + eb.size.y * (0.84 + 0.06 * bow)
+				var thick2: float = eb.size.y * 0.11
+				var z2: float = front + eb.size.z * (0.20 + 0.10 * bow)
+				row_bottom.append(add_vert.call(Vector3(x, lash_y, z2), Vector2(t, 1.0)))
+				row_top.append(add_vert.call(Vector3(x, lash_y + thick2, z2), Vector2(t, 0.0)))
+		# Emit each quad as TWO triangles, BOTH windings, so the flat strip shows from any
+		# angle (these are thin authored cards, not closed volumes — 2-sided is correct).
+		for s in segs:
+			var a0 := row_bottom[s]; var a1 := row_bottom[s + 1]
+			var b0 := row_top[s]; var b1 := row_top[s + 1]
+			tris.append(a0); tris.append(b1); tris.append(a1)
+			tris.append(a0); tris.append(b0); tris.append(b1)
+			tris.append(a0); tris.append(a1); tris.append(b1)
+			tris.append(a0); tris.append(b1); tris.append(b0)
 	if render_pos.is_empty() or tris.is_empty():
 		return {}
 	return {"render_pos_raw": render_pos, "render_uv": render_uv, "tris": tris, "binding": binding}

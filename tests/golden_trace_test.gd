@@ -102,6 +102,19 @@ func _input_logs() -> Array:
 				+ _hold(["jump"], 2)
 				+ _hold([], 14)
 				+ _hold(["aim"], 60)},
+		{"name": "multi-jump: ground jump, fall past coyote, then an AIR air-jump (FEATURE, pure data)", "spawn": Vector3(0, 1.2, 0), "with_walls": false,
+			"log": _hold([], 8)
+				+ _hold(["jump"], 2)
+				+ _hold([], 30)
+				+ _hold(["jump"], 2)
+				+ _hold([], 25)
+				+ _hold(["jump"], 2)
+				+ _hold([], 20)},
+		{"name": "bullet jump from slide while PITCHED DOWN (FEATURE: clamp_y_min forbids a downward launch)", "spawn": Vector3(0, 1.2, 0), "with_walls": false,
+			"log": _hold_vp(["move_forward", "sprint"], 35, 0.0, -0.6)
+				+ _hold_vp(["move_forward", "sprint", "crouch"], 4, 0.0, -0.6)
+				+ _hold_vp(["move_forward", "crouch", "jump"], 3, 0.0, -0.6)
+				+ _hold_vp(["move_forward"], 30, 0.0, -0.6)},
 	]
 
 

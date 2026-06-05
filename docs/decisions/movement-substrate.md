@@ -73,7 +73,7 @@ typed Resource / struct tree). Five node kinds:
    | `airborne` | — | `not is_on_floor()` |
    | `speed_h` | `cmp, value` | horizontal speed `>= / < / …` param/literal |
    | `speed_v` | `cmp, value` | vertical velocity comparison |
-   | `timer` | `name, cmp, value` | a named timer comparison (e.g. `coyote > 0`) |
+   | `var` | `name, cmp, value` | a named numeric state-var comparison (e.g. `coyote > 0`, `air_jumps > 0`) — generalizes the old `timer` op |
    | `input_pressed` | `action` | `Input.is_action_pressed(action)` (sampled, see §3) |
    | `input_buffered` | `action` | buffered-edge timer `> 0` (e.g. jump buffer) |
    | `wish_input` | (none) / `aligned_with_velocity, cmp, value` | any move input / dot of wish-dir vs velocity |
@@ -105,10 +105,11 @@ typed Resource / struct tree). Five node kinds:
    | `clamp_speed_h` | `max` | `limit_length` of horizontal velocity |
    | `slope_accelerate` | `rate, ref_angle` | downhill push proportional to slope angle |
    | `set_collider_height` | `value` | resize capsule, keep feet planted |
-   | `set_timer` | `name, value` | `timer = value` (start coyote/buffer/wall-run/slide) |
+   | `set_var` | `name, value` | `var = value` (start coyote/buffer/wall-run/slide; set a counter) — generalizes the old `set_timer` |
+   | `add_var` | `name, by, dt_scaled?, clamp_min?` | `var += by` (×dt when `dt_scaled`), floored at `clamp_min` — generalizes `add_timer` (the slide_steer accumulate; the multi-jump consume) |
    | `lerp_camera_height` | `target, rate` | camera pivot height ease |
    | `lerp_fov` | `target, rate` | dynamic FOV ease |
-   | `lerp_camera_roll` | `target, rate` | wall-run tilt |
+   | `lerp_camera_roll` | `target, rate, sign_from?` | wall-run tilt; `sign_from` takes the sign from a named state scalar (e.g. `wall_side`) |
    | `tween_position` | `from, to, duration_timer` | scripted move (vault/mantle) |
    | `respawn` | — | teleport to spawn, zero velocity + timers |
    | `move_and_slide` | — | commit the physics step (explicit, so its ordering is data) |
@@ -123,6 +124,23 @@ typed Resource / struct tree). Five node kinds:
    There are no closures and no inline expressions: an effect that needs a
    computed direction names a *space* (`wish`, `forward`, `wall_tangent`), and
    the interpreter supplies that vector from the tick's sampled state.
+
+   **Guarded effects (`when`).** Any effect may carry an optional top-level
+   `when: Condition`; it is skipped when the guard is false (the exact shape the
+   interaction substrate uses). One general mechanism in place of bespoke per-effect
+   skip flags. See §"Movement language redesign".
+
+   **Numeric state vars (`vars`).** Timers, cooldowns, and counters are one
+   primitive: declared numeric vars `{ name: { decay: bool } }`. Decaying vars are
+   reduced by `dt` once per tick (countdown timers); non-decaying vars are
+   counters/resources (`jump_hold`, `slide_steer`, `air_jumps`). `var`/`set_var`/
+   `add_var` read and write them.
+
+   **Space modifiers.** A `space` is either a bare name or a pure-function modifier
+   object `{ base, clamp_y_min?, sign_from? }`: `clamp_y_min` forbids a downward
+   component then renormalizes (bullet-jump-never-face-down); `sign_from` multiplies
+   by the sign of a named state scalar (wall-run tilt). Deterministic, derived from
+   the sampled vector.
 
 **Type sketch** (engine-side, the typed library; JSON is the wire form):
 
@@ -501,3 +519,71 @@ cross-platform replay validity.
 - **Vocabulary creep**: every new leaf predicate/effect is an engine change —
   resist per-verb leaves; collapse to primitives. Reviewed against
   "collapse asymmetries to primitives."
+
+## Movement language redesign — collapsing accreted special-cases (2026-06-05)
+
+Porting the imperative controller into the closed vocabulary left several
+statement-order / local-flag tricks carried across as **bespoke per-effect args**
+rather than general mechanisms. This redesign collapsed those smells into four
+general primitives (A–D), behavior-preserving for every existing verb — the
+existing golden traces stayed **bit-identical** (hash-for-hash, interpreter ==
+compiled == repeat). On the cleaned substrate, two parked features then fell out as
+pure data. Two further cleanups (E, F) are fenced as deferred follow-ups.
+
+### The A–D collapses (behavior-preserving)
+
+- **A. Guarded effects.** Any effect may carry a top-level `when: Condition`,
+  skipped when false — adopted verbatim from the interaction substrate's shape.
+  Subsumes two bespoke gates: `apply_friction only_when_no_wish:true` → `when:{not
+  wish_input}`; and the slide_steer `add_timer` accumulate/else-decay → two
+  mutually-exclusive guarded `add_var` effects.
+- **B. Numeric state vars.** Timers + cooldowns + counters unified into declared
+  numeric vars with a `decay` flag. `timer` cond → `var`; `set_timer`/`add_timer` →
+  `set_var`/`add_var`. The decay loop is driven by the declared flag (default
+  decaying), reproducing the old hardcoded `jump_hold`/`slide_steer` exclusion
+  exactly. `bullet_jump_cd` is now a plain decaying var.
+- **C. Space modifiers.** A `space` may be `{ base, clamp_y_min?, sign_from? }`.
+  `sign_from` subsumes the one-off `from_wall_side` on `lerp_camera_roll` (the minus
+  the old flag baked in is folded into the named `wall_side` source).
+- **D. Parameterized thresholds.** The kernel-baked wall-verticality (`0.3`) and
+  slope-deadzone (`2.0`) literals became params `wall_max_normal_y` / `slope_min_angle`
+  defaulted to those exact values.
+
+**`guard_not_in` — structural removal.** The slide-entry boost's
+`add_velocity guard_not_in:"SLIDE"` was verified to be a structural no-op: the boost
+fires only on the GROUND→SLIDE and AIR→SLIDE transitions, and a transition's `do`
+runs *before* `active_state` is set to the target, so `active_state` is never
+`SLIDE` at the boost — the guard could never trigger. Removed as dead weight (no new
+`state` condition op needed).
+
+**`aligned_with_velocity` retained.** It stays a parameterized `wish_input` arg (dot
+of wish-dir vs velocity, `cmp`/`value`) — already general, not a one-off hack — so
+no new condition op was introduced for it.
+
+The interpreter (reference semantics) and compiler (lowering) kernels stayed
+mirrored line-for-line; the compiled projection was regenerated and re-verified.
+
+### The two features (pure data, NOT behavior-preserving; new golden traces)
+
+- **Multi-jump.** An `air_jumps` resource var (non-decaying), refilled to
+  `air_jumps_max` on GROUND `on_enter`; an AIR air-jump transition (priority 80,
+  below coyote/wall-jump, above wall-run) guarded `when air_jumps > 0`, its `do`
+  consuming one (`add_var air_jumps by:-1`). No new engine primitive — the resource
+  var (B) is the whole mechanism (it would otherwise have cloned the `bullet_jump_cd`
+  timer-guard idiom).
+- **Bullet-jump-never-face-down.** Bullet jump's `aim` space gained
+  `clamp_y_min: 0` (C): a downward look clamps the launch's vertical component to 0
+  then renormalizes, so aiming down gives a forward+level burst, never a self-dive.
+
+### Fenced follow-ups (deferred — recorded, not forgotten)
+
+- **E. Explicit movement STATE SCHEMA.** Declare all sim state as typed slots
+  (parity with interaction's `state_schema`), replacing the implicit `timers` map +
+  ad-hoc `wall_normal`/`wall_side` fields. Deferred: invasive (touches setup/reset,
+  every state-touching kernel, and the trajectory hash), and B already provides the
+  declared-numeric-state the features needed. Note `lerp_camera_roll`'s `sign_from`
+  reads `wall_side` via a small `_read_state_scalar` shim today — E would subsume it.
+- **F. World-capture-as-EFFECT.** Make `ledge_vaultable` a pure predicate and add a
+  `capture_world(into: var)` effect, restoring condition purity (today the condition
+  performs a stateful `host_check_vault()` side-effect). Deferred: requires a new host
+  protocol shape and re-sequencing vault entry; not load-bearing for the current verbs.

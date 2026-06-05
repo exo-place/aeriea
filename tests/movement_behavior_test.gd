@@ -103,6 +103,7 @@ func _run_suite() -> void:
 	await _test_landing_crouch_fast_slides_carrying_momentum()
 	await _test_bullet_jump_forward_up_burst()
 	await _test_bullet_jump_tracks_aim_pitch()
+	await _test_multi_jump_consumes_refills_and_blocks()
 	await _test_wall_cling_latches_and_suppresses_gravity()
 	await _test_aim_glide_slows_descent()
 	await _test_slope_holds_position_without_crouch()
@@ -975,18 +976,94 @@ func _test_bullet_jump_tracks_aim_pitch() -> void:
 	var vy_level := await _bullet_jump_vy_at_pitch(0.0)   # level
 	var vy_down := await _bullet_jump_vy_at_pitch(-0.7)   # ~40 deg down
 
-	# vy_down is read after the physics commit: a downward dive launched from the
-	# ground immediately re-contacts the floor, so move_and_slide clamps its
-	# negative vy to 0 (it cannot gain height). Hence the floor-faithful assertion
-	# is vy_down <= 0 (no upward gain), strictly below the level arc — together with
-	# up > level this proves the burst tracks camera pitch. (The raw launch vy at
-	# down-pitch is negative, ~base_up + sin(pitch)*impulse; the golden-trace
-	# pitched case verifies the airborne trajectory bit-for-bit on both paths.)
+	# FEATURE bullet-jump-never-face-down (clamp_y_min:0 on the aim space): aiming UP
+	# still launches higher (aim.y>0), so vy_up > vy_level. Aiming DOWN no longer dives
+	# — the aim vector's downward component is clamped to 0, so a down-pitch launch
+	# becomes a level forward+base_up burst: its launch .y >= 0 (never self-diving) and
+	# equals the level launch (both have aim.y == 0 after the clamp). This is exactly
+	# the never-face-down guarantee. (The golden-trace pitched-UP case verifies the
+	# airborne trajectory bit-for-bit on both paths.)
 	_assert(
-		"bullet jump vy tracks aim pitch: up > level, level arcs up (>0), down does not gain height (<=0 and < level)",
-		vy_up > vy_level and vy_level > vy_down and vy_level > 0.0 and vy_down <= 0.0,
-		"vy_up=%.3f, vy_level=%.3f, vy_down=%.3f (expect up>level>down, level>0, down<=0)" % [
+		"bullet jump aim clamp: up arcs higher than level; aiming DOWN never launches downward (.y >= 0, == level)",
+		vy_up > vy_level and vy_level > 0.0 and vy_down >= 0.0 and is_equal_approx(vy_down, vy_level),
+		"vy_up=%.3f, vy_level=%.3f, vy_down=%.3f (expect up>level>0, down>=0 and down==level)" % [
 			vy_up, vy_level, vy_down]
+	)
+
+
+## MULTI-JUMP as a PURE-DATA feature (base.kit.json: the air_jumps resource var +
+## GROUND on_enter refill + an AIR air-jump transition guarded when air_jumps>0).
+## Asserts: an air-jump CONSUMES air_jumps (budget drops), GROUND re-entry REFILLS it
+## to air_jumps_max, and an air-jump is BLOCKED at zero (no extra rise once spent).
+## Data paths only (the substrate feature lives in the kit; the imperative oracle has
+## no air_jumps). Reads the resource var straight off interpreter.timers.
+func _test_multi_jump_consumes_refills_and_blocks() -> void:
+	if _target_label == "imperative":
+		return
+	var ctx := await _spawn_level()
+	var player: CharacterBody3D = ctx["player"]
+	await _settle_on_floor(player)
+	# Idle into a real GROUND state so the on_enter refill has run.
+	for _i in 30:
+		await get_tree().physics_frame
+		if player._state == S_GROUND:
+			break
+	var air_max: float = float(player.kit.params.get("air_jumps_max", 1.0))
+	var refilled_on_ground: float = float(player.interpreter.timers.get("air_jumps", -1.0))
+
+	# Go airborne in clear air with NO upward velocity and let coyote expire, so the
+	# next buffered jump can only be served by the air-jump path (not coyote/ground).
+	player.global_position = Vector3(0.0, 8.0, 0.0)
+	player._yaw = 0.0
+	player.rotation.y = 0.0
+	player.velocity = Vector3(0.0, -1.0, 0.0)
+	for _i in 20:
+		await get_tree().physics_frame
+		if float(player.interpreter.timers.get("coyote", 0.0)) <= 0.0 and not player.is_on_floor():
+			break
+	var budget_before: float = float(player.interpreter.timers.get("air_jumps", -1.0))
+	var vy_before := player.velocity.y
+	var jump_velocity := float(player.kit.params.get("jump_velocity", 9.5))
+
+	# First air-jump: a buffered jump in the air fires the air-jump transition (may
+	# land a frame or two after the press, via the jump buffer) → consumes one air_jump
+	# and kicks vy up to ~jump_velocity. Track the peak vy and the final budget.
+	_send_key(KEY_SPACE, false)
+	_send_key(KEY_SPACE, true)
+	var vy_after_jump := vy_before
+	for _i in 4:
+		await get_tree().physics_frame
+		vy_after_jump = maxf(vy_after_jump, player.velocity.y)
+	_send_key(KEY_SPACE, false)
+	var budget_after_jump: float = float(player.interpreter.timers.get("air_jumps", -1.0))
+	var consumed := budget_before - budget_after_jump
+	var jumped := vy_after_jump >= jump_velocity - 1.0
+
+	# Budget is now 0. A SECOND air-jump must be BLOCKED: no fresh kick back up to the
+	# jump impulse (gravity keeps pulling vy down past the impulse threshold).
+	for _i in 8:
+		await get_tree().physics_frame
+	var vy_pre_blocked := player.velocity.y
+	_send_key(KEY_SPACE, false)
+	_send_key(KEY_SPACE, true)
+	var vy_blocked := vy_pre_blocked
+	for _i in 4:
+		await get_tree().physics_frame
+		vy_blocked = maxf(vy_blocked, player.velocity.y)
+	_send_key(KEY_SPACE, false)
+	var budget_at_block: float = float(player.interpreter.timers.get("air_jumps", -1.0))
+	var blocked := budget_at_block <= 0.0 and vy_blocked < jump_velocity - 1.0
+
+	ctx["level"].queue_free()
+	await get_tree().process_frame
+
+	_assert(
+		"multi-jump: ground refills air_jumps to max, an air-jump consumes one, a jump at zero is blocked (pure-data feature)",
+		is_equal_approx(refilled_on_ground, air_max) and is_equal_approx(consumed, 1.0)
+			and jumped and is_equal_approx(budget_after_jump, air_max - 1.0) and blocked,
+		"refill_on_ground=%.1f (max=%.1f), budget %0.1f->%0.1f (consumed=%.1f), vy_peak %.2f (jumped=%s), then blocked: budget=%.1f vy_peak %.2f (jump_v=%.1f)" % [
+			refilled_on_ground, air_max, budget_before, budget_after_jump, consumed,
+			vy_after_jump, str(jumped), budget_at_block, vy_blocked, jump_velocity]
 	)
 
 

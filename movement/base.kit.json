@@ -57,7 +57,10 @@
 
     "comment_thresholds": "§D — kernel-baked numbers lifted to params at their CURRENT values (so traces stay bit-identical): wall-verticality acceptance and the slope deadzone angle.",
     "wall_max_normal_y": 0.3,
-    "slope_min_angle": 2.0
+    "slope_min_angle": 2.0,
+
+    "comment_multi_jump": "Multi-jump (FEATURE, pure data on the cleaned substrate): air_jumps_max mid-air jumps available between ground contacts. Implemented as the air_jumps resource var (decay:false): refilled to air_jumps_max on GROUND enter, consumed one-per-air-jump, gated when air_jumps>0.",
+    "air_jumps_max": 1
   },
 
   "comment_vars": "§B — declared numeric state vars generalizing timers/cooldowns/counters. decay:true (the default for undeclared names) reduces the var by dt once per tick (countdown timers). decay:false vars are counters/resources whose change is explicit: jump_hold accumulates while held, slide_steer accumulates via guarded add_var. The decay set here is identical to the pre-refactor hardcoded jump_hold/slide_steer exclusion.",
@@ -69,7 +72,8 @@
     "slide_steer": { "decay": false },
     "wall_run": { "decay": true },
     "wall_jump_grace": { "decay": true },
-    "vault": { "decay": true }
+    "vault": { "decay": true },
+    "air_jumps": { "decay": false }
   },
 
   "inputs": {
@@ -90,7 +94,9 @@
   "states": [
     {
       "name": "GROUND",
-      "on_enter": [],
+      "on_enter": [
+        { "comment": "Multi-jump (FEATURE): refill the air-jump budget on every ground contact.", "do": "set_var", "name": "air_jumps", "value": "air_jumps_max" }
+      ],
       "transitions": [
         {
           "comment": "Buffered jump from the ground (highest priority). NOT reenter: the jump sets vy>0 and hands to AIR, whose tick (gravity + move_and_slide) runs this same frame and lifts the body off the floor. Re-entering would re-evaluate AIR's transitions against the STALE is_on_floor()==true (move_and_slide has not run yet at transition-eval time), bouncing AIR->GROUND in the same tick; GROUND's tick then clobbers the jump impulse with ground_snap_bias, so the jump silently dies. Mirrors PlayerController._process_ground, which returns after _do_jump() and does NOT re-run air logic that frame.",
@@ -196,6 +202,22 @@
             { "do": "set_velocity_y", "value": "wall_jump_up" },
             { "do": "set_var", "name": "wall_jump_grace", "value": 0 },
             { "do": "set_var", "name": "jump_buffer", "value": 0 }
+          ]
+        },
+        {
+          "comment": "Multi-jump (FEATURE, pure data): a buffered jump in the air with air-jump budget remaining → another jump. Priority 80, BELOW coyote (90) and wall-jump (85) so those richer launches win when available, ABOVE wall-run (70). Guarded when air_jumps>0 (a var condition); the do consumes one (add_var air_jumps -1). reenter so the impulse hands to AIR's tick the same frame (mirrors the coyote jump). No new engine primitive — just the resource var + a guarded transition.",
+          "when": { "op": "all", "of": [
+            { "op": "input_buffered", "action": "jump" },
+            { "op": "var", "name": "air_jumps", "cmp": "gt", "value": 0 }
+          ] },
+          "to": "AIR",
+          "priority": 80,
+          "reenter": true,
+          "do": [
+            { "do": "set_velocity_y", "value": "jump_velocity" },
+            { "do": "add_var", "name": "air_jumps", "by": -1 },
+            { "do": "set_var", "name": "jump_buffer", "value": 0 },
+            { "do": "set_var", "name": "jump_hold", "value": 0 }
           ]
         },
         {

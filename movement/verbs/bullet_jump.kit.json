@@ -27,7 +27,7 @@
         "do": [
           { "do": "set_collider_height", "value": "stand_height", "require_headroom": true },
           { "do": "set_velocity_y", "value": "bullet_jump_base_up" },
-          { "do": "add_velocity", "space": "aim", "vector": "bullet_jump_impulse", "include_y": true },
+          { "comment": "FEATURE bullet-jump-never-face-down: clamp_y_min:0 on the aim space forbids a downward launch component (max(aim.y,0) then renormalize), so aiming down still gives a forward+level burst, never a self-dive. Pure §C space modifier, no one-off hack.", "do": "add_velocity", "space": { "base": "aim", "clamp_y_min": 0 }, "vector": "bullet_jump_impulse", "include_y": true },
           { "do": "set_var", "name": "bullet_jump_cd", "value": "bullet_jump_cooldown" },
           { "do": "set_var", "name": "jump_buffer", "value": 0 },
           { "do": "set_var", "name": "jump_hold", "value": 0 },
@@ -47,7 +47,7 @@
         "do": [
           { "do": "set_collider_height", "value": "stand_height", "require_headroom": true },
           { "do": "set_velocity_y", "value": "bullet_jump_base_up" },
-          { "do": "add_velocity", "space": "aim", "vector": "bullet_jump_impulse", "include_y": true },
+          { "comment": "FEATURE bullet-jump-never-face-down: clamp_y_min:0 on the aim space forbids a downward launch component (max(aim.y,0) then renormalize), so aiming down still gives a forward+level burst, never a self-dive. Pure §C space modifier, no one-off hack.", "do": "add_velocity", "space": { "base": "aim", "clamp_y_min": 0 }, "vector": "bullet_jump_impulse", "include_y": true },
           { "do": "set_var", "name": "bullet_jump_cd", "value": "bullet_jump_cooldown" },
           { "do": "set_var", "name": "jump_buffer", "value": 0 },
           { "do": "set_var", "name": "jump_hold", "value": 0 }

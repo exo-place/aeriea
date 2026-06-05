@@ -52,6 +52,7 @@ class ToggleHold:
 		_held_prev = false
 
 # --- Params lowered to consts (referenced by name in the kit) ---
+const P_air_jumps_max := 1.0
 const P_air_steer_rate := 14.0
 const P_bullet_jump_base_up := 6.0
 const P_bullet_jump_buffer_time := 0.15
@@ -62,6 +63,7 @@ const P_camera_height_lerp_speed := 12.0
 const P_camera_height_stand := 0.85
 const P_camera_roll_lerp_speed := 10.0
 const P_camera_roll_level := 0.0
+const P_comment_multi_jump := 0.0
 const P_comment_thresholds := 0.0
 const P_coyote_time := 0.12
 const P_crouch_height := 0.6
@@ -236,6 +238,13 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			timers["jump_buffer"] = 0.0
 			active_state = "AIR"
 			return true
+		elif ((float(timers.get("jump", 0.0)) > 0.0) and (float(timers.get("air_jumps", 0.0)) > 0.0)):
+			body.velocity.y = P_jump_velocity
+			timers["air_jumps"] = float(timers.get("air_jumps", 0.0)) + (-1.0)
+			timers["jump_buffer"] = 0.0
+			timers["jump_hold"] = 0.0
+			active_state = "AIR"
+			return true
 		elif ((not body.is_on_floor()) and frame.is_pressed("cling") and _probe_walls("any")):
 			body.velocity.y = 0.0
 			_k_clamp_speed_h(0.0)
@@ -267,13 +276,14 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			body.velocity.x = 0.0
 			body.velocity.z = 0.0
 			active_state = "GROUND"
+			timers["air_jumps"] = P_air_jumps_max
 			return true
 		return false
 	elif active_state == "SLIDE":
 		if ((float(timers.get("jump", 0.0)) > 0.0) and (float(timers.get("bullet_jump_cd", 0.0)) <= 0.0)):
 			body.host_set_collider_height(P_stand_height, true)
 			body.velocity.y = P_bullet_jump_base_up
-			_k_add_velocity(frame, P_bullet_jump_impulse, "aim", false, true)
+			_k_add_velocity(frame, P_bullet_jump_impulse, { "base": "aim", "clamp_y_min": 0.0 }, false, true)
 			timers["bullet_jump_cd"] = P_bullet_jump_cooldown
 			timers["jump_buffer"] = 0.0
 			timers["jump_hold"] = 0.0
@@ -292,13 +302,14 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			body.host_set_collider_height(P_stand_height, true)
 			timers["slide_steer"] = 0.0
 			active_state = "GROUND"
+			timers["air_jumps"] = P_air_jumps_max
 			return false
 		return false
 	elif active_state == "CROUCH":
 		if ((float(timers.get("jump", 0.0)) > 0.0) and (float(timers.get("bullet_jump_cd", 0.0)) <= 0.0)):
 			body.host_set_collider_height(P_stand_height, true)
 			body.velocity.y = P_bullet_jump_base_up
-			_k_add_velocity(frame, P_bullet_jump_impulse, "aim", false, true)
+			_k_add_velocity(frame, P_bullet_jump_impulse, { "base": "aim", "clamp_y_min": 0.0 }, false, true)
 			timers["bullet_jump_cd"] = P_bullet_jump_cooldown
 			timers["jump_buffer"] = 0.0
 			timers["jump_hold"] = 0.0
@@ -316,6 +327,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 		elif (not frame.is_pressed("crouch")):
 			body.host_set_collider_height(P_stand_height, true)
 			active_state = "GROUND"
+			timers["air_jumps"] = P_air_jumps_max
 			return true
 		return false
 	elif active_state == "WALL_RUN":
@@ -340,11 +352,13 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			return false
 		elif body.is_on_floor():
 			active_state = "GROUND"
+			timers["air_jumps"] = P_air_jumps_max
 			return false
 		return false
 	elif active_state == "VAULT":
 		if (float(timers.get("vault", 0.0)) <= 0.0):
 			active_state = "GROUND"
+			timers["air_jumps"] = P_air_jumps_max
 			return false
 		return false
 	elif active_state == "GLIDE":
@@ -362,6 +376,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			return false
 		elif (body.is_on_floor() and (body.velocity.y <= 0.0)):
 			active_state = "GROUND"
+			timers["air_jumps"] = P_air_jumps_max
 			return true
 		return false
 	elif active_state == "WALL_CLING":
@@ -381,6 +396,7 @@ func _eval_transitions(frame: InputFrame, dt: float) -> bool:
 			return false
 		elif body.is_on_floor():
 			active_state = "GROUND"
+			timers["air_jumps"] = P_air_jumps_max
 			return false
 		return false
 	return false

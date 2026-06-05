@@ -60,6 +60,7 @@ var _dragging_pan: bool = false
 const MorphDragScript := preload("res://scripts/body/morph_drag.gd")
 const DetailLibraryScript := preload("res://scripts/body/detail_library.gd")
 const CpuAccelPickerScript := preload("res://scripts/util/cpu_accel_picker.gd")
+const GpuIdPickerScript := preload("res://scripts/util/gpu_id_picker.gd")
 
 var _morph                       ## MorphDrag (untyped: the class_name isn't visible at parse)
 var _sculpt_mode: bool = false
@@ -80,8 +81,13 @@ var _glow_tris: PackedInt32Array         ## the body's triangle index list (for 
 var _hover_vertex: int = -1
 
 ## The picking backend (default the deterministic CPU uniform-grid). The Picker interface
-## keeps MorphDrag + the input glue backend-agnostic; _pick_body delegates to it.
+## keeps MorphDrag + the input glue backend-agnostic; _pick_body delegates to it. A
+## debug/dev toggle (the P key, set_picker_backend) swaps in the GPU ID-buffer backend —
+## the same "pick what's rendered" primitive reused for future in-world picking.
 var _picker: Picker
+var _cpu_picker: CpuAccelPicker
+var _gpu_picker                  ## GpuIdPicker (untyped: class_name not visible at parse)
+var _use_gpu_picker: bool = false
 
 var _value_labels: Dictionary = {}   ## field -> Label showing current value
 var _sliders: Dictionary = {}        ## field -> HSlider
@@ -202,10 +208,23 @@ func _build_morph_drag() -> void:
 		_glow_tris = arrays[Mesh.ARRAY_INDEX]
 	# Build the CPU spatial-grid picker over the rest-space baked triangles. Deterministic;
 	# rebuilt lazily on the next pick after a morph bake marks it dirty (_apply_state).
-	_picker = CpuAccelPickerScript.new()
+	_cpu_picker = CpuAccelPickerScript.new()
 	if not _glow_base_pos.is_empty() and not _glow_tris.is_empty():
-		(_picker as CpuAccelPicker).build(_glow_base_pos, _glow_tris)
+		_cpu_picker.build(_glow_base_pos, _glow_tris)
+	# The GPU ID-buffer backend (selectable via the P key). Its off-screen SubViewport is
+	# parented under this creator node; it renders the SAME skinned/morphed surface the player
+	# sees, so it generalises to in-world picking of animated targets (the CPU grid cannot).
+	_gpu_picker = GpuIdPickerScript.new()
+	_gpu_picker.set_host(self)
+	_picker = _gpu_picker if _use_gpu_picker else _cpu_picker
 	_build_glow_overlay()
+
+
+## Swap the active picking backend at runtime (debug/dev). The Picker interface means
+## MorphDrag + the input glue are untouched — only which strategy resolves a screen pick.
+func set_picker_backend(use_gpu: bool) -> void:
+	_use_gpu_picker = use_gpu
+	_picker = _gpu_picker if use_gpu else _cpu_picker
 
 
 ## The hover-glow overlay: a sibling MeshInstance3D under the body's skeleton (so it inherits
@@ -271,6 +290,8 @@ func _pick_body(screen_pos: Vector2) -> Dictionary:
 		"world_xf": _rig.skeleton.global_transform,
 		"rest_positions": _glow_base_pos,
 		"tris": _glow_tris,
+		"mesh_instance": _rig.mesh_instance,   # GPU backend: the rendered surface
+		"skeleton": _rig.skeleton,             # GPU backend: skinning source
 	}
 	var hit := _picker.pick(screen_pos, _camera, target)
 	if hit.is_empty():
@@ -419,6 +440,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		# M toggles sculpt mode (the camera-vs-morph gate).
 		if k.pressed and not k.echo and k.keycode == KEY_M and not k.ctrl_pressed:
 			_set_sculpt_mode(not _sculpt_mode)
+			get_viewport().set_input_as_handled()
+			return
+		# P — toggle the picking backend (CPU grid <-> GPU ID-buffer). Dev/debug: the GPU
+		# backend picks the rendered surface (the in-world primitive); CPU is the default.
+		if k.pressed and not k.echo and k.keycode == KEY_P and not k.ctrl_pressed:
+			set_picker_backend(not _use_gpu_picker)
+			if _status_lbl != null:
+				_status_lbl.text = "picker: %s" % ("GPU ID-buffer" if _use_gpu_picker else "CPU grid")
 			get_viewport().set_input_as_handled()
 			return
 	if event is InputEventMouseButton:
@@ -723,8 +752,8 @@ func _apply_state() -> void:
 		_rig.apply_body_state(_body_state)
 		# The rest-space baked positions just changed → the CPU pick grid is stale. Mark it
 		# dirty; the picker rebuilds lazily on the next pick (no per-bake-frame rebuild cost).
-		if _picker is CpuAccelPicker:
-			(_picker as CpuAccelPicker).mark_dirty()
+		if _cpu_picker != null:
+			_cpu_picker.mark_dirty()
 	for field in _value_labels:
 		(_value_labels[field] as Label).text = _format_value(field)
 

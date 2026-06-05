@@ -202,6 +202,31 @@ func _run() -> int:
 	arrays[Mesh.ARRAY_BONES] = bones_arr
 	arrays[Mesh.ARRAY_WEIGHTS] = weights_arr
 
+	# --- ARRAY_CUSTOM0: the render-vertex index, baked into the artifact ------
+	# The GPU ID-buffer picker (scripts/util/gpu_id_picker.gd) renders the body
+	# into an off-screen ID buffer where each fragment carries its source RENDER-
+	# VERTEX INDEX (0..rn-1) encoded as a color, decoded back to a vertex on
+	# readback. The index is a pure function of vertex count — identical in every
+	# body — so it belongs in the asset, not re-derived at load time (which would
+	# have to survive every per-instance mesh duplicate + clear_surfaces() re-bake).
+	#
+	# Channel format: ARRAY_CUSTOM_RGBA8_UNORM. Each render vertex contributes 4
+	# bytes (R,G,B,A) — a PackedByteArray of length rn*4. We split the 24-bit index
+	# across R/G/B (low/mid/high byte) and leave A=255; the shader reads CUSTOM0 as a
+	# normalized vec4 (bytes/255) and the gpu picker reassembles idx = R + G*256 +
+	# B*65536 after multiplying each channel by 255 and rounding. 24 bits covers
+	# 16.7M verts, far above this mesh's ~14.5k. UNORM (not UINT) so the value round-
+	# trips through Godot's standard interpolation/rasteriser as bytes 0..255.
+	var custom0 := PackedByteArray()
+	custom0.resize(rn * 4)
+	for i in rn:
+		var o := i * 4
+		custom0[o] = i & 0xFF
+		custom0[o + 1] = (i >> 8) & 0xFF
+		custom0[o + 2] = (i >> 16) & 0xFF
+		custom0[o + 3] = 255
+	arrays[Mesh.ARRAY_CUSTOM0] = custom0
+
 	# --- blendshapes: one per selected macro anchor ---------------------------
 	var mesh := ArrayMesh.new()
 	# RELATIVE: final = base + Σ(weightᵢ · blend_arrayᵢ); blend arrays are DELTAS.
@@ -282,8 +307,12 @@ func _run() -> int:
 		})
 		print("body_converter: blendshape '%s' <- %s (%d base verts moved, %d render verts)" % [axis_name, rel, moved_base.size(), moved])
 
-	# add the surface with all blendshapes attached
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, blend_arrays)
+	# add the surface with all blendshapes attached. The CUSTOM0 channel format
+	# (ARRAY_CUSTOM_RGBA8_UNORM) must be declared in the format flags or the custom
+	# array is ignored — Godot reads the per-custom-channel format from these bits.
+	var fmt_flags := Mesh.ARRAY_FORMAT_CUSTOM0 \
+		| (Mesh.ARRAY_CUSTOM_RGBA8_UNORM << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, blend_arrays, {}, fmt_flags)
 	mesh.surface_set_name(0, "body")
 
 	# --- write outputs --------------------------------------------------------

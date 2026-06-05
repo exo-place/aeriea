@@ -56,6 +56,7 @@ SUITES=(
   creator_history_test
   morph_drag_test
   picker_test
+  gpu_id_picker_test
 )
 
 # ---------------------------------------------------------------------------

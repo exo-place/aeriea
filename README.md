@@ -26,7 +26,7 @@ Built on Godot 4.x. Deep simulation layer following the `existence` deterministi
 # Enter dev shell (provides godot_4, rust toolchain, bun)
 nix develop
 
-# Open project in Godot editor
+# Open project in Godot editor (main scene: scenes/launcher.tscn)
 godot4 project.godot
 
 # Docs site

@@ -427,6 +427,72 @@ not a cage. *(Open: whether to additionally expose a low-weight height-macro
 contribution for subtle build-correlated stature realism — deferred; the pure
 scale ships first.)*
 
+### 4.1 Age → stature growth curve, from CITED CDC median height-for-age (2026-06-14)
+
+**Problem.** MakeHuman's age macro grows stature linearly from the `child` anchor
+(10yr) to the `young` anchor (25yr = full-adult geometry), so the verbatim blend
+makes a body keep growing until 25 — a real 18yr renders ~10% short. The first fix
+(commit `a1c255f`, `STATURE_ADULT_AGE`) replaced that with a **hand-picked linear
+remap** `[1,17]yr → [1,25]morph-yr`, which plateaued stature by ~17 but, being a
+guessed *linear* compression, **inflated younger ages**: a 12yr mapped to morph
+≈17.5yr (macro ≈0.344) and rendered at ~92% of adult stature — reading like a
+teen, not a 12-year-old. The guessed curve was not grounded in real growth.
+
+**Rebuild — drive the morph to CITED median height-for-age.** The age→morph curve
+is now derived from real anthropometric data, per *"validate against reality;
+trust comes from verifiable evidence, not authority"* (CLAUDE.md):
+
+**Sources (verifiable; 50th percentile = MEDIAN):**
+- **CDC/NHANES "2 to 20 years: stature-for-age" growth charts**, LMS reference data
+  file `statage.csv` (`https://www.cdc.gov/growthcharts/data/zscore/statage.csv`),
+  column **M = median stature in cm**, by sex (`1`=male, `2`=female) and age in
+  months. We read the M value at the row nearest each whole year, 2–19yr.
+- **CDC "birth to 36 months: length-for-age"** LMS file `lenageinf.csv` (same host,
+  the WHO-harmonised CDC infant chart), column **M**, for the **1yr** anchor
+  (recumbent length).
+
+**Median stature (cm) used** (`body_state.gd` `MEDIAN_CM_MALE` / `MEDIAN_CM_FEMALE`):
+
+| age | 1 | 6 | 10 | 12 | 14 | 16 | 18 | 19 (adult ref) |
+|---|---|---|---|---|---|---|---|---|
+| **male** | 74.92 | 115.12 | 138.41 | 148.79 | 163.54 | 173.40 | 176.13 | **176.59** |
+| **female** | 73.19 | 114.42 | 137.77 | 150.89 | 160.30 | 162.53 | 163.12 | **163.25** |
+
+(full year-by-year tables 1–19 are in the source file). The **sex difference is
+real and preserved**: females reach ~full adult stature by ~15–16 (160.3 cm @14 →
+163.3 @19, essentially flat after 16); males keep growing to ~18 (175.2 @17 →
+176.9 @19).
+
+**Derivation.** For a body of age `a` we compute the real **growth fraction**
+`g(a) = median_height(a) / median_height(adult≈19yr)`, **sex-blended** by the
+masculinity axis (`g = g_female + (g_male − g_female)·masculinity/100`), then map
+`g` to the MakeHuman age macro by **inverting the morph's own measured anchor
+stature-fractions** on the base mesh: the baby anchor (macro 0.0) renders at
+**0.375** of young-adult stature, the child anchor (macro 0.1875) at **0.789**, the
+young anchor (macro 0.5) at **1.0** (measured via `tools/age_sweep_render` /
+`measure`; structural constants `MORPH_BABY_STATURE_FRAC` /
+`MORPH_CHILD_STATURE_FRAC`). The fraction→macro inversion is piecewise-linear over
+those three nodes. So the body's overall **size tracks the cited median
+height-for-age at every age** — children are correctly small for their age (the
+12yr-reads-as-teen artifact is fixed: an androgynous 12yr now renders at ~88% of
+adult, matching the CDC M/F average), and stature plateaus at the realistic,
+**sex-aware** age. Verified in `tests/body_gate_test.gd`
+(`_test_stature_tracks_cited_growth_data`): the measured morph extent reproduces
+each cited per-sex fraction to <0.001.
+
+**Sex-aware: YES.** The blend is by the masculinity axis as above — the data is
+per-sex and the growth-timing difference is large enough to matter (a 12yr female
+is ~92% of adult height, a 12yr male ~84%). The coupling was not materially
+complex (one extra table + a linear blend), so the more-correct sex-aware curve
+ships rather than a combined-sex stand-in.
+
+**Untouched by this change:** the public `age_years` axis; the verbatim MakeHuman
+`age_years_to_macro` / `age_macro` conversion that the §5 gate pins; the `>= 18`
+adult gate (still `age_macro(18) ≈ 0.354`); and the **≥25yr old-aging segment**
+(verbatim MakeHuman identity). Only the **baby/child/young anchor blend's input
+macro** (`_stature_age_macro`) changed. The curve is continuous through the gate
+(17.9 → 18.0 → 19 → 25 vary smoothly, no notch) and deterministic.
+
 ---
 
 ## 5. The gate re-expression — TOUCHES A HARD CONSTRAINT

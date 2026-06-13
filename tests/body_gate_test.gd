@@ -34,7 +34,7 @@ var _fail := 0
 func _ready() -> void:
 	print("\n=== aeriea body SLICE 2 — BodyState + Layer-1 NSFW gate ===\n")
 	_test_bodystate_drives_morphs()
-	_test_stature_reaches_adult_by_17()
+	_test_stature_tracks_cited_growth_data()
 	_test_is_adult_body_predicate()
 	_test_gate_holds_at_guard_layer(false)  # interpreter
 	_test_gate_holds_at_guard_layer(true)   # compiled
@@ -138,22 +138,25 @@ func _test_bodystate_drives_morphs() -> void:
 
 
 # ---------------------------------------------------------------------------
-# (a2) AGE → STATURE REALISM (2026-06 fix). The body's overall SIZE must reach
-# full adult stature by ~17 and stay flat through adulthood — NOT keep growing to
-# 25 (the old verbatim-macro behavior, which a real 18yr would render ~10% short).
-# We measure the morph-only vertical extent (bbox height) at FIXED height_cm across
-# ages and assert: 18 ≈ 25 (plateau, the regression that FAILS under grow-to-25),
-# 16–17 is full-ish adult stature, and 10 is still clearly child-sized.
+# (a2) AGE → STATURE tracks CITED median height-for-age (body-parameterization.md
+# §4.1, 2026-06-14 rebuild). The body's overall SIZE must follow the CDC median
+# stature-for-age FRACTION at each age (children correctly small for their age),
+# plateau at the realistic SEX-AWARE age (females ~15-16, males ~18), and 18 ≈ 25.
+# We measure morph-only vertical extent (bbox height) at FIXED height_cm and assert
+# the measured fraction-of-adult-extent matches the cited CDC fractions per sex.
+# This FAILS under the old hand-picked linear remap (which inflated child stature:
+# a 12yr read ~teen size — ~1.55 m / ~92% of adult — instead of ~88% combined).
 # ---------------------------------------------------------------------------
 
-## Morph-only vertical extent (metres) of the body mesh at `age`, height_cm held at
-## the neutral base so we isolate what the AGE MORPH does to overall stature.
-func _morph_extent_at_age(mesh: ArrayMesh, age: float) -> float:
+## Morph-only vertical extent (metres) at `age`/`masculinity`, height_cm held at the
+## neutral base so we isolate what the AGE MORPH does to overall stature.
+func _morph_extent(mesh: ArrayMesh, age: float, masc: float) -> float:
 	var mi := MeshInstance3D.new()
 	mi.mesh = (mesh.duplicate(true) as ArrayMesh)
 	add_child(mi)
 	var bs := BodyState.new()
 	bs.age_years = age
+	bs.masculinity = masc
 	bs.height_cm = BodyState.DEFAULT_HEIGHT_CM
 	bs.apply_morph_cpu(mi)
 	var verts: PackedVector3Array = (mi.mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
@@ -163,36 +166,71 @@ func _morph_extent_at_age(mesh: ArrayMesh, age: float) -> float:
 	mi.queue_free()
 	return mx - mn
 
-func _test_stature_reaches_adult_by_17() -> void:
-	print("--- (a2) age → stature realism: full adult height by ~17, flat to adulthood ---")
+func _test_stature_tracks_cited_growth_data() -> void:
+	print("--- (a2) age → stature tracks CITED CDC median height-for-age (§4.1) ---")
 	var mesh: ArrayMesh = load(MESH_PATH)
 	if mesh == null:
 		return
-	var h10 := _morph_extent_at_age(mesh, 10.0)
-	var h16 := _morph_extent_at_age(mesh, 16.0)
-	var h17 := _morph_extent_at_age(mesh, 17.0)
-	var h18 := _morph_extent_at_age(mesh, 18.0)
-	var h21 := _morph_extent_at_age(mesh, 21.0)
-	var h25 := _morph_extent_at_age(mesh, 25.0)
 
-	# PLATEAU — the load-bearing assertion. Stature at 18 must equal stature at 25
-	# within tolerance. Under the OLD grow-to-25 curve h18 was ~1.506 m vs h25 ~1.676 m
-	# (a 10% gap) — this assertion FAILS there, PASSES now.
-	_assert("stature plateaus: morph extent at 18yr ≈ 25yr (full adult by ~17, not 25)",
-		absf(h18 - h25) < 0.01,
-		"h18=%.4f m  h25=%.4f m  (gap=%.4f)" % [h18, h25, absf(h18 - h25)])
-	_assert("stature flat across young-adult band: 17 ≈ 18 ≈ 21 ≈ 25",
-		absf(h17 - h25) < 0.01 and absf(h21 - h25) < 0.01,
-		"h17=%.4f h21=%.4f h25=%.4f" % [h17, h21, h25])
-	# 16yr is a near-full-stature older teen (>=95% of adult), not a giant child / shrunk adult.
-	_assert("16yr is near-full adult stature (older-teen, >=95% of 25yr extent)",
-		h16 >= 0.95 * h25 and h16 <= h25 + 1e-3,
-		"h16=%.4f m  (%.1f%% of h25=%.4f)" % [h16, 100.0 * h16 / h25, h25])
-	# 10yr is STILL clearly child-sized — a regression guard the other way: the fix must
-	# not flatten the whole growth curve into adults. <90% of adult extent at 10yr.
-	_assert("10yr stays clearly child-sized (< 90% of adult extent — child range preserved)",
-		h10 < 0.90 * h25 and h10 > 0.5 * h25,
-		"h10=%.4f m  (%.1f%% of h25=%.4f)" % [h10, 100.0 * h10 / h25, h25])
+	# --- FEMALE curve (masculinity 0): adult ref = the female 25yr extent. The measured
+	# fraction-of-adult at each age must match the CITED CDC female median fraction
+	# (MEDIAN_CM_FEMALE[age]/ADULT_REF_CM_FEMALE) within tolerance. The morph reproduces
+	# the real growth fractions, so children are correctly small for their age. ----------
+	var fa := _morph_extent(mesh, 25.0, 0.0)   # female adult reference extent
+	# [age, cited fraction] from MEDIAN_CM_FEMALE / 163.25 (CDC, §4.1).
+	var f_cases := [
+		[6.0, BodyState.MEDIAN_CM_FEMALE[6] / BodyState.ADULT_REF_CM_FEMALE],
+		[10.0, BodyState.MEDIAN_CM_FEMALE[10] / BodyState.ADULT_REF_CM_FEMALE],
+		[12.0, BodyState.MEDIAN_CM_FEMALE[12] / BodyState.ADULT_REF_CM_FEMALE],
+		[14.0, BodyState.MEDIAN_CM_FEMALE[14] / BodyState.ADULT_REF_CM_FEMALE],
+		[16.0, BodyState.MEDIAN_CM_FEMALE[16] / BodyState.ADULT_REF_CM_FEMALE],
+	]
+	for c in f_cases:
+		var age := float(c[0])
+		var want := float(c[1])
+		var got := _morph_extent(mesh, age, 0.0) / fa
+		# 2% tolerance: the morph→stature inversion is piecewise-linear over 3 anchor nodes,
+		# so it tracks the cited fraction closely but not to the last digit.
+		_assert("FEMALE %2.0fyr stature = cited CDC median fraction (%.1f%% of adult)" % [age, 100.0 * want],
+			absf(got - want) < 0.02,
+			"measured=%.4f (%.1f%%)  cited=%.4f (%.1f%%)  Δ=%.4f" % [got, 100.0 * got, want, 100.0 * want, absf(got - want)])
+
+	# --- MALE curve (masculinity 100): males grow LATER — at 12yr a male is markedly
+	# SHORTER (fraction-wise) than a female, and reaches full stature ~18. Assert the
+	# male 12yr fraction matches the cited male median (≈0.843) AND is below the female. -
+	var ma := _morph_extent(mesh, 25.0, 100.0)   # male adult reference extent
+	var m12_want := BodyState.MEDIAN_CM_MALE[12] / BodyState.ADULT_REF_CM_MALE
+	var m12_got := _morph_extent(mesh, 12.0, 100.0) / ma
+	var f12_frac := BodyState.MEDIAN_CM_FEMALE[12] / BodyState.ADULT_REF_CM_FEMALE
+	_assert("SEX-AWARE: MALE 12yr = cited male median fraction (%.1f%%), below female 12yr (%.1f%%)" % [100.0 * m12_want, 100.0 * f12_frac],
+		absf(m12_got - m12_want) < 0.02 and m12_want < f12_frac,
+		"male12 measured=%.3f cited=%.3f  female12 cited=%.3f" % [m12_got, m12_want, f12_frac])
+
+	# --- 12yr REGRESSION GUARD (the artifact this rebuild fixes). The OLD linear remap
+	# mapped 12yr→morph 17.5yr→macro≈0.344, rendering a 12yr at ~92% of adult extent (a
+	# near-teen). The data-grounded curve puts a 12yr at the CITED ~88% combined fraction.
+	# Assert the COMBINED (androgynous) 12yr is at/below ~90% — FAILS under the old remap.
+	var aa := _morph_extent(mesh, 25.0, 50.0)
+	var h12 := _morph_extent(mesh, 12.0, 50.0) / aa
+	_assert("12yr is child-sized per CITED data (≤90% of adult extent — was ~92% under old linear remap)",
+		h12 <= 0.90 and h12 > 0.80,
+		"androgynous 12yr extent = %.1f%% of adult (cited M/F avg ≈ 88%%)" % [100.0 * h12])
+
+	# --- PLATEAU (sex-aware) + 18≈25. Females flatten by ~16; both sexes reach the young
+	# anchor by ~18-19 and stay there to 25. 18 ≈ 25 within tolerance, no discontinuity. -
+	var f16 := _morph_extent(mesh, 16.0, 0.0)
+	var f25 := _morph_extent(mesh, 25.0, 0.0)
+	_assert("FEMALE plateau: 16yr ≈ 25yr (females reach full stature by ~15-16)",
+		absf(f16 - f25) < 0.015, "f16=%.4f f25=%.4f (Δ=%.4f)" % [f16, f25, absf(f16 - f25)])
+	var a18 := _morph_extent(mesh, 18.0, 50.0)
+	var a25 := _morph_extent(mesh, 25.0, 50.0)
+	_assert("stature plateaus: 18yr ≈ 25yr (full adult by ~18, no growth into adulthood)",
+		absf(a18 - a25) < 0.01, "h18=%.4f h25=%.4f (Δ=%.4f)" % [a18, a25, absf(a18 - a25)])
+	# 10yr stays clearly child-sized (regression guard the other way: fix must not flatten
+	# the whole curve into adults).
+	var h10 := _morph_extent(mesh, 10.0, 50.0) / aa
+	_assert("10yr stays clearly child-sized (< 85% of adult extent — child range preserved)",
+		h10 < 0.85 and h10 > 0.5, "androgynous 10yr extent = %.1f%% of adult" % [100.0 * h10])
 
 
 # ---------------------------------------------------------------------------
@@ -233,11 +271,12 @@ func _test_is_adult_body_predicate() -> void:
 	child.age_years = 10.0  # a 10yr — clearly child-range body-state
 	var cw := child.to_blend_weights()
 	# The morph is uncrippled and renders: the '-child-' average-build anchor carries the
-	# DOMINANT weight (× femaleVal 0.5) and no adult anchor does. After the age→stature fix
-	# the child anchor is no longer pinned to exactly 0.5 at 10yr (the growth segment is
-	# compressed so full stature is reached by ~17 — see _stature_age_macro); a 10yr now
-	# blends slightly toward the young anchor (morph-age ~14.5), but stays clearly child-
-	# dominant and well below adult. Assert child DOMINATES and stays uncrippled, not a pin.
+	# DOMINANT weight (× femaleVal 0.5) and no adult anchor does. After the §4.1 data-grounded
+	# age→stature rebuild the child anchor is no longer pinned to exactly 0.5 at 10yr: the
+	# morph is driven to the CITED CDC median height-for-age fraction at each age, so a 10yr
+	# blends toward the young anchor by exactly the real growth fraction (a 10yr is ~80% of
+	# adult stature per CDC), staying clearly child-dominant and well below adult. Assert
+	# child DOMINATES and stays uncrippled, not a pin.
 	var child_anchor := "macrodetails/universal-female-child-averagemuscle-averageweight.target"
 	var young_anchor10 := "macrodetails/universal-female-young-averagemuscle-averageweight.target"
 	_assert("age axis stays continuous/complete: child morph still renders, child anchor dominant (not crippled)",

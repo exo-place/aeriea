@@ -134,20 +134,67 @@ const MIN_AGE_YEARS := 1.0
 const MID_AGE_YEARS := 25.0
 const MAX_AGE_YEARS := 90.0
 
-## The STATURE-GROWTH completion age in YEARS (age→stature realism, 2026-06 fix).
-## Real humans reach ~full adult stature by ~16–18, not 25; but MakeHuman's young
-## anchor (macro 0.5 = 25yr) is the full-adult-size geometry, and its child anchor
-## (10yr) is physically shorter, so the verbatim macro blend grows stature linearly
-## all the way to 25 (a measured 1.31 m @10yr → 1.68 m @25yr at fixed height_cm).
+## ===========================================================================
+## AGE → STATURE GROWTH CURVE, grounded in CITED real anthropometric data
+## (body-parameterization.md §4.1, "Age→stature growth curve from CDC data",
+## 2026-06-14 rebuild). SUPERSEDES the 2026-06 hand-picked linear remap
+## (STATURE_ADULT_AGE), which compressed [1,17]yr→[1,25]morph-yr LINEARLY and so
+## read younger ages OLDER than real growth (e.g. a 12yr rendered near-teen size).
 ##
-## The fix REMAPS only the morphological age that drives the baby/child/young ANCHOR
-## blend (`_stature_age_macro` → `_age_vals`), so the `young` (full-stature) anchor is
-## reached by STATURE_ADULT_AGE and held flat from there to 25. The PUBLIC `age_years`,
-## the verbatim `age_macro()` / `age_years_to_macro()` MakeHuman map, and the `>= 18`
-## gate are ALL untouched — this changes the stature-vs-age CURVE only, not the axis,
-## the conversion, or the gate. The remap is continuous (no discontinuity at 18) and
-## leaves the old-aging segment (≥25yr) exactly the verbatim MakeHuman path.
-const STATURE_ADULT_AGE := 17.0
+## SOURCE (verifiable, 50th-percentile = MEDIAN):
+##   • CDC/NHANES "2 to 20 years: stature-for-age" growth charts, LMS reference
+##     file `statage.csv` (cdc.gov/growthcharts), column M = median stature in cm,
+##     by sex (1=male, 2=female) and age. Ages 2–19 below are the M value at the
+##     row nearest each whole year.
+##   • CDC "birth to 36 months: length-for-age" LMS file `lenageinf.csv`, M column,
+##     for the 1yr anchor (recumbent length, the WHO-harmonised CDC infant chart).
+## These are the U.S. clinical reference medians; the sex split is real (females
+## reach ~full adult stature by ~15–16, males by ~18) and is preserved here.
+##
+## HOW THE CURVE IS DERIVED. We do NOT remap age→years and reuse the verbatim macro
+## (that linear shortcut was the bug). Instead we drive the morph by the real
+## GROWTH FRACTION g(age) = median_height(age) / median_height(adult≈19yr), then map
+## that fraction to the MakeHuman age macro via the morph's OWN measured stature-by-
+## anchor fractions (the baby/child/young anchors render at fixed fractions of the
+## young-adult stature on the base mesh — MORPH_BABY/CHILD_STATURE_FRAC below). So
+## the body's overall SIZE tracks the cited median-height-for-age at every age:
+## children are correctly small for their age, and stature plateaus at the real age
+## (sex-aware). SEX-AWARE: g(age) blends the male and female fraction tables by the
+## masculinity axis (masc/100), because the data — and real growth timing — is
+## per-sex. Pure / deterministic; ≥25yr stays the verbatim MakeHuman old-aging path.
+## ===========================================================================
+
+## Median stature-for-age in CM, MALE (CDC `statage.csv` M-col, 2–19yr; 1yr from the
+## CDC `lenageinf.csv` length-for-age M-col). Index = age in whole years (1..19).
+const MEDIAN_CM_MALE := {
+	1: 74.92, 2: 86.45, 3: 94.65, 4: 101.94, 5: 108.63, 6: 115.12, 7: 121.51,
+	8: 127.63, 9: 133.29, 10: 138.41, 11: 143.31, 12: 148.79, 13: 155.76,
+	14: 163.54, 15: 169.74, 16: 173.40, 17: 175.24, 18: 176.13, 19: 176.59,
+}
+## Median stature-for-age in CM, FEMALE (same CDC sources, sex=2).
+const MEDIAN_CM_FEMALE := {
+	1: 73.19, 2: 84.98, 3: 93.63, 4: 100.47, 5: 107.37, 6: 114.42, 7: 121.22,
+	8: 127.35, 9: 132.71, 10: 137.77, 11: 143.69, 12: 150.89, 13: 156.96,
+	14: 160.30, 15: 161.82, 16: 162.53, 17: 162.90, 18: 163.12, 19: 163.25,
+}
+## Adult-reference median (the 19yr value above) each per-age fraction divides by.
+const ADULT_REF_CM_MALE := 176.59
+const ADULT_REF_CM_FEMALE := 163.25
+## The youngest / oldest data ages tabulated above (1yr .. 19yr).
+const GROWTH_MIN_AGE := 1.0
+const GROWTH_ADULT_AGE := 19.0
+
+## The MORPH's own stature, as a FRACTION of the young-adult (25yr) anchor stature,
+## measured on the base mesh at female-average build with height_cm at the neutral
+## base (tools/measure_morph: baby/macro0 = 0.602 m, child/macro0.1875 = 1.267 m,
+## young/macro0.5 = 1.605 m). The macro→stature relation is ~piecewise-linear between
+## these anchors, so inverting "target fraction → macro" is piecewise-linear too. These
+## are structural calibration constants of the MakeHuman age anchors on this base mesh.
+const MORPH_BABY_STATURE_FRAC := 0.6017 / 1.6054   # baby anchor (macro 0.0)   ≈ 0.3748
+const MORPH_CHILD_STATURE_FRAC := 1.2671 / 1.6054  # child anchor (macro 0.1875) ≈ 0.7893
+const MORPH_BABY_MACRO := 0.0
+const MORPH_CHILD_MACRO := 0.1875
+const MORPH_YOUNG_MACRO := 0.5
 
 ## The Layer-1 adult-body-state threshold in YEARS (body-parameterization.md §5).
 ## `is_adult_body()` is true iff `age_years >= ADULT_AGE_YEARS`. 18.0 is the exact,
@@ -235,37 +282,75 @@ func _gender_vals() -> Dictionary:
 	var g := clampf(masculinity / 100.0, 0.0, 1.0)
 	return {"male": g, "female": 1.0 - g}
 
-## The MORPHOLOGICAL age macro that drives the baby/child/young/old ANCHOR blend
-## (age→stature realism fix). It is the verbatim MakeHuman age macro EXCEPT the
-## child→young GROWTH segment is compressed so full young-adult stature is reached by
-## STATURE_ADULT_AGE (~17yr) instead of 25yr — matching real human growth, which is
-## ~complete by 16–18. Pure, deterministic, continuous:
+## The cited MEDIAN stature in cm at a (possibly fractional) age in years, for one sex
+## (`true` = male table, `false` = female), linearly interpolated between the tabulated
+## whole-year CDC medians and clamped to [1yr, 19yr]. Pure.
+static func _median_cm_at(age: float, male: bool) -> float:
+	var tbl: Dictionary = MEDIAN_CM_MALE if male else MEDIAN_CM_FEMALE
+	var y := clampf(age, GROWTH_MIN_AGE, GROWTH_ADULT_AGE)
+	var lo := int(floor(y))
+	var hi := int(ceil(y))
+	var clo := float(tbl[lo])
+	if hi == lo:
+		return clo
+	var chi := float(tbl[hi])
+	return clo + (chi - clo) * (y - float(lo))
+
+## The real GROWTH FRACTION g(age) = median_height(age) / adult-median, sex-blended by
+## the masculinity axis (the data and real growth timing are per-sex, so this is the
+## more-correct sex-aware curve). Returns 0..1, clamped. Pure.
+func _growth_fraction() -> float:
+	var g := clampf(masculinity / 100.0, 0.0, 1.0)
+	var fm := _median_cm_at(age_years, false) / ADULT_REF_CM_FEMALE
+	var mm := _median_cm_at(age_years, true) / ADULT_REF_CM_MALE
+	return clampf(fm + (mm - fm) * g, 0.0, 1.0)
+
+## The MORPHOLOGICAL age macro that drives the baby/child/young/old ANCHOR blend, derived
+## from CITED median height-for-age (body-parameterization.md §4.1; tables above). The
+## body's overall SIZE is driven to the real median-height-for-age FRACTION at each age:
+## we take g(age) (sex-blended growth fraction) and invert the morph's own measured
+## stature-by-anchor fractions (MORPH_*_STATURE_FRAC) — a piecewise-linear map fraction
+## → macro — so a child renders at the realistic fraction of adult stature for its age
+## (fixing the linear-remap artifact where a 12yr read near-teen) and stature plateaus at
+## the real, sex-aware age. Pure, deterministic, continuous:
 ##
-##   age_years <= STATURE_ADULT_AGE : real age in [1, STATURE_ADULT_AGE] maps LINEARLY
-##       onto morph-years [1, 25], so the baby/child/young anchors still pass through
-##       sensible child sizes below 17 (a 10yr is still clearly child-sized) but the
-##       `young` (full-stature) anchor is reached AT ~17.
-##   STATURE_ADULT_AGE <= age_years <= 25 : morph-years held FLAT at 25 (young = 1.0),
-##       so stature plateaus from ~17 through young adulthood — no growth in this band.
-##   age_years >= 25 : IDENTITY (morph-years == real age), so the old-aging segment is
-##       the verbatim MakeHuman path, unchanged.
+##   age_years <= 19 (the growth window): macro = invert(g(age_years)) over the baby
+##       (macro 0.0) / child (0.1875) / young (0.5) anchor-fraction nodes.
+##   age_years >= 25 : IDENTITY (verbatim MakeHuman old-aging segment, untouched).
+##   19 < age_years < 25 : the growth window already reaches the young anchor (macro
+##       0.5 = full adult) by ~18–19, and the verbatim path is also macro 0.5 at 25,
+##       so this band is held at the young anchor (macro 0.5) — continuous on both ends,
+##       no notch at the 18yr gate.
 ##
-## Continuity: at 17 → morph 25 (young=1); 17→25 stays morph 25 (flat); at 25 the
-## flat band meets the identity segment at the same value — continuous, no notch at
-## the 18yr gate. Only the ANCHOR blend reads this; `age_macro()` (the documented
-## MakeHuman conversion the gate test pins) is untouched.
+## Only the ANCHOR blend reads this; `age_macro()` (the verbatim MakeHuman conversion the
+## gate test pins) and the `>= 18` gate are untouched — this changes the stature CURVE only.
 func _stature_age_macro() -> float:
 	var y := clampf(age_years, MIN_AGE_YEARS, MAX_AGE_YEARS)
 	if y >= MID_AGE_YEARS:
 		return age_years_to_macro(y)           # ≥25: verbatim (old-aging segment intact)
-	var morph_years: float
-	if y <= STATURE_ADULT_AGE:
-		# [1, STATURE_ADULT_AGE] → [1, 25] linearly: growth completes at ~17.
-		var f := (y - MIN_AGE_YEARS) / (STATURE_ADULT_AGE - MIN_AGE_YEARS)
-		morph_years = MIN_AGE_YEARS + f * (MID_AGE_YEARS - MIN_AGE_YEARS)
-	else:
-		morph_years = MID_AGE_YEARS            # [17, 25]: flat at full young-adult stature
-	return age_years_to_macro(morph_years)
+	if y > GROWTH_ADULT_AGE:
+		return MORPH_YOUNG_MACRO               # (19,25): full adult, flat (continuous to 25)
+	# [1,19]: drive the morph to the cited median-height-for-age fraction, sex-aware.
+	var frac := _growth_fraction()
+	return _macro_for_stature_fraction(frac)
+
+## Invert "target stature fraction (of the young-adult anchor) → MakeHuman age macro"
+## over the morph's measured anchor-fraction nodes (baby/child/young). Piecewise-linear,
+## monotonic, clamped to [0, MORPH_YOUNG_MACRO]. Pure. A fraction at/above the young
+## anchor (1.0) returns the young macro 0.5; below the baby fraction returns macro 0.
+static func _macro_for_stature_fraction(frac: float) -> float:
+	var f := clampf(frac, 0.0, 1.0)
+	if f <= MORPH_BABY_STATURE_FRAC:
+		return MORPH_BABY_MACRO
+	if f <= MORPH_CHILD_STATURE_FRAC:
+		# baby → child segment: macro [0, 0.1875] over fraction [baby, child].
+		var t := (f - MORPH_BABY_STATURE_FRAC) / (MORPH_CHILD_STATURE_FRAC - MORPH_BABY_STATURE_FRAC)
+		return MORPH_BABY_MACRO + t * (MORPH_CHILD_MACRO - MORPH_BABY_MACRO)
+	if f < 1.0:
+		# child → young segment: macro [0.1875, 0.5] over fraction [child, 1.0].
+		var t := (f - MORPH_CHILD_STATURE_FRAC) / (1.0 - MORPH_CHILD_STATURE_FRAC)
+		return MORPH_CHILD_MACRO + t * (MORPH_YOUNG_MACRO - MORPH_CHILD_MACRO)
+	return MORPH_YOUNG_MACRO
 
 ## Age anchor vals: the verbatim _setAgeVals piecewise map over baby/child/young/old,
 ## fed by the STATURE-REMAPPED morph macro (`_stature_age_macro`) so full adult stature

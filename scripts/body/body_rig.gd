@@ -35,6 +35,29 @@ const RIG_PATH := "res://assets/body/base_body_rig.json"
 ## ArrayMesh; ProxyMorph re-bakes its morphed positions/normals on apply_body_state.
 const ProxyMorph := preload("res://scripts/body/proxy_morph.gd")
 const PROXY_MESH_PATH := "res://assets/body/base_body_proxies.res"
+## Procedural eye shader (iris/pupil/sclera computed analytically from the proxy UVs —
+## resolution-independent, no baked texture). Parameterised by EYE_PARAMS_DEFAULT.
+const EYE_SHADER := preload("res://assets/body/eye.gdshader")
+## Default eye parameters — a natural warm-brown eye matching the prior baked look.
+## Override per-character by passing a dict of the same keys to set_eye_params().
+## pupil_aspect: 1.0 round (human); <1 vertical slit (cat/reptile); >1 horizontal slit.
+const EYE_PARAMS_DEFAULT := {
+	"iris_color": Color(0.36, 0.20, 0.09),
+	"iris_inner": Color(0.20, 0.10, 0.04),
+	"iris_radius": 0.62,
+	"pattern_strength": 0.55,
+	"pattern_scale": 64.0,
+	"pupil_color": Color(0.02, 0.02, 0.02),
+	"pupil_size": 0.34,
+	"pupil_aspect": 1.0,
+	"limbal_color": Color(0.06, 0.03, 0.02),
+	"limbal_width": 0.14,
+	"sclera_color": Color(0.93, 0.90, 0.88),
+	"vein_color": Color(0.78, 0.45, 0.42),
+	"vein_strength": 0.12,
+	"eye_roughness": 0.06,
+	"eye_specular": 0.9,
+}
 ## Pieces hidden by default. The face must look complete, so eyes/teeth/tongue/
 ## eyebrows/eyelashes are ON; genitals are an attachable piece whose default
 ## visibility follows the NSFW flag.
@@ -79,6 +102,9 @@ var _skin_material: StandardMaterial3D
 var proxy_instance: MeshInstance3D
 ## Map: piece name -> surface index in the proxy mesh (for show/hide + tests).
 var _proxy_surface := {}
+
+## Live eye parameters (a copy of EYE_PARAMS_DEFAULT, overridable via set_eye_params).
+var _eye_params: Dictionary = EYE_PARAMS_DEFAULT.duplicate(true)
 ## NSFW-first full-body goal: the genitals piece is attachable. OFF by default (SFW face
 ## focus); flip and re-apply to render it. The MACHINERY always builds — only visibility
 ## follows this flag (DESIGN.md NSFW-first; the genital piece renders correctly when on).
@@ -344,11 +370,14 @@ func _apply_proxy_materials() -> void:
 		proxy_instance.set_surface_override_material(si, _proxy_material(mat_kind, visible))
 
 
-## A sensible material per proxy kind. Eyes get a real CC0 eye texture (white sclera +
-## brown iris) so they read as eyeballs, not flat skin; teeth a hard off-white; tongue a
-## muted pink; genitals a skin tone. `visible=false` returns a fully transparent material
-## (the surface stays in the single-draw mesh with stable indices, but renders nothing).
-func _proxy_material(kind: String, visible: bool) -> StandardMaterial3D:
+## A sensible material per proxy kind. Eyes get a PROCEDURAL shader material (iris/pupil/
+## sclera computed analytically from the proxy UVs — resolution-independent, no baked
+## texture); teeth a hard off-white; tongue a muted pink; genitals a skin tone.
+## `visible=false` returns a fully transparent material (the surface stays in the
+## single-draw mesh with stable indices, but renders nothing).
+func _proxy_material(kind: String, visible: bool) -> Material:
+	if kind == "eye" and visible:
+		return _build_eye_material()
 	var mat := StandardMaterial3D.new()
 	if not visible:
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -357,13 +386,6 @@ func _proxy_material(kind: String, visible: bool) -> StandardMaterial3D:
 		mat.no_depth_test = false
 		return mat
 	match kind:
-		"eye":
-			var tex := load("res://assets/body/eye_brown.png")
-			if tex != null:
-				mat.albedo_texture = tex
-			mat.albedo_color = Color(1, 1, 1)
-			mat.roughness = 0.25
-			mat.metallic_specular = 0.6
 		"lashes", "brows":
 			# A dark keratin tone for the PROJECT-AUTHORED brow/lash hair strips. These are
 			# thin 2-sided cards, so cull is disabled (visible from either face); rough +
@@ -390,6 +412,27 @@ func _proxy_material(kind: String, visible: bool) -> StandardMaterial3D:
 			mat.albedo_color = SKIN_ALBEDO
 			mat.roughness = SKIN_ROUGHNESS
 	return mat
+
+
+## Build the procedural eye ShaderMaterial from the current _eye_params. Every visual
+## knob is a shader uniform, so an arbitrary effective resolution comes for free (the
+## iris fibres / limbal ring / pupil are analytic, not sampled from a texture).
+func _build_eye_material() -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = EYE_SHADER
+	for key in _eye_params:
+		mat.set_shader_parameter(key, _eye_params[key])
+	return mat
+
+
+## Override eye appearance (a subset of EYE_PARAMS_DEFAULT keys is enough — e.g.
+## {"iris_color": Color(...), "pupil_aspect": 0.25} for a vertical-slit exotic eye) and
+## re-apply the eye material if the proxy is already built. Deterministic: pure data in.
+func set_eye_params(params: Dictionary) -> void:
+	for key in params:
+		_eye_params[key] = params[key]
+	if proxy_instance != null and _proxy_surface.has("eyes"):
+		proxy_instance.set_surface_override_material(_proxy_surface["eyes"], _build_eye_material())
 
 
 ## Show/hide a proxy piece at runtime (e.g. toggling genitals). Re-applies the material.

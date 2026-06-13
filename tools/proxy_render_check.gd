@@ -48,6 +48,12 @@ func _ready() -> void:
 	_shots = [
 		{"label": "face_front_neutral", "state": neutral, "mode": "face_front"},
 		{"label": "face_34_neutral", "state": neutral, "mode": "face_34"},
+		{"label": "eye_closeup_front", "state": neutral, "mode": "eye_front"},
+		{"label": "eye_closeup_34", "state": neutral, "mode": "eye_34"},
+		# exotic parameterisation proof: vertical-slit pupil + a vivid amber iris.
+		{"label": "eye_closeup_slit", "state": neutral, "mode": "eye_front",
+			"eye_params": {"pupil_aspect": 0.20, "iris_color": Color(0.78, 0.52, 0.10),
+				"iris_inner": Color(0.45, 0.28, 0.04), "pupil_size": 0.55}},
 		{"label": "mouth_open_neutral", "state": neutral, "mode": "mouth"},
 		{"label": "face_front_aged", "state": aged, "mode": "face_front"},
 		{"label": "face_front_child", "state": young, "mode": "face_front"},
@@ -71,6 +77,10 @@ func _process(_dt: float) -> void:
 	if shot.get("genitals", false):
 		_rig.show_genitals = true
 		_rig.set_proxy_visible("genitals", true)
+	# Reset to the natural-brown default, then apply any per-shot exotic eye params.
+	_rig.set_eye_params(BodyRig.EYE_PARAMS_DEFAULT.duplicate(true))
+	if shot.has("eye_params"):
+		_rig.set_eye_params(shot["eye_params"])
 	_rig.apply_body_state(shot["state"])
 	# For the mouth shot, pose the JAW bone open so the teeth + tongue are VISIBLE inside
 	# the (otherwise lip-closed) mouth — the whole point of verifying they exist + seat.
@@ -97,6 +107,25 @@ func _open_jaw() -> void:
 	sk.set_bone_pose_rotation(ji, rest.basis.get_rotation_quaternion() * Quaternion(Vector3.RIGHT, 0.32))
 
 
+## World-space centre of the subject's right eyeball, read from the morphed proxy mesh
+## (so the close-up tracks the real geometry, not a guessed offset).
+func _eye_centre() -> Vector3:
+	var am := _rig.proxy_instance.mesh as ArrayMesh
+	for si in am.get_surface_count():
+		if str(am.surface_get_name(si)) == "eyes":
+			var v: PackedVector3Array = am.surface_get_arrays(si)[Mesh.ARRAY_VERTEX]
+			var c := Vector3.ZERO
+			var n := 0
+			for p in v:
+				if p.x < 0.0:   # subject's right eye (negative x half)
+					c += p; n += 1
+			if n > 0:
+				c /= n
+			# push the focal point to the cornea front so the iris fills the frame
+			return _rig.proxy_instance.global_transform * Vector3(c.x, c.y, maxf(c.z, 0.12))
+	return Vector3(-0.044, 1.567, 0.13)
+
+
 func _frame_camera(mode: String) -> void:
 	# Frame off the MORPHED mesh, not the static eye bone: blendshape morphs (e.g. the
 	# child shape) move the mesh verts but NOT the skeleton joints, so eye_height() (a bone
@@ -112,6 +141,17 @@ func _frame_camera(mode: String) -> void:
 		"face_34":
 			_cam.look_at_from_position(Vector3(0.28, eye_y, 0.36), Vector3(0, eye_y - 0.01, 0), Vector3.UP)
 			_cam.fov = 35
+		"eye_front":
+			# Tight on the (subject's) right eyeball. Its centre is measured from the rig:
+			# x = -0.044, y = 1.567 (scale 1), front surface at z ~ 0.137. Stand back + a
+			# narrow FOV (the camera clips if shoved right up to the cornea).
+			var ec := _eye_centre()
+			_cam.look_at_from_position(ec + Vector3(0, 0, 0.22), ec, Vector3.UP)
+			_cam.fov = 12
+		"eye_34":
+			var ec2 := _eye_centre()
+			_cam.look_at_from_position(ec2 + Vector3(0.10, 0.01, 0.20), ec2, Vector3.UP)
+			_cam.fov = 13
 		"mouth":
 			# the mouth sits ~0.08 m below the eyes; look straight in, slightly from below.
 			var my := eye_y - 0.085

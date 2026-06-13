@@ -883,9 +883,16 @@ makes the seam minimal in practice.
 
 The teeth/tongue/genitals are `helper-*` groups **already inside `base.obj`**, in the
 SAME vertex space as `g body` — so they share the base mesh's skin weights and macro/
-detail `.target` deltas for free. The eyes are a dedicated proxy with their own UVs +
-CC0 iris texture (`brown_eye.png` → `assets/body/eye_brown.png`), so the eye reads as a
-sclera+iris eyeball, not flat skin.
+detail `.target` deltas for free. The eyes are a dedicated proxy with their own UVs,
+materialed by a PROCEDURAL shader (`assets/body/eye.gdshader`): the sclera, limbal ring,
+iris (radial fibre striation) and pupil are computed analytically from the proxy UVs
+about each eye's UV-island centre — resolution-independent, no baked texture. Every
+visual knob is a shader uniform (iris colour, pupil size/shape incl. round vs vertical
+slit, limbal ring, sclera/vein colour, wet-gloss roughness/specular), defaulted in
+`BodyRig.EYE_PARAMS_DEFAULT` to a natural warm-brown eye and overridable via
+`BodyRig.set_eye_params()`. (Earlier revisions baked a CC0 `brown_eye.png` iris texture;
+it was removed — the procedural material has no external texture dependency, which also
+closed a `res://result/…` build-output path leak the importable PNG caused.)
 
 **The `.mhclo` fitting format `[V]`.** A proxy vertex is bound to the base mesh as a
 barycentric combination of 3 base verts plus a scaled offset:
@@ -931,7 +938,8 @@ its machinery always builds, but visibility follows `BodyRig.show_genitals` (def
 
 **Artifacts (separate from `base_body.res` — the base mesh stays byte-stable):**
 `assets/body/base_body_proxies.{res,index.json}`,
-`base_body_proxies_detail.{bin,index.json}`, `eye_brown.png`. Built by
+`base_body_proxies_detail.{bin,index.json}` (no eye texture — the eye is procedural).
+Built by
 `nix build .#body-proxies` — byte-reproducible (verified identical to the committed
 copies against the pinned `fetchFromGitHub` source).
 

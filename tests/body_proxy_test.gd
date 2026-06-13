@@ -38,6 +38,7 @@ func _ready() -> void:
 	_test_normals_outward()
 	_test_rig_attach()
 	_test_polish()
+	_test_no_result_path_leak()
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
 
@@ -219,8 +220,30 @@ func _test_rig_attach() -> void:
 			rig.proxy_instance.skin == rig.mesh_instance.skin, "shared skin")
 		var am := rig.proxy_instance.mesh as ArrayMesh
 		var eyes_si := _surface_index(am, "eyes")
+		var eye_mat := rig.proxy_instance.get_surface_override_material(eyes_si) if eyes_si >= 0 else null
 		_assert("eyes surface has an override material (not flat skin)",
-			eyes_si >= 0 and rig.proxy_instance.get_surface_override_material(eyes_si) != null, "eye mat set")
+			eyes_si >= 0 and eye_mat != null, "eye mat set")
+		# The eye is PROCEDURAL: a ShaderMaterial on eye.gdshader, NOT a textured StandardMaterial3D.
+		var eye_sm := eye_mat as ShaderMaterial
+		_assert("eye material is a ShaderMaterial (procedural, not a baked-texture StandardMaterial3D)",
+			eye_sm != null and (eye_mat is StandardMaterial3D) == false, "type=%s" % (eye_mat.get_class() if eye_mat else "null"))
+		if eye_sm != null:
+			_assert("eye ShaderMaterial uses res://assets/body/eye.gdshader",
+				eye_sm.shader != null and eye_sm.shader.resource_path == "res://assets/body/eye.gdshader",
+				"shader=%s" % (eye_sm.shader.resource_path if eye_sm.shader else "null"))
+			# Expected parameterising uniforms are present with the natural-brown defaults.
+			for u in ["iris_color", "iris_radius", "pupil_size", "pupil_aspect", "limbal_width", "sclera_color", "eye_roughness"]:
+				var has_u := false
+				for up in eye_sm.shader.get_shader_uniform_list():
+					if String(up["name"]) == u:
+						has_u = true; break
+				_assert("eye shader exposes uniform '%s'" % u, has_u, "missing %s" % u)
+			# Exotic pupil: set_eye_params with a vertical slit takes effect (data-only).
+			rig.set_eye_params({"pupil_aspect": 0.22})
+			var eye_sm2 := rig.proxy_instance.get_surface_override_material(eyes_si) as ShaderMaterial
+			_assert("set_eye_params({pupil_aspect:0.22}) applies a vertical-slit pupil to the eye material",
+				eye_sm2 != null and absf(float(eye_sm2.get_shader_parameter("pupil_aspect")) - 0.22) < 1e-5,
+				"aspect=%s" % str(eye_sm2.get_shader_parameter("pupil_aspect") if eye_sm2 else null))
 		# genitals OFF => transparent material; toggling shows it
 		var gen_si := _surface_index(am, "genitals")
 		if gen_si >= 0:
@@ -313,6 +336,59 @@ func _test_polish() -> void:
 		gmat != null and gmat == rig.mesh_instance.material_override,
 		"gen_mat==body_mat: %s" % str(gmat == rig.mesh_instance.material_override))
 	rig.queue_free()
+
+
+# (7) leak guard: no committed file references the nix-build `result/` output path, and
+# no baked eye texture remains (the eye is procedural). The earlier baked eye PNG, copied
+# into the `result/` build output, caused a `res://result/eye_brown.png.import` error when
+# the editor scanned the symlink — this scan keeps that path leak from creeping back in.
+func _test_no_result_path_leak() -> void:
+	print("--- (7) leak guard: no res://result/ refs + eye is procedural (no baked PNG) ---")
+	var offenders := PackedStringArray()
+	# Resource-carrying files only (NOT prose/markdown, NOT this guard which names the path
+	# literally). A leaked ref shows up as a `res://result/...` path inside a resource.
+	var exts := ["gd", "tres", "tscn", "import", "material", "gdshader", "json", "nix"]
+	_scan_for("res://", "res://result/", exts, offenders)   # scans the whole project tree
+	var self_ref := offenders.find("res://tests/body_proxy_test.gd")
+	if self_ref != -1:
+		offenders.remove_at(self_ref)   # this guard names the path literally; that's not a leak
+	_assert("no committed file references the build-output path 'res://result/' (leak fixed)",
+		offenders.is_empty(), "offenders=%s" % str(offenders))
+
+	# The baked eye texture is gone (procedural eye material has no external texture dep).
+	_assert("baked eye texture removed: res://assets/body/eye_brown.png absent",
+		not FileAccess.file_exists("res://assets/body/eye_brown.png"), "PNG still present")
+	_assert("baked eye .import removed: res://assets/body/eye_brown.png.import absent",
+		not FileAccess.file_exists("res://assets/body/eye_brown.png.import"), ".import still present")
+	# The procedural eye shader exists and loads.
+	_assert("procedural eye shader res://assets/body/eye.gdshader loads",
+		load("res://assets/body/eye.gdshader") is Shader, "shader missing")
+
+
+## Recurse `root` (a res:// dir), reporting any file whose text contains `needle`.
+## `exts` is the allow-list of extensions to read (skip the `result/` symlink + binaries).
+func _scan_for(root: String, needle: String, exts: Array, out: PackedStringArray) -> void:
+	var dir := DirAccess.open(root)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var name := dir.get_next()
+	while name != "":
+		if name.begins_with("."):
+			name = dir.get_next(); continue
+		var p := root.path_join(name)
+		if dir.current_is_dir():
+			# Skip the gitignored nix-build symlink itself (uncommitted build output).
+			if name != "result" and name != "addons":
+				_scan_for(p, needle, exts, out)
+		elif exts.has(name.get_extension()):
+			var f := FileAccess.open(p, FileAccess.READ)
+			if f != null:
+				if f.get_as_text().find(needle) != -1:
+					out.append(p)
+				f.close()
+		name = dir.get_next()
+	dir.list_dir_end()
 
 
 # --- helpers ------------------------------------------------------------------

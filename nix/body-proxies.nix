@@ -5,7 +5,7 @@
 #   - base_body_proxies.res            (ArrayMesh, one surface per piece, skinned)
 #   - base_body_proxies.index.json     (surface -> piece/material + global vertex slice)
 #   - base_body_proxies_detail.{bin,index.json}  (per-proxy sparse morph delta library)
-#   - eye_brown.png                    (CC0 eye iris texture copied next to the artifacts)
+# The eye material is procedural (assets/body/eye.gdshader); no eye texture is emitted.
 # No manual step. SEPARATE from body-assets so the base mesh (base_body.res) stays
 # byte-stable (the proxies are their OWN assets, not baked into base_body.res).
 #
@@ -63,7 +63,6 @@ pkgs.stdenvNoCC.mkDerivation {
     cp assets/body/base_body_proxies.index.json "$out/"
     cp assets/body/base_body_proxies_detail.bin "$out/"
     cp assets/body/base_body_proxies_detail.index.json "$out/"
-    test -f assets/body/eye_brown.png && cp assets/body/eye_brown.png "$out/" || true
     runHook postInstall
   '';
 

@@ -237,15 +237,9 @@ func _run() -> int:
 	print("body_proxy_build: wrote %s" % OUT_MESH)
 	_write_index(index_entries, global_offset)
 
-	# Copy the CC0 eye iris texture next to the artifacts so the runtime eye material has
-	# a real sclera+iris (not flat white). It is referenced by body_rig._proxy_material.
-	var eye_src := data_root.path_join("eyes/materials/brown_eye.png")
-	if FileAccess.file_exists(eye_src):
-		var bytes := FileAccess.get_file_as_bytes(eye_src)
-		var ef := FileAccess.open("res://assets/body/eye_brown.png", FileAccess.WRITE)
-		if ef != null:
-			ef.store_buffer(bytes); ef.flush(); ef.close()
-			print("body_proxy_build: wrote res://assets/body/eye_brown.png (%d bytes)" % bytes.size())
+	# The eye material is PROCEDURAL (assets/body/eye.gdshader — iris/pupil/sclera computed
+	# analytically from the proxy UVs), so no eye texture is emitted or vendored: the
+	# proxy artifacts have no external texture dependency.
 
 	# --- build the per-proxy SPARSE DELTA LIBRARY (morph-following) --------------------
 	if not _build_delta_library(data_root, binding, global_offset):

@@ -57,6 +57,7 @@ SUITES=(
   morph_drag_test
   picker_test
   gpu_id_picker_test
+  launcher_test
 )
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://aeriea_launcher_v1"]
+
+[ext_resource type="Script" path="res://scripts/launcher.gd" id="1_launcher"]
+
+[node name="Launcher" type="Node"]
+script = ExtResource("1_launcher")

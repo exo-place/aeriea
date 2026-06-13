@@ -52,6 +52,8 @@ See `DESIGN.md` for the full design including the 100% immersion goal, the ~45-s
 
 Godot 4.x is the primary engine. Rust via gdext for hot paths (deep simulation, perf-critical systems) when needed. The `flake.nix` dev shell provides `godot_4`, a Rust toolchain, `clang`, `mold`, `bun` (for docs), and `xvfb-run` + `xvfb` for windowed verification in headless/CI environments (`xvfb-run -a godot4 --path . <scene> --quit-after N` — `--headless` skips real GDScript reload and hides parse errors).
 
+**`project.godot` gotcha — Godot strips comments on every load.** The editor/import path deterministically rewrites `project.godot` and discards any `;` comments on every load. Comments there do NOT survive, so do not maintain explanatory comments in `project.godot` and do not restore stripped comments each commit (accept Godot's reformat). Put such notes in README/docs instead — e.g. the main scene is recorded in `README.md`, not a `project.godot` comment.
+
 ## Tests
 
 **Canonical command:** `nix run .#test` (or `nix develop --command bash tests/run.sh` inside a dev shell).

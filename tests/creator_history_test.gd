@@ -18,6 +18,7 @@ extends Node
 
 const HistoryTreeScript := preload("res://scripts/util/history_tree.gd")
 const PngTextChunkScript := preload("res://scripts/util/png_text_chunk.gd")
+const ImageMetadataScript := preload("res://scripts/util/image_metadata.gd")
 const CreatorIOScript := preload("res://scripts/body/creator_io.gd")
 
 var _pass := 0
@@ -34,6 +35,10 @@ func _ready() -> void:
 	_test_png_chunk_roundtrip()
 	_test_json_history_roundtrip()
 	_test_determinism()
+	_test_noop_commit_hygiene()
+	_test_reset_to_neutral_idempotent()
+	_test_linear_nav_helpers()
+	_test_image_metadata_roundtrip()
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
 
@@ -210,6 +215,154 @@ func _test_determinism() -> void:
 		JSON.stringify(t3.to_dict()) == JSON.stringify(t4.to_dict()), "")
 	_assert("no wall-clock in ids: ids are 0..N monotonic",
 		t3.has_node(0) and t3.has_node(1) and t3.has_node(2) and t3.has_node(3) and not t3.has_node(4), "")
+
+
+func _test_noop_commit_hygiene() -> void:
+	print("--- HISTORY HYGIENE: a commit equal to the current state is a NO-OP ---")
+	var t := HistoryTreeScript.new({"v": 0}, "root")
+	t.commit({"v": 1}, "a")
+	var before := t.node_count()
+	var cur := t.current_id()
+	# Re-commit the IDENTICAL state (re-settle to the same value / re-apply identical state).
+	var rid := t.commit({"v": 1}, "a again")
+	_assert("re-committing the identical state adds NO node", t.node_count() == before,
+		"%d -> %d" % [before, t.node_count()])
+	_assert("no-op commit returns the existing current id and leaves current put",
+		rid == cur and t.current_id() == cur, "rid=%d cur=%d" % [rid, cur])
+	# A genuinely different state still commits.
+	t.commit({"v": 2}, "b")
+	_assert("a changed state still commits a node", t.node_count() == before + 1,
+		"count=%d" % t.node_count())
+	# Deep-equality is structural, not identity: a fresh dict with the same contents is equal.
+	t.jump_to(cur)
+	var rid2 := t.commit({"v": 1}, "structurally equal")
+	_assert("structurally-equal (not identity-equal) commit is also a no-op",
+		rid2 == cur and t.node_count() == before + 1, "count=%d" % t.node_count())
+
+
+func _test_reset_to_neutral_idempotent() -> void:
+	print("--- RESET-TO-NEUTRAL: branches from ROOT, idempotent (N resets -> ONE branch) ---")
+	var neutral := {"v": "neutral"}
+	var t := HistoryTreeScript.new({"v": "root"}, "root")
+	var rid := t.root_id()
+	# Wander down a branch first.
+	t.commit({"v": "A"}, "A")
+	t.commit({"v": "B"}, "B")
+	var count_before := t.node_count()
+	# First reset: branches a neutral child off the ROOT (not off the current deep node).
+	var n1 := t.reset_to(neutral, "reset")
+	_assert("reset branches a neutral child OFF THE ROOT", t.parent_of(n1) == rid,
+		"parent(n1)=%d root=%d" % [t.parent_of(n1), rid])
+	_assert("reset adds exactly one node", t.node_count() == count_before + 1, "count=%d" % t.node_count())
+	_assert("reset makes the neutral node current", t.current_id() == n1, "")
+	# Wander away, then reset AGAIN (and again): must REUSE the existing neutral branch.
+	t.jump_to(rid)
+	t.commit({"v": "C"}, "C")
+	var after_wander := t.node_count()
+	var n2 := t.reset_to(neutral, "reset")
+	var n3 := t.reset_to(neutral, "reset")
+	_assert("repeated reset reuses the SAME neutral node (idempotent)",
+		n2 == n1 and n3 == n1, "n1=%d n2=%d n3=%d" % [n1, n2, n3])
+	_assert("repeated reset adds NO duplicate branches", t.node_count() == after_wander,
+		"%d vs %d" % [t.node_count(), after_wander])
+	_assert("root has exactly one neutral child among its children",
+		_count_children_with_state(t, rid, neutral) == 1,
+		"matches=%d" % _count_children_with_state(t, rid, neutral))
+
+
+func _count_children_with_state(t: HistoryTree, parent: int, state: Variant) -> int:
+	var c := 0
+	for cid in t.children_of(parent):
+		if HistoryTreeScript.states_equal(t.state_of(int(cid)), state):
+			c += 1
+	return c
+
+
+func _test_linear_nav_helpers() -> void:
+	print("--- LINEAR branch-nav helpers: path_to_current / sibling_index / junction / switch ---")
+	var t := HistoryTreeScript.new({"v": 0}, "root")
+	var rid := t.root_id()
+	var a := t.commit({"v": "A"}, "A")
+	var b := t.commit({"v": "B"}, "B")   # path root -> A -> B
+	_assert("path_to_current is the root->current spine, root-first",
+		t.path_to_current() == [rid, a, b], "%s" % str(t.path_to_current()))
+	# Branch a sibling off A.
+	t.jump_to(a)
+	var c := t.commit({"v": "C"}, "C")   # A now has children B and C (ascending id: B then C)
+	_assert("A is a junction (more than one child)", t.is_junction(a), "")
+	_assert("root is NOT a junction (single child)", not t.is_junction(rid), "")
+	# sibling_index: B is child 0/2, C is child 1/2 (ascending id order).
+	var sib_b := t.sibling_index(b)
+	var sib_c := t.sibling_index(c)
+	_assert("sibling_index(B) = 0 of 2", int(sib_b["index"]) == 0 and int(sib_b["count"]) == 2,
+		"%s" % str(sib_b))
+	_assert("sibling_index(C) = 1 of 2", int(sib_c["index"]) == 1 and int(sib_c["count"]) == 2,
+		"%s" % str(sib_c))
+	_assert("root reports index 0 / count 1 (no parent)",
+		int(t.sibling_index(rid)["index"]) == 0 and int(t.sibling_index(rid)["count"]) == 1, "")
+	# child_at resolves ascending-id branch positions.
+	_assert("child_at(A,0)=B and child_at(A,1)=C",
+		t.child_at(a, 0) == b and t.child_at(a, 1) == c, "")
+	_assert("child_at out of range -> -1", t.child_at(a, 5) == -1, "")
+	# switch_branch jumps current onto the chosen child's preferred-child LEAF.
+	var landed := t.switch_branch(a, 0)   # follow branch 0 (B) -> B is a leaf
+	_assert("switch_branch(A, 0) lands on B's tip", landed == b and t.current_id() == b, "landed=%d b=%d" % [landed, b])
+	landed = t.switch_branch(a, 1)
+	_assert("switch_branch(A, 1) lands on C's tip", landed == c and t.current_id() == c, "")
+	# leaf_following_preferred descends the preferred chain to a leaf.
+	t.jump_to(rid)
+	_assert("leaf_following_preferred(root) reaches a leaf (preferred chain)",
+		t.children_of(t.leaf_following_preferred(rid)).is_empty(), "")
+
+
+func _test_image_metadata_roundtrip() -> void:
+	print("--- IMAGE METADATA: per-format embed -> extract round-trip (PNG / JPG / WEBP) ---")
+	# A tiny opaque image; payload is the actual history JSON the creator embeds.
+	var img := Image.create(16, 16, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.3, 0.5, 0.7, 1.0))
+	var body := BodyState.new()
+	body.age_years = 41.0
+	body.masculinity = 62.0
+	var tree := HistoryTreeScript.new(BodyState.new().to_dict(), "initial")
+	tree.commit(body.to_dict(), "age = 41")
+	var payload := CreatorIOScript.history_to_json(body, tree)
+	for fmt in ["png", "jpg", "webp"]:
+		var supported: bool = ImageMetadataScript.supports_metadata(fmt)
+		_assert("format %s reports support honestly" % fmt, supported, "supports=%s" % str(supported))
+		if not supported:
+			# If a format ever can't carry metadata, the creator must disable image+history.
+			_assert("unsupported format %s: CreatorIO disables image+history" % fmt,
+				not CreatorIOScript.supports_image_history(fmt), "")
+			continue
+		var bytes: PackedByteArray = ImageMetadataScript.encode(img, fmt)
+		_assert("%s encodes to non-empty bytes" % fmt, bytes.size() > 0, "size=%d" % bytes.size())
+		var with_meta: PackedByteArray = CreatorIOScript.embed_history_in_image(bytes, fmt, payload)
+		_assert("%s embed grows the byte stream" % fmt, with_meta.size() > bytes.size(),
+			"%d -> %d" % [bytes.size(), with_meta.size()])
+		# The image still decodes after embedding (metadata is ancillary).
+		var reimg := Image.new()
+		var lerr := OK
+		match fmt:
+			"png": lerr = reimg.load_png_from_buffer(with_meta)
+			"jpg": lerr = reimg.load_jpg_from_buffer(with_meta)
+			"webp": lerr = reimg.load_webp_from_buffer(with_meta)
+		_assert("%s still decodes as a valid image after embed" % fmt, lerr == OK, "err=%d" % lerr)
+		# Extract round-trips the exact payload.
+		var got: String = CreatorIOScript.extract_history_from_image(with_meta, fmt)
+		_assert("%s extract returns the exact embedded payload" % fmt, got == payload,
+			"len got=%d want=%d" % [got.length(), payload.length()])
+		# And the FULL state round-trips: parse the extracted payload back into body + tree.
+		var parsed := CreatorIOScript.parse_payload(got)
+		var rb: BodyState = parsed["body"]
+		_assert("%s round-trips the BodyState (age + masculinity)" % fmt,
+			parsed["ok"] and is_equal_approx(rb.age_years, 41.0) and is_equal_approx(rb.masculinity, 62.0),
+			"age=%.1f masc=%.1f" % [rb.age_years, rb.masculinity])
+		_assert("%s round-trips the HistoryTree (identical to_dict)" % fmt,
+			parsed["tree"] != null and JSON.stringify((parsed["tree"] as HistoryTree).to_dict()) == JSON.stringify(tree.to_dict()),
+			"")
+		# Extracting a different keyword / from un-embedded bytes returns empty.
+		_assert("%s extract of bare (un-embedded) bytes is empty" % fmt,
+			CreatorIOScript.extract_history_from_image(bytes, fmt) == "", "")
 
 
 func _run_seq(seq: Array) -> HistoryTree:

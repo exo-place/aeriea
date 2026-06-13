@@ -17,6 +17,7 @@ class_name CreatorIO
 extends RefCounted
 
 const PngTextChunkScript := preload("res://scripts/util/png_text_chunk.gd")
+const ImageMetadataScript := preload("res://scripts/util/image_metadata.gd")
 const HistoryTreeScript := preload("res://scripts/util/history_tree.gd")
 
 ## The tEXt-chunk keyword our embedded history rides under.
@@ -69,6 +70,35 @@ static func extract_history_from_png(png: PackedByteArray) -> String:
 ## Embed the history JSON into PNG bytes (variant-4 export).
 static func embed_history_in_png(png: PackedByteArray, history_json: String) -> PackedByteArray:
 	return PngTextChunkScript.embed(png, HISTORY_KEYWORD, history_json)
+
+
+# ---------------------------------------------------------------------------
+# Per-FORMAT image helpers (PNG / JPG / WEBP). The creator offers individual export
+# actions (image / image+history) and lets the user pick the format; metadata embedding
+# is format-aware via ImageMetadata. supports_image_history() tells the UI HONESTLY
+# whether a format can carry the history so it can disable image+history rather than
+# silently drop it.
+# ---------------------------------------------------------------------------
+
+## True iff `format` can carry embedded history (so image+history is offered for it).
+static func supports_image_history(format: String) -> bool:
+	return ImageMetadataScript.supports_metadata(format)
+
+
+## Encode `img` to `format`'s bytes (no metadata).
+static func encode_image(img: Image, format: String) -> PackedByteArray:
+	return ImageMetadataScript.encode(img, format)
+
+
+## Embed the history JSON into already-encoded image `bytes` of `format`. Returns the
+## input unchanged if the format can't carry metadata.
+static func embed_history_in_image(bytes: PackedByteArray, format: String, history_json: String) -> PackedByteArray:
+	return ImageMetadataScript.embed(bytes, format, HISTORY_KEYWORD, history_json)
+
+
+## Extract embedded history JSON from image `bytes` of `format` (import). "" if absent.
+static func extract_history_from_image(bytes: PackedByteArray, format: String) -> String:
+	return ImageMetadataScript.extract(bytes, format, HISTORY_KEYWORD)
 
 
 # ---------------------------------------------------------------------------

@@ -108,10 +108,18 @@ var _history: HistoryTree
 var _drag_pending: Dictionary = {}   ## field -> bool (a drag is in progress)
 var _suspend_commit: bool = false    ## true while applying a restored state (no commit)
 
-var _history_list: VBoxContainer     ## the history-panel node list (rebuilt on change)
-var _undo_btn: Button
-var _redo_btn: Button
-var _status_lbl: Label               ## export/import feedback
+var _history_list: VBoxContainer     ## the linear branch-nav node list (rebuilt on change)
+var _history_panel: Control          ## the whole history panel (hidden by default; toggled)
+var _undo_btn: Button                ## corner icon button
+var _redo_btn: Button                ## corner icon button
+var _status_lbl: Label               ## transient export/import toast (no persistent path text)
+var _legend_panel: Control           ## the controls legend (Ctrl hold-to-peek / tap-to-pin)
+var _legend_pinned: bool = false     ## tap-Ctrl pin state
+var _ctrl_down: bool = false         ## Ctrl currently held (hold-to-peek)
+var _ctrl_used_combo: bool = false   ## a Ctrl-combo fired this hold (so release isn't a tap)
+
+## The image format the export actions use (one of CreatorIO/ImageMetadata FORMAT_* keys).
+var _image_format: String = "png"
 
 
 func _ready() -> void:
@@ -461,11 +469,32 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Ctrl+Z = undo, Ctrl+Shift+Z = redo (history navigation).
 	if event is InputEventKey:
 		var k := event as InputEventKey
+		# CONTROLS-LEGEND Ctrl hold-to-peek / tap-to-pin. Track Ctrl press/release; a quick
+		# tap (press then release with no Ctrl-combo consumed in between) toggles the pin,
+		# while merely HOLDING Ctrl peeks the legend. This is display-only — it changes no
+		# binding. (The keycode for the modifier itself is KEY_CTRL.)
+		if k.keycode == KEY_CTRL:
+			if k.pressed and not k.echo:
+				_ctrl_down = true
+				_ctrl_used_combo = false
+				_update_legend_visibility()
+			elif not k.pressed:
+				_ctrl_down = false
+				if not _ctrl_used_combo:
+					_legend_pinned = not _legend_pinned
+				_update_legend_visibility()
+			return
 		if k.pressed and not k.echo and k.keycode == KEY_Z and k.ctrl_pressed:
+			_ctrl_used_combo = true
 			if k.shift_pressed:
 				_do_redo()
 			else:
 				_do_undo()
+			get_viewport().set_input_as_handled()
+			return
+		# H toggles the history panel (hidden by default).
+		if k.pressed and not k.echo and k.keycode == KEY_H and not k.ctrl_pressed:
+			_toggle_history_panel()
 			get_viewport().set_input_as_handled()
 			return
 		# M toggles sculpt mode (the camera-vs-morph gate).
@@ -543,6 +572,8 @@ func _build_ui() -> void:
 	var canvas := CanvasLayer.new()
 	add_child(canvas)
 
+	# Main slider panel — TOP-LEFT corner. No persistent controls-legend clutter (that
+	# moved to its own Ctrl-peek panel) and no persistent internal export-path text.
 	var panel := PanelContainer.new()
 	panel.position = Vector2(16, 16)
 	panel.custom_minimum_size = Vector2(430, 0)
@@ -556,11 +587,6 @@ func _build_ui() -> void:
 	title.text = "aeriea — character creator"
 	vbox.add_child(title)
 
-	var hint := Label.new()
-	hint.text = "drag: orbit   right-drag: pan   scroll: zoom   M: sculpt mode"
-	hint.add_theme_font_size_override("font_size", 11)
-	vbox.add_child(hint)
-
 	# Sculpt-mode toggle (Slice D): the camera-vs-morph gate. ON => left-drag ON the body
 	# morphs (drag-to-modify with region glow); left-drag on the BACKGROUND still orbits.
 	_sculpt_btn = Button.new()
@@ -568,12 +594,6 @@ func _build_ui() -> void:
 	_sculpt_btn.text = "Sculpt mode: OFF (press M)"
 	_sculpt_btn.toggled.connect(func(on: bool) -> void: _set_sculpt_mode(on))
 	vbox.add_child(_sculpt_btn)
-
-	var sculpt_hint := Label.new()
-	sculpt_hint.text = "sculpt: hover body to glow the editable region, then drag the surface to pull it"
-	sculpt_hint.add_theme_font_size_override("font_size", 10)
-	sculpt_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vbox.add_child(sculpt_hint)
 
 	vbox.add_child(HSeparator.new())
 
@@ -606,39 +626,74 @@ func _build_ui() -> void:
 	reset.pressed.connect(_reset_all)
 	vbox.add_child(reset)
 
-	_build_history_ui(vbox)
+	# History-toggle button lives in the main panel; the history nav itself is a SEPARATE
+	# corner panel hidden by default (toggled by this button or the H hotkey).
+	var hist_toggle := Button.new()
+	hist_toggle.text = "History (H)"
+	hist_toggle.pressed.connect(_toggle_history_panel)
+	vbox.add_child(hist_toggle)
+
 	_build_export_ui(vbox)
+
+	# Corner panels (own CanvasLayer-sibling Controls, anchored to other screen corners).
+	_build_undo_redo_corner(canvas)
+	_build_history_panel(canvas)
+	_build_legend_panel(canvas)
 
 	_apply_state()
 	_refresh_history_panel()
 
 
-## Undo/redo buttons + the branching history node list (click a node to jump_to it).
-func _build_history_ui(vbox: VBoxContainer) -> void:
-	vbox.add_child(HSeparator.new())
+## UNDO / REDO as compact ICON buttons in the TOP-RIGHT corner (a different corner from
+## the sliders), out of the main panel. Glyph arrows keep them small; tooltips name the
+## hotkeys. (Ctrl-Z / Ctrl-Shift-Z still drive them — see _unhandled_input.)
+func _build_undo_redo_corner(canvas: CanvasLayer) -> void:
+	var box := HBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	box.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	box.position = Vector2(-96, 16)
+	box.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	canvas.add_child(box)
+
+	_undo_btn = Button.new()
+	_undo_btn.text = "↶"   # ↶ undo glyph
+	_undo_btn.tooltip_text = "Undo (Ctrl+Z)"
+	_undo_btn.custom_minimum_size = Vector2(40, 40)
+	_undo_btn.pressed.connect(_do_undo)
+	box.add_child(_undo_btn)
+
+	_redo_btn = Button.new()
+	_redo_btn.text = "↷"   # ↷ redo glyph
+	_redo_btn.tooltip_text = "Redo (Ctrl+Shift+Z)"
+	_redo_btn.custom_minimum_size = Vector2(40, 40)
+	_redo_btn.pressed.connect(_do_redo)
+	box.add_child(_redo_btn)
+
+
+## The history panel — its OWN corner panel (BOTTOM-LEFT), HIDDEN by default, toggled by the
+## main-panel button or the H hotkey. The body is a ChatGPT-style pseudo-linear branch nav
+## (see _refresh_history_panel): the root→current spine rendered LINEARLY top-to-bottom, with
+## a `‹ i/n ›` branch selector at any junction. No indentation, no diagonal tree.
+func _build_history_panel(canvas: CanvasLayer) -> void:
+	_history_panel = PanelContainer.new()
+	_history_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_history_panel.position = Vector2(16, -16)
+	_history_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_history_panel.custom_minimum_size = Vector2(360, 0)
+	_history_panel.visible = false   # HIDDEN by default
+	canvas.add_child(_history_panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 4)
+	_history_panel.add_child(vbox)
 
 	var hdr := Label.new()
-	hdr.text = "history (branching undo tree)"
+	hdr.text = "history — branch nav (root → current)"
 	vbox.add_child(hdr)
 
-	var nav := HBoxContainer.new()
-	nav.add_theme_constant_override("separation", 4)
-	_undo_btn = Button.new()
-	_undo_btn.text = "Undo (Ctrl+Z)"
-	_undo_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_undo_btn.pressed.connect(_do_undo)
-	nav.add_child(_undo_btn)
-	_redo_btn = Button.new()
-	_redo_btn.text = "Redo (Ctrl+Shift+Z)"
-	_redo_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_redo_btn.pressed.connect(_do_redo)
-	nav.add_child(_redo_btn)
-	vbox.add_child(nav)
-
-	# Scrollable indented node list. Branches read as deeper indentation; the
-	# current node is marked. Clicking a node jumps_to it (restores that state).
+	# Scrollable LINEAR path list (no indentation). Built in _refresh_history_panel.
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, 150)
+	scroll.custom_minimum_size = Vector2(0, 200)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	vbox.add_child(scroll)
 	_history_list = VBoxContainer.new()
@@ -647,47 +702,197 @@ func _build_history_ui(vbox: VBoxContainer) -> void:
 	scroll.add_child(_history_list)
 
 
-## Export (JSON / JSON+history / PNG / PNG+history) and import (JSON or PNG-with-history).
+## Toggle the history panel's visibility (the H hotkey + the main-panel button).
+func _toggle_history_panel() -> void:
+	if _history_panel != null:
+		_history_panel.visible = not _history_panel.visible
+
+
+## The CONTROLS LEGEND — its own corner panel (BOTTOM-RIGHT). Not persistent clutter: shown
+## only while HOLDING Ctrl (hold-to-peek), and TAP Ctrl toggles it pinned on/off. The legend
+## is display-only; it does not change any binding (M sculpt, P picker, Ctrl-Z undo, etc.).
+func _build_legend_panel(canvas: CanvasLayer) -> void:
+	_legend_panel = PanelContainer.new()
+	_legend_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_legend_panel.position = Vector2(-16, -16)
+	_legend_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_legend_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_legend_panel.visible = false   # hidden until Ctrl held / pinned
+	canvas.add_child(_legend_panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 2)
+	_legend_panel.add_child(vbox)
+
+	var hdr := Label.new()
+	hdr.text = "controls (hold Ctrl to peek · tap Ctrl to pin)"
+	hdr.add_theme_font_size_override("font_size", 11)
+	vbox.add_child(hdr)
+
+	for line in [
+		"drag: orbit    right-drag: pan    scroll: zoom",
+		"M: sculpt mode (drag body to morph)",
+		"P: picker backend (CPU grid / GPU id)",
+		"H: toggle history panel",
+		"Ctrl+Z: undo    Ctrl+Shift+Z: redo",
+		"sculpt: hover to glow the region, drag the surface to pull it",
+	]:
+		var l := Label.new()
+		l.text = line
+		l.add_theme_font_size_override("font_size", 10)
+		vbox.add_child(l)
+
+
+## Refresh the legend's VISIBILITY from the hold/pin state (pinned OR Ctrl-held shows it).
+func _update_legend_visibility() -> void:
+	if _legend_panel != null:
+		_legend_panel.visible = _legend_pinned or _ctrl_down
+
+
+## INDIVIDUAL export actions (no "export all"): JSON, JSON+history, image, image+history —
+## with a FORMAT picker (PNG / JPG / WEBP). image+history is enabled only for formats that
+## can actually carry the embedded history (all three here); were one unable, it would be
+## honestly disabled, offering image-only. No persistent internal-path text — a transient
+## toast (_status_lbl) reports results.
+var _img_history_btn: Button
 func _build_export_ui(vbox: VBoxContainer) -> void:
 	vbox.add_child(HSeparator.new())
 
 	var hdr := Label.new()
-	hdr.text = "export / import"
+	hdr.text = "export"
 	vbox.add_child(hdr)
 
-	var export_btn := Button.new()
-	export_btn.text = "Export all 4 (JSON / +history / PNG / PNG+history)"
-	export_btn.pressed.connect(_do_export)
-	vbox.add_child(export_btn)
+	# Format picker (drives the image / image+history actions).
+	var fmt_row := HBoxContainer.new()
+	fmt_row.add_theme_constant_override("separation", 4)
+	var fmt_lbl := Label.new()
+	fmt_lbl.text = "image format"
+	fmt_lbl.custom_minimum_size = Vector2(96, 0)
+	fmt_row.add_child(fmt_lbl)
+	var fmt := OptionButton.new()
+	fmt.add_item("PNG", 0)
+	fmt.add_item("JPG", 1)
+	fmt.add_item("WEBP", 2)
+	fmt.item_selected.connect(_on_image_format_selected)
+	fmt_row.add_child(fmt)
+	vbox.add_child(fmt_row)
+
+	var json_btn := Button.new()
+	json_btn.text = "Export JSON (current)"
+	json_btn.pressed.connect(func() -> void: _export_json(false))
+	vbox.add_child(json_btn)
+
+	var json_h_btn := Button.new()
+	json_h_btn.text = "Export JSON + history"
+	json_h_btn.pressed.connect(func() -> void: _export_json(true))
+	vbox.add_child(json_h_btn)
+
+	var img_btn := Button.new()
+	img_btn.text = "Export image (current)"
+	img_btn.pressed.connect(func() -> void: _export_image(false))
+	vbox.add_child(img_btn)
+
+	_img_history_btn = Button.new()
+	_img_history_btn.text = "Export image + history"
+	_img_history_btn.pressed.connect(func() -> void: _export_image(true))
+	vbox.add_child(_img_history_btn)
 
 	_status_lbl = Label.new()
 	_status_lbl.add_theme_font_size_override("font_size", 10)
 	_status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status_lbl.text = "exports -> user://creator_exports/"
+	_status_lbl.text = ""
 	vbox.add_child(_status_lbl)
 
+	_update_image_history_enabled()
 
-func _refresh_history_panel() -> void:
-	if _history_list == null:
+
+func _on_image_format_selected(idx: int) -> void:
+	_image_format = ["png", "jpg", "webp"][idx]
+	_update_image_history_enabled()
+
+
+## Honestly enable/disable "image + history" for the chosen format: disabled (with a hint)
+## if the format genuinely can't carry the metadata. image-only stays available regardless.
+func _update_image_history_enabled() -> void:
+	if _img_history_btn == null:
 		return
-	for c in _history_list.get_children():
-		c.queue_free()
-	for n in _history.structure():
-		var btn := Button.new()
-		var indent := "    ".repeat(int(n["depth"]))
-		var marker := "* " if bool(n["is_current"]) else "  "
-		var fork := "  <branch>" if int(n["child_count"]) > 1 else ""
-		btn.text = "%s%s%s%s" % [indent, marker, str(n["label"]), fork]
-		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		btn.add_theme_font_size_override("font_size", 11)
-		btn.flat = not bool(n["is_current"])
-		var nid := int(n["id"])
-		btn.pressed.connect(func() -> void: _jump_to_node(nid))
-		_history_list.add_child(btn)
+	var ok := CreatorIOScript.supports_image_history(_image_format)
+	_img_history_btn.disabled = not ok
+	_img_history_btn.tooltip_text = "" if ok else "%s cannot carry embedded history — use image-only" % _image_format.to_upper()
+
+
+## ChatGPT-style pseudo-LINEAR branch nav: render the root→current path top-to-bottom as a
+## flat list (NO indentation, NO diagonal). At any node that is a JUNCTION (more than one
+## child) show a `‹ i/n ›` selector whose arrows switch which child branch is followed from
+## that junction (switch_branch = jump current onto that child's preferred-child leaf).
+func _refresh_history_panel() -> void:
 	if _undo_btn != null:
 		_undo_btn.disabled = not _history.can_undo()
 	if _redo_btn != null:
 		_redo_btn.disabled = not _history.can_redo()
+	if _history_list == null:
+		return
+	for c in _history_list.get_children():
+		c.queue_free()
+	var path: Array = _history.path_to_current()
+	var current := _history.current_id()
+	for step_i in path.size():
+		var nid := int(path[step_i])
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 4)
+
+		# The node entry (click to jump to it). Marked when it is the current node.
+		var marker := "● " if nid == current else "○ "
+		var btn := Button.new()
+		btn.text = "%s%s" % [marker, _history.label_of(nid)]
+		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		btn.add_theme_font_size_override("font_size", 11)
+		btn.flat = nid != current
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.pressed.connect(func() -> void: _jump_to_node(nid))
+		row.add_child(btn)
+
+		# Junction selector: `‹ i/n ›` over which child branch is followed from this node.
+		if _history.is_junction(nid):
+			# The IMMEDIATE child currently followed from this junction: the next node on
+			# the path if any, else this junction's preferred immediate child (current sits
+			# on the junction itself). sibling_index gives its branch position among siblings.
+			var followed := -1
+			if step_i + 1 < path.size():
+				followed = int(path[step_i + 1])
+			else:
+				var pref := _history.leaf_following_preferred(nid)
+				# Walk pref's ancestry up to the immediate child of nid.
+				while pref >= 0 and _history.parent_of(pref) != nid:
+					pref = _history.parent_of(pref)
+				followed = pref
+			var si := _history.sibling_index(followed) if followed >= 0 else {"index": 0, "count": 0}
+			var idx := int(si["index"])
+			var cnt := int(_history.sibling_index(_history.child_at(nid, 0))["count"])
+			var prev := Button.new()
+			prev.text = "‹"
+			prev.add_theme_font_size_override("font_size", 11)
+			prev.disabled = idx <= 0
+			prev.pressed.connect(func() -> void: _switch_branch(nid, idx - 1))
+			row.add_child(prev)
+			var ic := Label.new()
+			ic.text = "%d/%d" % [idx + 1, cnt]
+			ic.add_theme_font_size_override("font_size", 11)
+			row.add_child(ic)
+			var nxt := Button.new()
+			nxt.text = "›"
+			nxt.add_theme_font_size_override("font_size", 11)
+			nxt.disabled = idx >= cnt - 1
+			nxt.pressed.connect(func() -> void: _switch_branch(nid, idx + 1))
+			row.add_child(nxt)
+
+		_history_list.add_child(row)
+
+
+## Switch the branch followed from a junction and restore the resulting state.
+func _switch_branch(junction_id: int, child_index: int) -> void:
+	if _history.switch_branch(junction_id, child_index) >= 0:
+		_restore_current()
 
 
 func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float,
@@ -789,18 +994,14 @@ func _apply_state() -> void:
 		(_value_labels[field] as Label).text = _format_value(field)
 
 
+## RESET-TO-NEUTRAL: branch from the ROOT (HistoryTree.reset_to), and be IDEMPOTENT — a
+## neutral branch off root is REUSED if it already exists, so repeated resets never accrete
+## duplicate empty branches. The body + sliders are then restored from the (new or reused)
+## neutral node.
 func _reset_all() -> void:
-	_suspend_commit = true
 	var neutral := BodyState.new()
-	for field in _sliders:
-		var v := float(neutral.get(field))
-		_body_state.set(field, v)
-		(_sliders[field] as HSlider).value = v
-	_apply_state()
-	_suspend_commit = false
-	# Reset is itself a settled edit -> one history node (preserves prior branch).
-	_commit_axis("reset", 0.0, "reset to neutral")
-	_refresh_history_panel()
+	_history.reset_to(neutral.to_dict(), "reset to neutral")
+	_restore_current()
 
 
 # ---------------------------------------------------------------------------
@@ -848,26 +1049,79 @@ func _restore_current() -> void:
 
 
 # ---------------------------------------------------------------------------
-# Export — captures the viewport render and writes the four variants.
+# Export — INDIVIDUAL actions (JSON / JSON+history / image / image+history), the image
+# in the user-chosen format (PNG / JPG / WEBP). image+history embeds the history JSON via
+# the format's metadata carrier (ImageMetadata); the button is disabled for any format
+# that can't carry it. A transient toast (_status_lbl) reports the result — no path text.
 # ---------------------------------------------------------------------------
 
-func _do_export() -> void:
-	var png_bytes := await _capture_png_bytes()
-	var stamp := str(Time.get_unix_time_from_system()).replace(".", "")
-	var basename := "creator_%s" % stamp
-	var paths := CreatorIOScript.export_all(_body_state, _history, basename, png_bytes)
-	var lines: Array = []
-	for k in paths:
-		lines.append("%s: %s" % [k, paths[k]])
+func _toast(msg: String) -> void:
 	if _status_lbl != null:
-		_status_lbl.text = "exported:\n" + "\n".join(lines)
-	print("[creator] exported:\n", "\n".join(lines))
+		_status_lbl.text = msg
+	print("[creator] ", msg)
 
 
-## Render the 3D body to a PNG byte stream, excluding the UI overlay. The UI lives on
-## a CanvasLayer, so a SubViewport-free capture of the root viewport would include it;
-## instead we hide the CanvasLayer for one frame, grab the viewport image, restore it.
-func _capture_png_bytes() -> PackedByteArray:
+func _export_basename() -> String:
+	var stamp := str(Time.get_unix_time_from_system()).replace(".", "")
+	return "creator_%s" % stamp
+
+
+## Export JSON — current-only or with the full history tree embedded.
+func _export_json(with_history: bool) -> void:
+	CreatorIOScript.ensure_export_dir()
+	var base := _export_basename()
+	if with_history:
+		var path := "%s/%s.history.json" % [CreatorIOScript.EXPORT_DIR, base]
+		_write_text(path, CreatorIOScript.history_to_json(_body_state, _history))
+		_toast("exported JSON + history")
+	else:
+		var path := "%s/%s.json" % [CreatorIOScript.EXPORT_DIR, base]
+		_write_text(path, CreatorIOScript.body_to_json(_body_state))
+		_toast("exported JSON (current)")
+
+
+## Export an image in the chosen format — optionally with the history JSON embedded via the
+## format's metadata carrier. Honors the disabled state for formats that can't carry it.
+func _export_image(with_history: bool) -> void:
+	if with_history and not CreatorIOScript.supports_image_history(_image_format):
+		_toast("%s cannot carry history — use image-only" % _image_format.to_upper())
+		return
+	var img := await _capture_image()
+	if img == null:
+		_toast("image capture failed")
+		return
+	CreatorIOScript.ensure_export_dir()
+	var base := _export_basename()
+	var bytes := CreatorIOScript.encode_image(img, _image_format)
+	if bytes.is_empty():
+		_toast("image encode failed (%s)" % _image_format.to_upper())
+		return
+	var suffix := ".history" if with_history else ""
+	if with_history:
+		bytes = CreatorIOScript.embed_history_in_image(bytes, _image_format,
+			CreatorIOScript.history_to_json(_body_state, _history))
+	var path := "%s/%s%s.%s" % [CreatorIOScript.EXPORT_DIR, base, suffix, _image_format]
+	_write_bytes(path, bytes)
+	_toast("exported %s%s" % [_image_format.to_upper(), " + history" if with_history else ""])
+
+
+func _write_text(path: String, text: String) -> void:
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f != null:
+		f.store_string(text)
+		f.close()
+
+
+func _write_bytes(path: String, bytes: PackedByteArray) -> void:
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f != null:
+		f.store_buffer(bytes)
+		f.close()
+
+
+## Render the 3D body to an Image, excluding the UI overlay. The UI lives on CanvasLayers,
+## so we hide them for one frame, grab the viewport image, then restore them.
+func _capture_image() -> Image:
 	var vp := get_viewport()
 	var canvases: Array = []
 	for c in get_children():
@@ -878,6 +1132,4 @@ func _capture_png_bytes() -> PackedByteArray:
 	var img := vp.get_texture().get_image()
 	for c in canvases:
 		(c as CanvasLayer).visible = true
-	if img == null:
-		return PackedByteArray()
-	return img.save_png_to_buffer()
+	return img

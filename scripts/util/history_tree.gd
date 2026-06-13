@@ -65,7 +65,14 @@ static func _make_node(id: int, parent_id: int, state: Variant, label: String) -
 ## the existing children and their subtrees are PRESERVED, not discarded. Returns
 ## the new node id. The new node becomes its parent's preferred child (so redo,
 ## after an undo back across it, follows the most recently created path).
+##
+## HISTORY HYGIENE: a commit whose `state` equals the CURRENT node's state is a NO-OP —
+## no node is created and current is unchanged; the existing current id is returned. This
+## catches re-settling a slider to the same value and re-applying an identical state
+## (repeating the same step must NOT accrete duplicate entries).
 func commit(state: Variant, label: String = "") -> int:
+	if _current_id >= 0 and states_equal((_nodes[_current_id] as Dictionary)["state"], state):
+		return _current_id
 	var parent_id := _current_id
 	var nid := _alloc_id()
 	_nodes[nid] = _make_node(nid, parent_id, state, label)
@@ -74,6 +81,54 @@ func commit(state: Variant, label: String = "") -> int:
 	parent["preferred_child"] = nid
 	_current_id = nid
 	return nid
+
+
+## Deep value-equality for opaque state payloads (Dictionaries / Arrays / scalars).
+## Used by the no-op-commit hygiene guard and the idempotent reset. Order-insensitive
+## for Dictionary keys; element-order-sensitive for Arrays. Pure + deterministic.
+static func states_equal(a: Variant, b: Variant) -> bool:
+	var ta := typeof(a)
+	if ta != typeof(b):
+		return false
+	if ta == TYPE_DICTIONARY:
+		var da: Dictionary = a
+		var db: Dictionary = b
+		if da.size() != db.size():
+			return false
+		for k in da:
+			if not db.has(k) or not states_equal(da[k], db[k]):
+				return false
+		return true
+	if ta == TYPE_ARRAY:
+		var aa: Array = a
+		var ab: Array = b
+		if aa.size() != ab.size():
+			return false
+		for i in aa.size():
+			if not states_equal(aa[i], ab[i]):
+				return false
+		return true
+	return a == b
+
+
+## RESET-TO-NEUTRAL: branch a `neutral_state` node directly off the ROOT, then make it
+## current. IDEMPOTENT — if the root already has a child whose state equals `neutral_state`,
+## that existing child is REUSED (current jumps to it) rather than creating a duplicate
+## empty branch. So clicking reset repeatedly yields exactly ONE neutral branch from root.
+## Returns the neutral node's id. Honors the no-op hygiene guard too: if current is already
+## the matching neutral child, nothing changes.
+func reset_to(neutral_state: Variant, label: String = "reset to neutral") -> int:
+	var rid := root_id()
+	if rid < 0:
+		return _current_id
+	# Reuse an existing neutral child of the root if present (idempotent).
+	for cid in (_nodes[rid] as Dictionary)["children_ids"]:
+		if states_equal((_nodes[int(cid)] as Dictionary)["state"], neutral_state):
+			jump_to(int(cid))
+			return int(cid)
+	# None yet: branch from the root, then commit the neutral state as its child.
+	_current_id = rid
+	return commit(neutral_state, label)
 
 
 ## Move current -> parent. No-op at the root.
@@ -170,6 +225,85 @@ func can_undo() -> bool:
 
 func can_redo() -> bool:
 	return _current_id >= 0 and not ((_nodes[_current_id] as Dictionary)["children_ids"] as Array).is_empty()
+
+
+## The linear path of node ids from the ROOT down to the current node (inclusive),
+## ordered root-first. This is the spine the ChatGPT-style branch nav renders top to
+## bottom — no indentation, no diagonal. Empty if there is no root.
+func path_to_current() -> Array:
+	var out: Array = []
+	var cur: int = _current_id
+	while cur >= 0 and _nodes.has(cur):
+		out.append(cur)
+		cur = int((_nodes[cur] as Dictionary)["parent_id"])
+	out.reverse()
+	return out
+
+
+## The child-branch index of `id` among its parent's children, and the sibling count,
+## as { index, count }. Children are ordered ASCENDING by id (the deterministic display
+## order). The root (no parent) reports { index: 0, count: 1 }. Unknown id -> { index: -1, count: 0 }.
+func sibling_index(id: int) -> Dictionary:
+	if not _nodes.has(id):
+		return {"index": -1, "count": 0}
+	var pid: int = int((_nodes[id] as Dictionary)["parent_id"])
+	if pid < 0:
+		return {"index": 0, "count": 1}
+	var kids: Array = (_nodes[pid] as Dictionary)["children_ids"]
+	var sorted := kids.duplicate()
+	sorted.sort()
+	return {"index": sorted.find(id), "count": sorted.size()}
+
+
+## True if `id` is a JUNCTION — a node with more than one child, where the linear nav
+## must offer a `‹ i/n ›` branch selector to choose which child to follow.
+func is_junction(id: int) -> bool:
+	return _nodes.has(id) and ((_nodes[id] as Dictionary)["children_ids"] as Array).size() > 1
+
+
+## The child of `id` at sibling display-index `child_index` (ascending-id order), or -1
+## if out of range / unknown. Used by the branch selector arrows.
+func child_at(id: int, child_index: int) -> int:
+	if not _nodes.has(id):
+		return -1
+	var kids: Array = (_nodes[id] as Dictionary)["children_ids"]
+	if child_index < 0 or child_index >= kids.size():
+		return -1
+	var sorted := kids.duplicate()
+	sorted.sort()
+	return int(sorted[child_index])
+
+
+## Follow the preferred-child chain from `id` down to a leaf, returning the leaf id.
+## (preferred_child, falling back to the last child.) Used so SWITCHING a junction's
+## branch lands current on a concrete descendant, not the junction itself.
+func leaf_following_preferred(id: int) -> int:
+	if not _nodes.has(id):
+		return id
+	var cur: int = id
+	var node: Dictionary = _nodes[cur]
+	var kids: Array = node["children_ids"]
+	while not kids.is_empty():
+		var pref: int = int(node["preferred_child"])
+		if pref < 0 or not _nodes.has(pref) or not (kids as Array).has(pref):
+			pref = int(kids[kids.size() - 1])
+		cur = pref
+		node = _nodes[cur]
+		kids = node["children_ids"]
+	return cur
+
+
+## Switch the branch followed FROM junction `junction_id` to its child at display-index
+## `child_index`, then jump current onto that child's preferred-child leaf. This is the
+## branch-nav arrow action: pick a sibling branch and follow it to its tip. Returns the
+## new current id, or -1 on a bad index / unknown node.
+func switch_branch(junction_id: int, child_index: int) -> int:
+	var child := child_at(junction_id, child_index)
+	if child < 0:
+		return -1
+	var leaf := leaf_following_preferred(child)
+	jump_to(leaf)
+	return _current_id
 
 
 ## A flat structure snapshot for the UI: an ordered list of

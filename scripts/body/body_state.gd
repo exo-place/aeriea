@@ -134,6 +134,21 @@ const MIN_AGE_YEARS := 1.0
 const MID_AGE_YEARS := 25.0
 const MAX_AGE_YEARS := 90.0
 
+## The STATURE-GROWTH completion age in YEARS (age→stature realism, 2026-06 fix).
+## Real humans reach ~full adult stature by ~16–18, not 25; but MakeHuman's young
+## anchor (macro 0.5 = 25yr) is the full-adult-size geometry, and its child anchor
+## (10yr) is physically shorter, so the verbatim macro blend grows stature linearly
+## all the way to 25 (a measured 1.31 m @10yr → 1.68 m @25yr at fixed height_cm).
+##
+## The fix REMAPS only the morphological age that drives the baby/child/young ANCHOR
+## blend (`_stature_age_macro` → `_age_vals`), so the `young` (full-stature) anchor is
+## reached by STATURE_ADULT_AGE and held flat from there to 25. The PUBLIC `age_years`,
+## the verbatim `age_macro()` / `age_years_to_macro()` MakeHuman map, and the `>= 18`
+## gate are ALL untouched — this changes the stature-vs-age CURVE only, not the axis,
+## the conversion, or the gate. The remap is continuous (no discontinuity at 18) and
+## leaves the old-aging segment (≥25yr) exactly the verbatim MakeHuman path.
+const STATURE_ADULT_AGE := 17.0
+
 ## The Layer-1 adult-body-state threshold in YEARS (body-parameterization.md §5).
 ## `is_adult_body()` is true iff `age_years >= ADULT_AGE_YEARS`. 18.0 is the exact,
 ## documented legal age of majority in the overwhelming majority of jurisdictions
@@ -220,9 +235,44 @@ func _gender_vals() -> Dictionary:
 	var g := clampf(masculinity / 100.0, 0.0, 1.0)
 	return {"male": g, "female": 1.0 - g}
 
-## Age anchor vals: the verbatim _setAgeVals piecewise map over baby/child/young/old.
+## The MORPHOLOGICAL age macro that drives the baby/child/young/old ANCHOR blend
+## (age→stature realism fix). It is the verbatim MakeHuman age macro EXCEPT the
+## child→young GROWTH segment is compressed so full young-adult stature is reached by
+## STATURE_ADULT_AGE (~17yr) instead of 25yr — matching real human growth, which is
+## ~complete by 16–18. Pure, deterministic, continuous:
+##
+##   age_years <= STATURE_ADULT_AGE : real age in [1, STATURE_ADULT_AGE] maps LINEARLY
+##       onto morph-years [1, 25], so the baby/child/young anchors still pass through
+##       sensible child sizes below 17 (a 10yr is still clearly child-sized) but the
+##       `young` (full-stature) anchor is reached AT ~17.
+##   STATURE_ADULT_AGE <= age_years <= 25 : morph-years held FLAT at 25 (young = 1.0),
+##       so stature plateaus from ~17 through young adulthood — no growth in this band.
+##   age_years >= 25 : IDENTITY (morph-years == real age), so the old-aging segment is
+##       the verbatim MakeHuman path, unchanged.
+##
+## Continuity: at 17 → morph 25 (young=1); 17→25 stays morph 25 (flat); at 25 the
+## flat band meets the identity segment at the same value — continuous, no notch at
+## the 18yr gate. Only the ANCHOR blend reads this; `age_macro()` (the documented
+## MakeHuman conversion the gate test pins) is untouched.
+func _stature_age_macro() -> float:
+	var y := clampf(age_years, MIN_AGE_YEARS, MAX_AGE_YEARS)
+	if y >= MID_AGE_YEARS:
+		return age_years_to_macro(y)           # ≥25: verbatim (old-aging segment intact)
+	var morph_years: float
+	if y <= STATURE_ADULT_AGE:
+		# [1, STATURE_ADULT_AGE] → [1, 25] linearly: growth completes at ~17.
+		var f := (y - MIN_AGE_YEARS) / (STATURE_ADULT_AGE - MIN_AGE_YEARS)
+		morph_years = MIN_AGE_YEARS + f * (MID_AGE_YEARS - MIN_AGE_YEARS)
+	else:
+		morph_years = MID_AGE_YEARS            # [17, 25]: flat at full young-adult stature
+	return age_years_to_macro(morph_years)
+
+## Age anchor vals: the verbatim _setAgeVals piecewise map over baby/child/young/old,
+## fed by the STATURE-REMAPPED morph macro (`_stature_age_macro`) so full adult stature
+## is reached by ~17yr, not 25 (age→stature realism fix). The piecewise split itself is
+## the verbatim MakeHuman _setAgeVals; only its INPUT macro is the growth-remapped one.
 func _age_vals() -> Dictionary:
-	var a := age_macro()
+	var a := _stature_age_macro()
 	var baby := 0.0; var child := 0.0; var young := 0.0; var old := 0.0
 	if a < 0.5:
 		old = 0.0

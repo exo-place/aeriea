@@ -34,6 +34,7 @@ var _fail := 0
 func _ready() -> void:
 	print("\n=== aeriea body SLICE 2 — BodyState + Layer-1 NSFW gate ===\n")
 	_test_bodystate_drives_morphs()
+	_test_stature_reaches_adult_by_17()
 	_test_is_adult_body_predicate()
 	_test_gate_holds_at_guard_layer(false)  # interpreter
 	_test_gate_holds_at_guard_layer(true)   # compiled
@@ -137,6 +138,64 @@ func _test_bodystate_drives_morphs() -> void:
 
 
 # ---------------------------------------------------------------------------
+# (a2) AGE → STATURE REALISM (2026-06 fix). The body's overall SIZE must reach
+# full adult stature by ~17 and stay flat through adulthood — NOT keep growing to
+# 25 (the old verbatim-macro behavior, which a real 18yr would render ~10% short).
+# We measure the morph-only vertical extent (bbox height) at FIXED height_cm across
+# ages and assert: 18 ≈ 25 (plateau, the regression that FAILS under grow-to-25),
+# 16–17 is full-ish adult stature, and 10 is still clearly child-sized.
+# ---------------------------------------------------------------------------
+
+## Morph-only vertical extent (metres) of the body mesh at `age`, height_cm held at
+## the neutral base so we isolate what the AGE MORPH does to overall stature.
+func _morph_extent_at_age(mesh: ArrayMesh, age: float) -> float:
+	var mi := MeshInstance3D.new()
+	mi.mesh = (mesh.duplicate(true) as ArrayMesh)
+	add_child(mi)
+	var bs := BodyState.new()
+	bs.age_years = age
+	bs.height_cm = BodyState.DEFAULT_HEIGHT_CM
+	bs.apply_morph_cpu(mi)
+	var verts: PackedVector3Array = (mi.mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	var mn := INF; var mx := -INF
+	for v in verts:
+		mn = minf(mn, v.y); mx = maxf(mx, v.y)
+	mi.queue_free()
+	return mx - mn
+
+func _test_stature_reaches_adult_by_17() -> void:
+	print("--- (a2) age → stature realism: full adult height by ~17, flat to adulthood ---")
+	var mesh: ArrayMesh = load(MESH_PATH)
+	if mesh == null:
+		return
+	var h10 := _morph_extent_at_age(mesh, 10.0)
+	var h16 := _morph_extent_at_age(mesh, 16.0)
+	var h17 := _morph_extent_at_age(mesh, 17.0)
+	var h18 := _morph_extent_at_age(mesh, 18.0)
+	var h21 := _morph_extent_at_age(mesh, 21.0)
+	var h25 := _morph_extent_at_age(mesh, 25.0)
+
+	# PLATEAU — the load-bearing assertion. Stature at 18 must equal stature at 25
+	# within tolerance. Under the OLD grow-to-25 curve h18 was ~1.506 m vs h25 ~1.676 m
+	# (a 10% gap) — this assertion FAILS there, PASSES now.
+	_assert("stature plateaus: morph extent at 18yr ≈ 25yr (full adult by ~17, not 25)",
+		absf(h18 - h25) < 0.01,
+		"h18=%.4f m  h25=%.4f m  (gap=%.4f)" % [h18, h25, absf(h18 - h25)])
+	_assert("stature flat across young-adult band: 17 ≈ 18 ≈ 21 ≈ 25",
+		absf(h17 - h25) < 0.01 and absf(h21 - h25) < 0.01,
+		"h17=%.4f h21=%.4f h25=%.4f" % [h17, h21, h25])
+	# 16yr is a near-full-stature older teen (>=95% of adult), not a giant child / shrunk adult.
+	_assert("16yr is near-full adult stature (older-teen, >=95% of 25yr extent)",
+		h16 >= 0.95 * h25 and h16 <= h25 + 1e-3,
+		"h16=%.4f m  (%.1f%% of h25=%.4f)" % [h16, 100.0 * h16 / h25, h25])
+	# 10yr is STILL clearly child-sized — a regression guard the other way: the fix must
+	# not flatten the whole growth curve into adults. <90% of adult extent at 10yr.
+	_assert("10yr stays clearly child-sized (< 90% of adult extent — child range preserved)",
+		h10 < 0.90 * h25 and h10 > 0.5 * h25,
+		"h10=%.4f m  (%.1f%% of h25=%.4f)" % [h10, 100.0 * h10 / h25, h25])
+
+
+# ---------------------------------------------------------------------------
 # (b) is_adult_body predicate over the continuous age axis.
 # ---------------------------------------------------------------------------
 
@@ -171,14 +230,22 @@ func _test_is_adult_body_predicate() -> void:
 	# distinct) blendshape projection for ordinary NPC use — the gate is a predicate
 	# OVER the axis, not a notch cut into it.
 	var child := BodyState.new()
-	child.age_years = 10.0  # the child anchor (macro 0.1875 -> childVal ~1.0)
+	child.age_years = 10.0  # a 10yr — clearly child-range body-state
 	var cw := child.to_blend_weights()
-	# At the child anchor the universal '-child-' average-build anchor carries full weight
-	# (× femaleVal 0.5) and no adult anchor does; the morph is uncrippled and renders.
+	# The morph is uncrippled and renders: the '-child-' average-build anchor carries the
+	# DOMINANT weight (× femaleVal 0.5) and no adult anchor does. After the age→stature fix
+	# the child anchor is no longer pinned to exactly 0.5 at 10yr (the growth segment is
+	# compressed so full stature is reached by ~17 — see _stature_age_macro); a 10yr now
+	# blends slightly toward the young anchor (morph-age ~14.5), but stays clearly child-
+	# dominant and well below adult. Assert child DOMINATES and stays uncrippled, not a pin.
 	var child_anchor := "macrodetails/universal-female-child-averagemuscle-averageweight.target"
-	_assert("age axis stays continuous/complete: child morph still renders (child anchor weighted ~0.5, not crippled)",
-		absf(float(cw.get(child_anchor, 0.0)) - 0.5) < 1e-3 and not child.is_adult_body(),
-		"child_anchor=%.3f is_adult=%s" % [float(cw.get(child_anchor, 0.0)), str(child.is_adult_body())])
+	var young_anchor10 := "macrodetails/universal-female-young-averagemuscle-averageweight.target"
+	_assert("age axis stays continuous/complete: child morph still renders, child anchor dominant (not crippled)",
+		float(cw.get(child_anchor, 0.0)) > 0.25
+		and float(cw.get(child_anchor, 0.0)) > float(cw.get(young_anchor10, 0.0))
+		and not child.is_adult_body(),
+		"child_anchor=%.3f young_anchor=%.3f is_adult=%s" % [
+			float(cw.get(child_anchor, 0.0)), float(cw.get(young_anchor10, 0.0)), str(child.is_adult_body())])
 
 
 # ---------------------------------------------------------------------------

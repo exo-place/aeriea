@@ -117,6 +117,7 @@
           ] },
           "to": "VAULT",
           "priority": 70,
+          "legend": { "label": "Vault / Mantle", "trigger": "approach a ledge with speed" },
           "do": [ { "do": "set_var", "name": "vault", "value": "vault_duration" } ]
         },
         {
@@ -127,6 +128,7 @@
           ] },
           "to": "SLIDE",
           "priority": 60,
+          "legend": { "label": "Slide", "trigger": "Crouch while moving fast" },
           "do": [
             { "do": "add_velocity", "space": "velocity", "vector": "slide_boost" },
             { "do": "clamp_speed_h", "max": "max_slide_speed" },
@@ -230,6 +232,7 @@
           ] },
           "to": "WALL_RUN",
           "priority": 70,
+          "legend": { "label": "Wall-run", "trigger": "run fast alongside a wall" },
           "do": [
             { "do": "set_velocity_y_max", "value": "wall_run_vertical_boost" },
             { "do": "set_var", "name": "wall_run", "value": "wall_run_max_time" }
@@ -432,6 +435,7 @@
           "when": { "op": "input_buffered", "action": "jump" },
           "to": "AIR",
           "priority": 90,
+          "legend": { "label": "Wall-jump", "trigger": "Jump while wall-running" },
           "do": [
             { "do": "add_velocity", "space": "wall_normal", "vector": "wall_jump_lateral", "replace": true },
             { "do": "set_velocity_y", "value": "wall_jump_up" },

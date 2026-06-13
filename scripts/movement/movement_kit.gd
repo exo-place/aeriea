@@ -59,6 +59,14 @@ class Transition:
 	var priority: int = 0
 	var reenter: bool = false
 	var do_effects: Array = []  # Array[Dictionary]
+	## Optional controls-legend metadata (DATA; closed shape). When present, this
+	## transition surfaces in the projected controls legend; empty = not shown.
+	## Shape: { label: String, trigger: String, input?: String }. `input` (an
+	## action name) marks the verb as input-bound — the legend shows that action's
+	## live binding; absent = automatic/contextual — the legend shows `trigger`.
+	## The kit stays the single source of truth: adding a verb with a `legend`
+	## block surfaces it in the legend automatically (projection-from-one-def).
+	var legend: Dictionary = {}
 
 class MovementState:
 	extends RefCounted
@@ -383,7 +391,98 @@ func _load_transition(raw: Variant, state_name: String) -> Transition:
 	tr.priority = int(raw.get("priority", 0))
 	tr.reenter = bool(raw.get("reenter", false))
 	tr.do_effects = _load_effects(raw.get("do", []), "state '%s' transition.do" % state_name)
+	tr.legend = _load_legend(raw.get("legend", null), state_name, tr.when_cond)
 	return tr
+
+## Load + validate the optional controls-legend metadata (closed shape). Returns
+## {} when absent. An `input` (if present) must name a condition action reachable
+## from this transition's guard — so the legend's binding display can never drift
+## from the actual input that fires the verb.
+func _load_legend(raw: Variant, state_name: String, guard: Dictionary = {}) -> Dictionary:
+	if raw == null:
+		return {}
+	if typeof(raw) != TYPE_DICTIONARY:
+		_err("state '%s' transition.legend must be an object { label, trigger, input? }" % state_name)
+		return {}
+	var out: Dictionary = {}
+	if str(raw.get("label", "")) == "":
+		_err("state '%s' transition.legend needs a non-empty 'label'" % state_name)
+	else:
+		out["label"] = str(raw["label"])
+	if str(raw.get("trigger", "")) == "":
+		_err("state '%s' transition.legend needs a non-empty 'trigger'" % state_name)
+	else:
+		out["trigger"] = str(raw["trigger"])
+	if raw.has("input"):
+		var act := str(raw["input"])
+		if act == "":
+			_err("state '%s' transition.legend 'input' must be a non-empty action name" % state_name)
+		elif not _guard_references_input(guard, act):
+			# Anti-drift: a legend that claims to be bound to action X must actually
+			# be fired by an input_pressed/input_buffered(X) condition in its guard.
+			_err("state '%s' transition.legend 'input' is '%s' but the guard has no input_pressed/input_buffered('%s')" % [state_name, act, act])
+		else:
+			out["input"] = act
+	# Reject unknown keys (closed shape).
+	for k in raw:
+		if not ["label", "trigger", "input"].has(str(k)):
+			_err("state '%s' transition.legend has unknown key '%s' (allowed: label, trigger, input)" % [state_name, str(k)])
+	return out
+
+## True if `action` appears in an input_pressed/input_buffered condition anywhere
+## in the (possibly nested all/any/not) guard tree.
+func _guard_references_input(cond: Variant, action: String) -> bool:
+	if typeof(cond) != TYPE_DICTIONARY:
+		return false
+	var op := str(cond.get("op", ""))
+	if op == "input_pressed" or op == "input_buffered":
+		return str(cond.get("action", "")) == action
+	if op == "all" or op == "any" or op == "not":
+		var of: Variant = cond.get("of", [])
+		if typeof(of) == TYPE_ARRAY:
+			for sub: Variant in of:
+				if _guard_references_input(sub, action):
+					return true
+	return false
+
+# ---------------------------------------------------------------------------
+# Controls-legend projection (projection-from-one-definition).
+#
+# The legend is DERIVED from the loaded kit, never re-listed in code. Every
+# transition that carries `legend` metadata becomes one entry, in state_order
+# then priority-desc order (deterministic, matches transition evaluation order).
+# Input-bound entries (legend.input present) are marked so the renderer shows the
+# live binding for that action; the rest are automatic/contextual and show their
+# `trigger` hint. Adding a verb with a legend block to the kit surfaces it here
+# automatically — there is no parallel hardcoded list to keep in sync.
+# ---------------------------------------------------------------------------
+
+## Project the controls legend from the loaded kit. Returns an ordered
+## Array[Dictionary]; each entry: { label, trigger, input_bound: bool, action? }.
+## `action` is present iff input_bound is true (the rebindable action name).
+func legend_entries() -> Array:
+	var out: Array = []
+	var seen_labels: Dictionary = {}
+	for sname in state_order:
+		var st: MovementState = states[sname]
+		for tr: Transition in st.transitions:
+			if tr.legend.is_empty():
+				continue
+			var label := str(tr.legend.get("label", ""))
+			# Same verb may fire from several states (e.g. vault from GROUND and AIR);
+			# list each label once, first occurrence in state/priority order.
+			if seen_labels.has(label):
+				continue
+			seen_labels[label] = true
+			var entry: Dictionary = {
+				"label": str(tr.legend.get("label", "")),
+				"trigger": str(tr.legend.get("trigger", "")),
+				"input_bound": tr.legend.has("input"),
+			}
+			if tr.legend.has("input"):
+				entry["action"] = str(tr.legend["input"])
+			out.append(entry)
+	return out
 
 func _load_effects(raw: Variant, ctx: String) -> Array:
 	var out: Array = []

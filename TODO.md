@@ -1,5 +1,21 @@
 # TODO
 
+## Open threads
+
+> *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
+1. **PIVOT — text-based systemic gameplay (the live direction).** Goal: gameplay that beats Lilith's Throne / Trials in Tainted Space by out-systeming their handwritten content depth — i.e. systemic/generative depth, not authored scenes. This directly targets the reference-analysis critique that those games feel "grindy/samey, grinding for grinding's sake." Framing is GAMEPLAY-SYSTEMS-FIRST, explicitly NOT "a dialogue system / NPC mind." Lives in the new Text Sandbox mode: `scenes/text_sandbox.tscn` + `scripts/text_sandbox.gd` (launcher mode 3), currently a STUB (transcript + input that echoes — placeholder, marked in-code as the entrypoint for this work). Relevant carried-forward design docs to (re-)read: `docs/decisions/reference-analysis.md`, `semantic-layer.md`, `npc-mind-and-language.md`, `affordance-substrate.md`, `throughlines.md`. Open question / fork: where this builds ON the affordance/interaction substrate (designed in `affordance-substrate.md` but still prototype-only in `scripts/interaction/` — likely foundational here) vs. needing new systems; and what "systemic depth" concretely means as mechanics (this is the design work to do).
+
+2. **Affordance/interaction substrate is designed but not lifted to data yet** — only the hand-wired prototype exists (`scripts/interaction/`), unlike the movement substrate which is now fully data-driven. If the pivot leans on affordances, this substrate likely needs the same interpreter+compiler+golden-trace lift the movement one got. Relevant: `docs/decisions/affordance-substrate.md`.
+
+3. **Movement substrate fenced follow-ups (recorded, deferred).** Documented in `docs/decisions/movement-substrate.md`: (E) explicit movement STATE SCHEMA declaration for parity with the interaction substrate's typed slots (the `wall_side` camera-roll shim currently reads an ad-hoc field); (F) world-capture-as-EFFECT so `ledge_vaultable` becomes a pure predicate. Both deferred as more invasive, not load-bearing for current verbs. Pick up if/when movement work resumes.
+
+4. **Character-creator "tool vs feature" ceiling.** The morph/body substrate is complete and works as a TOOL. Making it a polished player-facing FEATURE is a separate, longer MATERIALS/SHADING/HAIR track, mostly art/rendering not algorithms: skin needs SSS + detail-normal/albedo/roughness texture maps (currently flat `StandardMaterial3D` — the main "game mannequin vs person" gap); no hair system (eyebrows/eyelashes are authored ribbons); MakeHuman base-mesh face quality is a dated ceiling; eyes lack cornea normal/bump. Only invest if the creator becomes a real pillar.
+
+5. **Minor body residuals (low priority).** Procedural eye pupil sits slightly off-center (fixed +Z gaze-axis artifact — a true per-eye gaze direction would fix it); eye-param creator sliders not yet exposed (`params` + `BodyRig.set_eye_params` exist); the age→stature curve's anchor stature-fractions are calibration constants measured on the current `base_body.res` (re-measure via `tools/age_sweep_render` if the base mesh is ever re-imported).
+
+Note: the body / movement / character-creator track is DONE (see git) — carried here as context, not to be re-dug.
+
 ## Immediate
 
 - Open `project.godot` in Godot 4.x editor; verify it loads.

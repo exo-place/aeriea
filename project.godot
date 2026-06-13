@@ -18,10 +18,6 @@ config/name="aeriea"
 config/description="A place to be — embodied modern-life sandbox built around 100% immersion"
 config/version="0.1.0"
 config/tags=PackedStringArray("sandbox", "immersive", "modern-life")
-; The launcher is the main scene: a persistent shell with a top bar of mode tabs
-; that swaps one mode scene at a time — Character Creator (3rd-person body viewer/
-; editor), Parkour Sandbox (res://scenes/test_level.tscn), and Text Sandbox. Each
-; mode scene remains standalone-runnable; see scripts/launcher.gd.
 run/main_scene="res://scenes/launcher.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"

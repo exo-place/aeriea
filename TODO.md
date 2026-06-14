@@ -252,6 +252,22 @@ change, reviewed against "collapse asymmetries to primitives.")
 
 ## NPC mind + dialogue + language (R&D pillar)
 
+- **ACTIVE PILLAR — deterministic prose-generation engine** (the text-systemic
+  pivot, resolved into a doc): see **`docs/decisions/prose-generation.md`**. The
+  pivot to text-based systemic gameplay is now a concrete design direction for
+  the prose-OUTPUT engine (systemic state + communicative intent → prose). The
+  superiority target is a **four-way product — faithfulness × quality ×
+  determinism × freshness**: neither rival hits all four (handwritten loses on
+  coverage at the combinatorial edges; LLM loses on ground-truth + determinism),
+  so aeriea wins by rendering the sim's full true state with build-time-corpus
+  quality phrasing, deterministically, and non-repeatingly — no hot-loop LLM. It
+  **deepens the open NLG side** of `npc-mind-and-language.md` (its generator's
+  concrete approach / realization grammar / build-time-learned components) and
+  does not contradict the spine. Open: realization-grammar formalism;
+  trained-vs-rule split; corpus + training strategy; eval methodology;
+  semantic-graph query API; salience/novelty function. INPUT (the affordance
+  substrate) stays out of scope — this is the OUTPUT half.
+
 - **NPC mind, dialogue, and language generation** — R&D pillar (not a
   frozen spec): see **`docs/decisions/npc-mind-and-language.md`**. Two
   demands: (1) a real cognitive/personality brain (memory, beliefs,

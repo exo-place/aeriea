@@ -137,7 +137,11 @@ depth the substrate holds, faithfully and at high quality; it **cannot create
 depth the substrate lacks** — and the doc's own central invariant proves it.
 
 **This is forced by faithfulness (zero confabulation).** The realizer may assert
-only what is true of the model's state. Depth that the simulated brain does not
+only what is true of the model's state — which, under the constrain-then-generate
+substrate (`simulation-depth-and-materialization.md`), means only what is
+**consistent with all commitments / entailed by `G`**, the realizer being a
+consumer that *queries* that substrate rather than reading a stored snapshot.
+Depth that the simulated brain does not
 actually hold — interiority, contradiction, history, a textured relationship the
 model never recorded — is, if rendered anyway, *invented* interiority: that is
 **confabulation**, which faithfulness flatly forbids. So the realizer is allowed
@@ -182,7 +186,13 @@ the eval harness checks (see *Generator architecture → 5*).
   confabulation**. *Measured:* assert→state-fact provenance check. Every rendered
   claim must trace to a state proposition that was true at render time; any clause
   with no backing proposition is a faithfulness failure. This is the axis the LLM
-  structurally fails.
+  structurally fails. *Under the constrain-then-generate substrate
+  (`simulation-depth-and-materialization.md`), "true of the state" means
+  **consistent with all commitments / entailed by `G`** — not true of a
+  pre-stored state snapshot; there is no stored snapshot, only the generator `G`
+  and the accumulated constraint set. The realizer is a **consumer that queries
+  `G`**: rendering the foveal slice is a query, and a faithful clause is one `G`
+  entails under the current constraints.*
 
 - **Specificity** — the prose renders the *actual rich state* (the specific body /
   fluid / arousal / position / relationship facts), not a generic fallback.
@@ -671,6 +681,12 @@ These are unsolved. The architecture is a *direction*, not an implementation.
   world's semantic richness upper-bounds how rich the prose about the world can
   faithfully be; a thin world renders thin no matter how good the realizer. → *It
   is the layer under the others*, *Semantic LOD*.
+- `docs/decisions/simulation-depth-and-materialization.md` — **the substrate the
+  realizer queries, and the model of "true of state."** The realizer is a consumer
+  that queries the generator `G`; faithfulness = consistency-with-commitments /
+  what `G` entails, not truth of a stored snapshot. *Depth is upstream* reads from
+  the substrate side here: prose depth = the richness of `G`'s answers, which the
+  realizer renders and can never exceed.
 - `docs/decisions/affordance-substrate.md` — **the INPUT half, out of scope here.**
   The composable social/physical verbs are the player's input vocabulary; this
   doc is the OUTPUT/NLG half that renders the resulting systemic state.

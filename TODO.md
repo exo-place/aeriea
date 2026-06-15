@@ -268,41 +268,53 @@ change, reviewed against "collapse asymmetries to primitives.")
   semantic-graph query API; salience/novelty function. INPUT (the affordance
   substrate) stays out of scope — this is the OUTPUT half.
 
-- **SUBSTRATE-ARCHITECTURE PILLAR — deep, causal, bounded simulation; the
-  lazy-materialization "resolution" CORRECTED** (open problem, not resolved): see
+- **SUBSTRATE-ARCHITECTURE PILLAR — constrain-then-generate (target &
+  architecture DECIDED; the generator crux is the open core)**: see
   **`docs/decisions/simulation-depth-and-materialization.md`**. Depth is
   **upstream** of the prose realizer — prose depth is upper-bounded by simulation
   depth, so "beats handwritten" reduces to an unreasonably deep, self-consistent
-  character + world sim. That collides with a two-horned tension: causality
-  forbids naive post-hoc refinement (inventing detail after the fact breaks replay
-  and is confabulation), but eager full fidelity is unbounded and prohibitive.
-  **CORRECTION (2026-06-15): deterministic lazy materialization does NOT resolve
-  this.** Referential transparency makes late computation *consistent*, never
-  *causal*: lazy is **sound-but-not-cheap** (every causally-live thunk is forced at
-  its causal moment = eager for the depth that actually drives behavior; saves cost
-  only on causally-inert facts) **OR cheap-but-lossy** (decisions run on coarse
-  stand-ins = generating the committed timeline from lossy state, which is exactly
-  the latent lossiness rejected for timeline generation) — **never both.** Hard
-  constraint (recorded as a decision): **the causal timeline must NOT be generated
-  from lossy state** — no coarse approx, compressed/learned latents, or lossy
-  projection standing in for an entangled cause. Valid "lazy" is narrow: only
-  **lossless deferral of a causally-DISJOINT subgraph + causally-INERT detail** no
-  decision reads — NOT coarse approximation of an entangled cause. Faithful-
-  coarsening LOD is legitimate for **describing/observing already-committed state**,
-  **illegitimate for generating the timeline**. The only lossless cost lever is
-  **reducing WHAT is simulated (the live/causal set), never the FIDELITY**. The
-  no-order invariant + latent/committed/crystallization machinery survive (for the
-  valid lazy scope), as does the strict-refinement-of-`seed + event log` framing.
-  It remains the **upstream dependency of the prose-generation pillar** (faithful
-  read on observation is settled; cost is not). **Open CRUX (un-cheated):** a deep
-  *living* world implies off-screen agency that entangles before observation =
-  full forward-fidelity cost lazy cannot dodge; how to get it at bounded cost
-  WITHOUT lossy-timeline generation is UNSOLVED (candidate directions —
-  causal-cone activation/dormant-until-entangled, bounded eager forward-sim of a
-  live population, time-coarse/event-driven forward sim committing full-fidelity
-  events — enumerated but UN-DECIDED, the lead's call). Secondary opens: constrained
-  deterministic refinement; stable fact-identity / canonical key namespace; the
-  commitment boundary; cost of coarse-everywhere; multiplayer commit ordering.
+  character + world. The literal goal "simulate a deep causal world" was the
+  **wrong frame**: eager forward-sim is infeasible (HHS+, seconds/tick) and lazy
+  materialization is **sound-but-not-cheap or cheap-but-lossy, never both**
+  (referential transparency buys consistency, never causality; the cheap-but-lossy
+  branch — coarse stand-ins *causing* committed events — is rejected). Reverse-
+  engineering the hard lines (no hot-loop LLM, faithfulness, determinism, depth,
+  causality, no lossy timeline, no eager sim) shows ONE **decided TARGET:
+  observer-indistinguishability** — a world that, to its only observer (the
+  player), is indistinguishable from a deep, living, fully-simulated one under
+  unbounded adversarial probing, at cost ∝ engagement, deterministically, never
+  committing a falsehood ("real" = real to the observer; chosen over "really
+  real"). **Decided ARCHITECTURE: constrain then generate.** Ground truth is a
+  pure function `G(seed, constraints, query) → answer` (not a process, not a
+  store); **constraints** = everything observed so far + its entailments;
+  **commit-on-observation** (an observed answer + entailments join the constraint
+  set, permanently binding); **pay per query**, never per world-tick (cost ∝
+  engagement). **Determinism:** constraint-set ⟵ `seed + action log`; `G` pure
+  over `(seed, constraint-set, query)`; replays bit-for-bit (cross-platform-float
+  caveat as peers). **Lossless** because causality runs BACKWARD as a constraint,
+  never forward as a computation: an NPC flinching at fire commits the TRUE fact
+  "flinches at fire" + entailment "a fire-consistent history exists" — NOT a
+  guessed history; the childhood, when queried, is generated CONSISTENT WITH that
+  entailment. Nothing approximate ever enters the record — **incomplete, never
+  wrong** (incompleteness ≠ lossiness). Remains the **upstream dependency of the
+  prose-generation pillar** (the realizer is a consumer that QUERIES `G`;
+  faithfulness = consistency-with-commitments / what `G` entails). **THE CENTRAL
+  OPEN CRUX:** deterministic, bounded-cost generation that satisfies an
+  unboundedly-growing global consistency constraint set. Sub-problems (OPEN):
+  **painting into a corner / satisfiability — the sharp one** (`G` cannot draw
+  greedily or it foreclosures a later consistent completion; needs
+  forward-checking-style draws preserving future satisfiability — CSP-under-
+  determinism over an arbitrary growing constraint set, the hard core); the
+  **constraint language** (what entailments an observation commits, at what
+  abstraction); **stable query / fact identity** (canonical keys independent of
+  access path); **the commitment boundary** (what counts as "observed"); **multi-
+  observer / multiplayer** (shared commit log + canonical constraint ordering
+  across concurrent clients); **per-query cost bound**. **PARKED (deferred /
+  out-of-scope):** the "really real" autonomous off-screen world (constrain-then-
+  generate gives up genuine off-screen autonomy — it reconstructs on encounter, no
+  player-facing loss), and the separable sim↔reality-membrane idea of in-game
+  state escaping onto the real desktop (e.g. real OS push notifications from
+  in-fiction events).
 
 - **NPC mind, dialogue, and language generation** — R&D pillar (not a
   frozen spec): see **`docs/decisions/npc-mind-and-language.md`**. Two

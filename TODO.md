@@ -268,30 +268,41 @@ change, reviewed against "collapse asymmetries to primitives.")
   semantic-graph query API; salience/novelty function. INPUT (the affordance
   substrate) stays out of scope — this is the OUTPUT half.
 
-- **SUBSTRATE-ARCHITECTURE PILLAR — deep, causal, bounded simulation via
-  deterministic lazy materialization** (resolved into a doc): see
+- **SUBSTRATE-ARCHITECTURE PILLAR — deep, causal, bounded simulation; the
+  lazy-materialization "resolution" CORRECTED** (open problem, not resolved): see
   **`docs/decisions/simulation-depth-and-materialization.md`**. Depth is
   **upstream** of the prose realizer — prose depth is upper-bounded by simulation
   depth, so "beats handwritten" reduces to an unreasonably deep, self-consistent
   character + world sim. That collides with a two-horned tension: causality
   forbids naive post-hoc refinement (inventing detail after the fact breaks replay
   and is confabulation), but eager full fidelity is unbounded and prohibitive.
-  **Resolved by deterministic lazy materialization:** separate when a fact is
-  *computed* from when it is causally *determined* — a latent fact is a **pure
-  function of `(seed, causally-prior event log, stable fact-identity)`**, so
-  materializing it on first observation *reads ground truth* (referential
-  transparency over the seeded timeline), not invents it. Latent (unforced thunk)
-  vs committed (crystallized into the event log, then binding); faithful-coarsening
-  LOD bounds cost (foveated, pay-for-foveal-slice, refinement constrained to never
-  contradict coarse commitments); **order/path-dependent fill is forbidden**
-  (else replay diverges, multiplayer desyncs, and it becomes real post-hoc
-  confabulation). It is a strict refinement of `seed + event log` determinism, same
-  cross-platform-float caveat. It is the **upstream dependency of the
-  prose-generation pillar** (the realizer is a downstream consumer; rendering the
-  foveal slice forces materialization). Open core: **constrained deterministic
-  refinement** (the crux — seeded draws that must satisfy the arbitrary accumulated
-  constraint set); stable fact-identity / canonical key namespace; the commitment
-  boundary; cost of coarse-everywhere; multiplayer commit ordering.
+  **CORRECTION (2026-06-15): deterministic lazy materialization does NOT resolve
+  this.** Referential transparency makes late computation *consistent*, never
+  *causal*: lazy is **sound-but-not-cheap** (every causally-live thunk is forced at
+  its causal moment = eager for the depth that actually drives behavior; saves cost
+  only on causally-inert facts) **OR cheap-but-lossy** (decisions run on coarse
+  stand-ins = generating the committed timeline from lossy state, which is exactly
+  the latent lossiness rejected for timeline generation) — **never both.** Hard
+  constraint (recorded as a decision): **the causal timeline must NOT be generated
+  from lossy state** — no coarse approx, compressed/learned latents, or lossy
+  projection standing in for an entangled cause. Valid "lazy" is narrow: only
+  **lossless deferral of a causally-DISJOINT subgraph + causally-INERT detail** no
+  decision reads — NOT coarse approximation of an entangled cause. Faithful-
+  coarsening LOD is legitimate for **describing/observing already-committed state**,
+  **illegitimate for generating the timeline**. The only lossless cost lever is
+  **reducing WHAT is simulated (the live/causal set), never the FIDELITY**. The
+  no-order invariant + latent/committed/crystallization machinery survive (for the
+  valid lazy scope), as does the strict-refinement-of-`seed + event log` framing.
+  It remains the **upstream dependency of the prose-generation pillar** (faithful
+  read on observation is settled; cost is not). **Open CRUX (un-cheated):** a deep
+  *living* world implies off-screen agency that entangles before observation =
+  full forward-fidelity cost lazy cannot dodge; how to get it at bounded cost
+  WITHOUT lossy-timeline generation is UNSOLVED (candidate directions —
+  causal-cone activation/dormant-until-entangled, bounded eager forward-sim of a
+  live population, time-coarse/event-driven forward sim committing full-fidelity
+  events — enumerated but UN-DECIDED, the lead's call). Secondary opens: constrained
+  deterministic refinement; stable fact-identity / canonical key namespace; the
+  commitment boundary; cost of coarse-everywhere; multiplayer commit ordering.
 
 - **NPC mind, dialogue, and language generation** — R&D pillar (not a
   frozen spec): see **`docs/decisions/npc-mind-and-language.md`**. Two

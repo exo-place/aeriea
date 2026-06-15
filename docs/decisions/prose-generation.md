@@ -104,6 +104,70 @@ combinatorial space). It does **not** claim recombination beats handwritten on
 not merely on coverage/volume — is exactly the moonshot, and it is marked as such
 throughout (see *Risks*).
 
+### The substrate-level cut (why the depth is real, not just phrased)
+
+Sharpening the four-way product's *quality* factor at the level that actually
+sets it: the three positions differ not in how well they *phrase* but in **what
+model the phrasing draws from**.
+
+- **Handwritten — the author holds a deep model but externalizes only a sliver.**
+  A skilled author carries a rich interior model of the character, but each
+  written scene externalizes only the fraction that scene reached, and no author
+  can cover the combinatorial state. The depth is real but thinly projected and
+  uncoverable.
+- **LLM — fluent but no grounded, persistent model.** Its apparent depth is
+  **confabulated**: invented per-generation from the context window, ungrounded
+  in any persistent truth, so it drifts and contradicts. Depth-shaped output, no
+  depth behind it.
+- **Aeriea — the depth is real because the sim holds it as ground truth.** The
+  brain and world hold a deep, persistent, self-consistent model, and the realizer
+  **surfaces it without inventing**. The depth pre-exists the prose; the realizer
+  renders it faithfully.
+
+This is the *quality* factor read at the substrate: aeriea's edge is not a better
+pen, it is a real model under the pen.
+
+---
+
+## Depth is upstream — the realizer renders depth, it does not manufacture it
+
+The single most load-bearing scope boundary of this doc: **prose depth is
+upper-bounded by simulation depth.** The realizer is a lens. It can render the
+depth the substrate holds, faithfully and at high quality; it **cannot create
+depth the substrate lacks** — and the doc's own central invariant proves it.
+
+**This is forced by faithfulness (zero confabulation).** The realizer may assert
+only what is true of the model's state. Depth that the simulated brain does not
+actually hold — interiority, contradiction, history, a textured relationship the
+model never recorded — is, if rendered anyway, *invented* interiority: that is
+**confabulation**, which faithfulness flatly forbids. So the realizer is allowed
+to surface only depth the model already holds. It follows directly that the
+realizer cannot be the *origin* of depth; it can only be its *conduit*.
+
+The corollary is unforgiving: a **two-dimensional character — a few personality
+traits plus some numbers** — cannot be rendered into deep, real-feeling prose
+**without lying.** Faithfully rendered, a caricature reads as a caricature; the
+only way to make thin state read deep is to assert beyond it, which is the one
+thing the realizer is forbidden to do. Depth that feels real is therefore the
+**dividend of an unreasonably deep, self-consistent simulated character and
+world** — memory, beliefs, contradictions, personal history, self-image,
+relationships with real texture, theory-of-mind, and a world of genuine semantic
+richness — *faithfully rendered.*
+
+So the seat of depth is **upstream of this doc entirely**:
+
+- the **simulated brain** — `npc-mind-and-language.md`'s *first* demand, the
+  cognitive / personality model (memory, beliefs, contradictions, history,
+  self-image, textured relationships, theory-of-mind); and
+- the **world** — `semantic-layer.md`'s genuine semantic richness.
+
+This is exactly the project's **"simulation underneath, rendering on top."** This
+doc is the rendering: the **faithful, high-quality lens**. It is **necessary and
+nowhere near sufficient.** The binding constraint on "beats handwritten" is the
+**brain and the world**, not the realizer — and that is a larger problem, sited
+upstream, that this doc *depends on* but does not solve (see *Risks*, *Open
+threads*).
+
 ---
 
 ## The prose quality bar
@@ -152,10 +216,17 @@ the eval harness checks (see *Generator architecture → 5*).
   (freshness), does a sentence carry **more than its literal propositions** —
   implication, subtext, layering, the telling detail that implies the whole,
   connotation, rhythm matched to content. This is what makes handwritten win *per
-  instance*; variety without it is shallow. It is the **weakest / least cleanly-
-  measurable axis**, and that is exactly where the moonshot lives — depth is the
-  sharpened core of the *quality* claim, not a solved sub-problem. *Measured*
-  (honestly, partially):
+  instance*; variety without it is shallow. **Read this axis correctly: it scores
+  how faithfully the realizer *surfaces* the depth the substrate already holds —
+  not depth the realizer manufactures.** Per *Depth is upstream*, the realizer
+  cannot create depth above the model's ceiling without confabulating; the
+  mechanisms below (and their metrics) raise the prose *toward* that ceiling and
+  guard against flattening the substrate's depth on the way out — they do not lift
+  the ceiling, which is set by model depth. It is the **weakest / least cleanly-
+  measurable axis**, and that is exactly where the (rendering-side) moonshot lives
+  — depth is the sharpened core of the *quality* claim, not a solved sub-problem,
+  and even fully solved it only realizes a deep substrate, never substitutes for a
+  shallow one. *Measured* (honestly, partially):
   - *Implication recovery* — the build-time judge attempts to recover source
     propositions from a rendered clause; depth shows when the judge recovers
     **more** than was literally stated (successful implication), rather than exactly
@@ -245,21 +316,26 @@ the same underlying act). The phrasing is *meaning about the world turned into
 words*, with that meaning drawn from the semantic layer (`semantic-layer.md` →
 "The NLG speaks from it").
 
-This is also where **depth is generated**, not merely scored — three mechanisms,
-each a handle on the otherwise-open formalism:
+This is also where the substrate's depth is **faithfully surfaced** — not
+manufactured (per *Depth is upstream*): three mechanisms, each a handle on the
+otherwise-open formalism, each a way of rendering depth the model already holds
+without flattening it on the way to the page:
 
 - **Multi-proposition fusion.** Compose several typed propositions into a *single*
   clause / image that carries them simultaneously, rather than
   one-proposition-one-clause concatenation. This is what drives the *fusion ratio*
-  above off the flat 1:1 floor: one image doing the work of several facts.
+  above off the flat 1:1 floor: one image doing the work of several facts the
+  model holds.
 - **Subtext from the literal-vs-stance gap.** The intent tuple already separates
-  propositional content from stance/affect (per `npc-mind-and-language.md`). Depth
-  = rendering the **gap**: say *less* or *other* than the literal content while
-  letting stance **leak through connotation** (the prevalence-weighted lexical
-  choice already specified in the semantic→NLG interface — connotation = pulling
-  toward marked / atypical word choice under affect) and through **omission**.
-  This is irony, restraint, indirection — the said and the meant pulled apart on
-  purpose.
+  propositional content from stance/affect (per `npc-mind-and-language.md`). The
+  subtext here is **rendered, not invented** — both the literal content and the
+  stance it diverges from are facts the brain holds; depth = rendering the **gap**
+  between them: say *less* or *other* than the literal content while letting stance
+  **leak through connotation** (the prevalence-weighted lexical choice already
+  specified in the semantic→NLG interface — connotation = pulling toward marked /
+  atypical word choice under affect) and through **omission**. This is irony,
+  restraint, indirection — the said and the meant pulled apart on purpose, *both
+  ends supplied by the model.*
 - **Rhetorical relations in the grammar formalism.** Compose propositions with
   **RST-style rhetorical relations** (concession, cause, contrast, elaboration),
   not flat conjunction — which is precisely the *rhetorical-relation richness*
@@ -304,7 +380,7 @@ Crucially, the seed must branch **upstream**, at the **salience / rhetorical-
 structure layer** — which telling detail to foreground, which rhetorical relation
 to use, which subtext to leave unsaid, which propositions to fuse — so equivalent
 realizations differ in *what* and *how*, not merely in *word*. This connects the
-seeded variation to the depth-generation mechanisms already specified in the
+seeded variation to the depth-surfacing mechanisms already specified in the
 salience (stage 1) and grammar (stage 2) subsections: the branch point is the
 same telling-detail-salience / multi-proposition-fusion / rhetorical-relation
 machinery, now also seeded. **Lexical-only seeded variation is explicitly
@@ -515,11 +591,22 @@ This is the R&D frontier, **not claimed solved**. Honest risks:
   **core moonshot risk**: "beats handwritten on quality" lives or dies on depth —
   the one axis we can measure *least* well — and freshness in particular can read
   as quality while hiding depth's absence.
+- **The binding constraint is substrate depth, which is outside this doc's scope.**
+  Per *Depth is upstream*: the realizer's ceiling on "beats handwritten" is set by
+  the depth of the **brain** (`npc-mind-and-language.md`) and the **world**
+  (`semantic-layer.md`), not by the realizer. A shallow brain/world caps prose
+  quality no matter how good the realizer is — a perfect lens over a
+  two-dimensional character still renders a two-dimensional character, and the only
+  way past that is to confabulate, which faithfulness forbids. **The realizer
+  cannot rescue a shallow substrate.** This relocates the *real* moonshot upstream
+  of this doc, onto a larger problem this doc depends on but does not own.
 - **"Beats handwritten on quality" is the unproven moonshot.** Coverage/volume
   superiority follows from composition (`reference-analysis.md`). *Quality*
   superiority over a skilled human author does not follow from anything proven
   here. This is the frontier claim, and it is confronted as such — owned, not
-  designed away. Its sharpened core is the depth/nuance axis above.
+  designed away. Its sharpened core is the depth/nuance axis above — and even that
+  is the *rendering-side* half of the claim; its other, larger half is upstream
+  substrate depth (preceding risk).
 
 ---
 
@@ -551,6 +638,14 @@ This is the R&D frontier, **not claimed solved**. Honest risks:
   affect/register.
 - **The salience / novelty function** — how novelty, intensity, and intent-relevance
   are scored and combined within the per-tick LOD budget.
+- **The depth ceiling is set upstream — the substrate this doc depends on but does
+  not solve.** Per *Depth is upstream*, the upper bound on prose depth is the depth
+  of the **brain** (`npc-mind-and-language.md`) and the **world**
+  (`semantic-layer.md`). Achieving "unreasonably high" character / world fidelity —
+  a model with enough memory, belief, contradiction, history, self-image, textured
+  relationship, theory-of-mind, and semantic richness to *be worth* faithfully
+  rendering — is the upstream open problem this realizer **depends on**. It is the
+  real moonshot, and it lives outside this doc.
 
 These are unsolved. The architecture is a *direction*, not an implementation.
 
@@ -558,16 +653,24 @@ These are unsolved. The architecture is a *direction*, not an implementation.
 
 ## Cross-links
 
-- `docs/decisions/npc-mind-and-language.md` — **the spine.** This doc deepens its
-  open NLG side (its *Open threads* → "the generator's concrete approach … the
-  realization grammar … which components are build-time-learned"); it consumes the
-  spine's communicative-intent tuple and inherits its determinism line and its
-  permitted build-time-trained realizer. → *The spine*, *Determinism & the LLM
+- `docs/decisions/npc-mind-and-language.md` — **the spine, and the upstream seat of
+  depth this realizer is bounded by.** This doc deepens its open NLG side (its
+  *Open threads* → "the generator's concrete approach … the realization grammar …
+  which components are build-time-learned"); it consumes the spine's
+  communicative-intent tuple and inherits its determinism line and its permitted
+  build-time-trained realizer. **Dependency:** per *Depth is upstream*, the prose's
+  depth ceiling is set by the spine's *first* demand — the cognitive / personality
+  model (memory, beliefs, contradictions, history, self-image, textured
+  relationships, theory-of-mind). This realizer renders that model's depth; it
+  cannot exceed it without confabulating. → *The spine*, *Determinism & the LLM
   line*.
-- `docs/decisions/semantic-layer.md` — **what the NLG speaks from.** This doc
-  mechanizes the asserted seam: prevalence weights → typical phrasing, and
-  semantic LOD → utterance specificity (carrying the faithful-coarsening / no-
-  popping spine into prose). → *It is the layer under the others*, *Semantic LOD*.
+- `docs/decisions/semantic-layer.md` — **what the NLG speaks from, and the other
+  half of the depth ceiling.** This doc mechanizes the asserted seam: prevalence
+  weights → typical phrasing, and semantic LOD → utterance specificity (carrying
+  the faithful-coarsening / no-popping spine into prose). **Dependency:** the
+  world's semantic richness upper-bounds how rich the prose about the world can
+  faithfully be; a thin world renders thin no matter how good the realizer. → *It
+  is the layer under the others*, *Semantic LOD*.
 - `docs/decisions/affordance-substrate.md` — **the INPUT half, out of scope here.**
   The composable social/physical verbs are the player's input vocabulary; this
   doc is the OUTPUT/NLG half that renders the resulting systemic state.

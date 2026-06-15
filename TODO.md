@@ -268,6 +268,31 @@ change, reviewed against "collapse asymmetries to primitives.")
   semantic-graph query API; salience/novelty function. INPUT (the affordance
   substrate) stays out of scope — this is the OUTPUT half.
 
+- **SUBSTRATE-ARCHITECTURE PILLAR — deep, causal, bounded simulation via
+  deterministic lazy materialization** (resolved into a doc): see
+  **`docs/decisions/simulation-depth-and-materialization.md`**. Depth is
+  **upstream** of the prose realizer — prose depth is upper-bounded by simulation
+  depth, so "beats handwritten" reduces to an unreasonably deep, self-consistent
+  character + world sim. That collides with a two-horned tension: causality
+  forbids naive post-hoc refinement (inventing detail after the fact breaks replay
+  and is confabulation), but eager full fidelity is unbounded and prohibitive.
+  **Resolved by deterministic lazy materialization:** separate when a fact is
+  *computed* from when it is causally *determined* — a latent fact is a **pure
+  function of `(seed, causally-prior event log, stable fact-identity)`**, so
+  materializing it on first observation *reads ground truth* (referential
+  transparency over the seeded timeline), not invents it. Latent (unforced thunk)
+  vs committed (crystallized into the event log, then binding); faithful-coarsening
+  LOD bounds cost (foveated, pay-for-foveal-slice, refinement constrained to never
+  contradict coarse commitments); **order/path-dependent fill is forbidden**
+  (else replay diverges, multiplayer desyncs, and it becomes real post-hoc
+  confabulation). It is a strict refinement of `seed + event log` determinism, same
+  cross-platform-float caveat. It is the **upstream dependency of the
+  prose-generation pillar** (the realizer is a downstream consumer; rendering the
+  foveal slice forces materialization). Open core: **constrained deterministic
+  refinement** (the crux — seeded draws that must satisfy the arbitrary accumulated
+  constraint set); stable fact-identity / canonical key namespace; the commitment
+  boundary; cost of coarse-everywhere; multiplayer commit ordering.
+
 - **NPC mind, dialogue, and language generation** — R&D pillar (not a
   frozen spec): see **`docs/decisions/npc-mind-and-language.md`**. Two
   demands: (1) a real cognitive/personality brain (memory, beliefs,

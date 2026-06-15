@@ -110,8 +110,8 @@ throughout (see *Risks*).
 
 `npc-mind-and-language.md` mandates "real grammar + semantics" and rules out the
 copouts, but it never *defines* "superior" prose operationally. This is that
-missing spec. "Superior" is defined along five axes, each with a crisp
-operational definition and a **build-time** measurement. These five are the gates
+missing spec. "Superior" is defined along six axes, each with a crisp
+operational definition and a **build-time** measurement. These six are the gates
 the eval harness checks (see *Generator architecture → 5*).
 
 - **Faithfulness** — every asserted detail is true of the state; **zero
@@ -135,13 +135,38 @@ the eval harness checks (see *Generator architecture → 5*).
   phrasing diversity across repeated invocations on similar state — the same
   situation must not read identically twice. This is the anti-grind axis (the
   `reference-analysis.md` "samey/grindy" complaint, answered at the prose layer).
+  *Caveat:* freshness measures **non-repetition only** and must **not** be read as
+  quality — variety ≠ depth. A generator can produce many different-but-flat
+  sentences and pass freshness; per-instance superiority over handwritten lives on
+  the *Depth / nuance* axis below, which freshness can mask the absence of.
+
+- **Depth / nuance** — beyond surfacing true state (specificity) and not-repeating
+  (freshness), does a sentence carry **more than its literal propositions** —
+  implication, subtext, layering, the telling detail that implies the whole,
+  connotation, rhythm matched to content. This is what makes handwritten win *per
+  instance*; variety without it is shallow. It is the **weakest / least cleanly-
+  measurable axis**, and that is exactly where the moonshot lives — depth is the
+  sharpened core of the *quality* claim, not a solved sub-problem. *Measured*
+  (honestly, partially):
+  - *Implication recovery* — the build-time judge attempts to recover source
+    propositions from a rendered clause; depth shows when the judge recovers
+    **more** than was literally stated (successful implication), rather than exactly
+    the literal content or less.
+  - *Fusion ratio* — distinct propositions carried per clause (flat prose ≈ 1:1;
+    higher means several meanings ride one clause/image).
+  - *Rhetorical-relation richness* — fraction of inter-clause links that are
+    **non-additive** (causal / concessive / contrastive vs. a bare "and").
+  - *Blind A/B preference* against handwritten exemplars by the offline build-time
+    judge — note this is taste-laden and inherits the **judge-bias risk already
+    recorded** (below), and depth is where that bias bites hardest.
+  All of this is **build-time only**, never runtime, like every other axis.
 
 - **Determinism** — seeded replay is bit-for-bit. *Measured:* golden-trace
   equality — the same `(intent, brain state, seed)` renders the same bytes.
 
 **Validation is BUILD-TIME ONLY — never runtime.** The harness is golden traces
 plus a **build-time judge** (human and/or an offline LLM evaluated at build time)
-scoring rendered output against handwritten exemplars on the five axes. An
+scoring rendered output against handwritten exemplars on the six axes. An
 offline LLM used as a build-time judge is *permitted* by the leaf / build-time
 principle ("the LLM is an oracle at the leaves, never the control loop") — it is
 exactly the sanctioned build-time-inference position. A **runtime judge would be
@@ -179,9 +204,19 @@ This stage is *simultaneously* two engines:
   boilerplate. (If nothing salient changed, the right output is often *less*
   prose, not a re-statement.)
 
+Salience must also select for **implication**, not only novelty / intensity — the
+**telling-detail / synecdoche** move: render the part that *implies the whole*
+rather than enumerating the whole. Restraint — what **not** to say — is itself a
+depth move, and it cuts *against* naive specificity: the most specific output is
+not always the deepest. So specificity and depth are in **tension**, and the
+salience function must **trade** them, not maximize specificity blindly — picking
+the one detail that lets the reader infer the rest over the exhaustive catalogue
+that surfaces every available fact.
+
 **OPEN:** the salience function and the novelty model — how "changed since last
-described," "intense," and "relevant to intent" are scored and combined, and how
-the per-tick salience budget interacts with the semantic LOD budget (below).
+described," "intense," "relevant to intent," and **"most-implying"** are scored
+and combined (including the specificity-vs-depth trade), and how the per-tick
+salience budget interacts with the semantic LOD budget (below).
 
 ### 2. Semantic-grounded realization grammar
 
@@ -202,9 +237,31 @@ the same underlying act). The phrasing is *meaning about the world turned into
 words*, with that meaning drawn from the semantic layer (`semantic-layer.md` →
 "The NLG speaks from it").
 
+This is also where **depth is generated**, not merely scored — three mechanisms,
+each a handle on the otherwise-open formalism:
+
+- **Multi-proposition fusion.** Compose several typed propositions into a *single*
+  clause / image that carries them simultaneously, rather than
+  one-proposition-one-clause concatenation. This is what drives the *fusion ratio*
+  above off the flat 1:1 floor: one image doing the work of several facts.
+- **Subtext from the literal-vs-stance gap.** The intent tuple already separates
+  propositional content from stance/affect (per `npc-mind-and-language.md`). Depth
+  = rendering the **gap**: say *less* or *other* than the literal content while
+  letting stance **leak through connotation** (the prevalence-weighted lexical
+  choice already specified in the semantic→NLG interface — connotation = pulling
+  toward marked / atypical word choice under affect) and through **omission**.
+  This is irony, restraint, indirection — the said and the meant pulled apart on
+  purpose.
+- **Rhetorical relations in the grammar formalism.** Compose propositions with
+  **RST-style rhetorical relations** (concession, cause, contrast, elaboration),
+  not flat conjunction — which is precisely the *rhetorical-relation richness*
+  metric, and a concrete handle on the otherwise-open grammar-formalism question
+  below. A clause joined by "but" / "because" / "even so" carries structure a bare
+  "and" does not.
+
 **OPEN:** the grammar formalism itself — what the rule and fragment
 representation is, how composition is typed, how lexical-choice weighting is
-expressed.
+expressed, and how fusion and RST-style relations are represented within it.
 
 ### 3. Build-time-trained deterministic realizer surrogate
 
@@ -240,13 +297,14 @@ reproduces the run also reproduces the "random" phrasing choice.
 The quality bar is defined in *The prose quality bar* above; this stage is the
 **eval harness** that enforces it. It runs at build time only: **golden traces**
 (for the determinism gate) plus a **build-time judge** (human and/or offline LLM)
-scoring rendered output against **handwritten exemplars** on the five axes —
-faithfulness, specificity, coherence, freshness, determinism — used as **gates**
-on the shipped artifact. No runtime evaluation; a runtime judge would be a
-hot-loop LLM and is forbidden.
+scoring rendered output against **handwritten exemplars** on the six axes —
+faithfulness, specificity, coherence, freshness, depth/nuance, determinism — used
+as **gates** on the shipped artifact. No runtime evaluation; a runtime judge would
+be a hot-loop LLM and is forbidden.
 
-**OPEN:** the eval methodology specifics — exemplar selection, how the five axes
-are scored and thresholded, how the judge's taste is calibrated and audited.
+**OPEN:** the eval methodology specifics — exemplar selection, how the six axes
+are scored and thresholded (depth especially — it is the least cleanly measurable
+of the six), how the judge's taste is calibrated and audited.
 
 ### The interface
 
@@ -254,7 +312,7 @@ The realizer's runtime interface is: `(communicative intent, brain state, seed,
 salient state) → prose`, where *salient state* is the output of stage 1 over the
 sim's true systemic state, and *communicative intent* is the spine's tuple
 (speech-act type + propositional content + stance/affect + register + memory
-references). The output is a string; the *contract* is the five-axis quality bar.
+references). The output is a string; the *contract* is the six-axis quality bar.
 
 ---
 
@@ -339,6 +397,7 @@ once.
 - ¹ → `contact.hand_on: player.forearm` (faithful: stated contact)
 - ² → `memory_refs: [player_complimented_her]` + `speech_act: confide` (referencing the prior beat, half-said)
 - ³ → `affect: bashful` + `arousal +0.18` rendered as *color climbing* (faithful: rising-affect/arousal change, tender register)
+- **depth touch:** ² is the *literal-vs-stance gap* in action — she says *less* than the propositional content (`wants_closeness`, `feels_safe_with`), the wanting-to-confide leaking through the half-said line and `doesn't finish` rather than being stated; and ³ **fuses** affect + arousal-change into one image (*color climbing her face*), fusion-ratio > 1:1 instead of one clause per fact.
 
 **Realization B** (seed `s2`, near-identical state):
 
@@ -406,11 +465,18 @@ This is the R&D frontier, **not claimed solved**. Honest risks:
 - **Faithful-coarsening in prose is hard to guarantee.** Ensuring a coarse mention
   is *always* a true summary of the fine detail — never a contradicting one — is
   harder in language than in a numeric mipmap; prose "popping" is a real risk.
+- **Depth resists operational measurement, and the variety metrics can mask its
+  absence.** A generator can pass **freshness + specificity** while producing flat
+  prose — many different, fully-faithful, fully-specific sentences that still lose
+  to handwritten because they carry no implication, subtext, or fusion. This is the
+  **core moonshot risk**: "beats handwritten on quality" lives or dies on depth —
+  the one axis we can measure *least* well — and freshness in particular can read
+  as quality while hiding depth's absence.
 - **"Beats handwritten on quality" is the unproven moonshot.** Coverage/volume
   superiority follows from composition (`reference-analysis.md`). *Quality*
   superiority over a skilled human author does not follow from anything proven
   here. This is the frontier claim, and it is confronted as such — owned, not
-  designed away.
+  designed away. Its sharpened core is the depth/nuance axis above.
 
 ---
 
@@ -423,7 +489,13 @@ This is the R&D frontier, **not claimed solved**. Honest risks:
 - **The corpus + training strategy** — how the build-time corpus is generated /
   curated, and how the surrogate is trained against it.
 - **The eval methodology** — exemplar selection, scoring and thresholding of the
-  five axes, judge calibration and auditing.
+  six axes, judge calibration and auditing.
+- **How to GENERATE and MEASURE depth / nuance** — the telling-detail /
+  synecdoche salience move, multi-proposition fusion, subtext from the
+  literal-vs-stance gap, RST-style rhetorical-relation grammar, and the depth
+  metrics themselves (implication recovery, fusion ratio, rhetorical-relation
+  richness, blind A/B). Depth is the **least cleanly measurable** axis and the
+  sharpened core of the moonshot; both its generation and its measurement are open.
 - **The concrete semantic-graph query / traversal API** — how the realizer queries
   the prevalence-weighted graph for typical phrasing at an LOD, pulled by
   affect/register.

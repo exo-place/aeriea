@@ -139,6 +139,14 @@ the eval harness checks (see *Generator architecture → 5*).
   quality — variety ≠ depth. A generator can produce many different-but-flat
   sentences and pass freshness; per-instance superiority over handwritten lives on
   the *Depth / nuance* axis below, which freshness can mask the absence of.
+  *Sharper caveat — variety of conception, not of lexicon:* the variety that
+  feeds depth is variety of **conception** — what to select to imply, what to
+  withhold, what stance to take, how to structure the rhetoric — **not** variety
+  of lexicon. Two renderings of the same state earn depth by differing in *what*
+  and *how*, not by swapping words. Lexical-only variation maximizes n-gram
+  diversity while conception stays flat: that is anti-nuance wearing freshness as
+  a costume, and it is the **degenerate case the freshness metric is most easily
+  fooled by**.
 
 - **Depth / nuance** — beyond surfacing true state (specificity) and not-repeating
   (freshness), does a sentence carry **more than its literal propositions** —
@@ -292,6 +300,18 @@ are not in tension: the variation is itself a deterministic, seeded selection.
 This ties directly to the determinism invariant (below) — the seed that
 reproduces the run also reproduces the "random" phrasing choice.
 
+Crucially, the seed must branch **upstream**, at the **salience / rhetorical-
+structure layer** — which telling detail to foreground, which rhetorical relation
+to use, which subtext to leave unsaid, which propositions to fuse — so equivalent
+realizations differ in *what* and *how*, not merely in *word*. This connects the
+seeded variation to the depth-generation mechanisms already specified in the
+salience (stage 1) and grammar (stage 2) subsections: the branch point is the
+same telling-detail-salience / multi-proposition-fusion / rhetorical-relation
+machinery, now also seeded. **Lexical-only seeded variation is explicitly
+insufficient** — it is the degenerate failure mode (variety of lexicon, not of
+conception) that the freshness caveat above names, here ruled out at the
+mechanism.
+
 ### 5. The prose quality bar + build-time eval methodology
 
 The quality bar is defined in *The prose quality bar* above; this stage is the
@@ -301,6 +321,21 @@ scoring rendered output against **handwritten exemplars** on the six axes —
 faithfulness, specificity, coherence, freshness, depth/nuance, determinism — used
 as **gates** on the shipped artifact. No runtime evaluation; a runtime judge would
 be a hot-loop LLM and is forbidden.
+
+**Metrics are proxies — floors, never objectives (Goodhart).** By Goodhart's law,
+optimizing a proxy destroys the target it stood for. So the cheap metrics — n-gram
+diversity, fusion ratio, rhetorical-relation richness, implication recovery — are
+**regression guards / floors** that catch degeneration, **never optimization
+objectives and never training targets** for the build-time-trained realizer
+(stage 3). Training the realizer to maximize any of them produces the *opposite*
+of nuance by construction: crammed clauses (maxed fusion ratio), gratuitous
+connectives (maxed rhetorical-relation richness), thesaurus-salad (maxed n-gram
+diversity). The realizer is trained toward the **corpus / human-preference
+distribution**; the metrics only **diagnose**. The only honest arbiter of depth
+is **holistic preference against handwritten exemplars** (the blind A/B above) —
+taste — the irreducible target the proxies approximate but can never *be*. The
+build-time-only discipline is unchanged: floors and arbiter alike run at build
+time, never runtime.
 
 **OPEN:** the eval methodology specifics — exemplar selection, how the six axes
 are scored and thresholded (depth especially — it is the least cleanly measurable
@@ -459,6 +494,14 @@ This is the R&D frontier, **not claimed solved**. Honest risks:
 - **The quality-bar metrics may be gameable.** Specificity and freshness scores,
   in particular, can be satisfied by superficial tricks (padding detail, shuffling
   synonyms) that do not actually read better; the gates need anti-gaming care.
+- **Goodhart is the central eval risk.** *Every* depth/freshness metric can be
+  maximized by a degenerate generator producing the **opposite** of nuance —
+  crammed clauses, gratuitous connectives, thesaurus-salad — and lexical variety
+  can masquerade as conceptual variety, fooling freshness while conception stays
+  flat. The instant the trained realizer optimizes a metric *directly*, the metric
+  stops measuring anything. The mitigation — metrics as floors, taste (preference
+  vs handwritten) as the only arbiter — is itself **unproven and taste-laden**,
+  which is precisely why "beats handwritten on quality" stays the marked moonshot.
 - **Combinatorial salience may explode.** Scoring novelty × intensity × relevance
   over rich state, per tick, within an LOD budget, is a hard real-time problem;
   naive salience could be too expensive or too noisy.
@@ -496,6 +539,13 @@ This is the R&D frontier, **not claimed solved**. Honest risks:
   metrics themselves (implication recovery, fusion ratio, rhetorical-relation
   richness, blind A/B). Depth is the **least cleanly measurable** axis and the
   sharpened core of the moonshot; both its generation and its measurement are open.
+  Equally open: the **conception-vs-lexicon variety distinction** (earning depth
+  by varying what to select / imply / withhold / the stance / the rhetorical
+  structure, not by swapping words); **branching variation upstream** at the
+  salience/structure layer rather than in the lexicon; and a **Goodhart-resistant
+  eval** that holds every depth/freshness metric as a floor / diagnostic while
+  keeping holistic preference vs handwritten (taste) as the arbiter — never letting
+  a metric become an optimization objective or training target.
 - **The concrete semantic-graph query / traversal API** — how the realizer queries
   the prevalence-weighted graph for typical phrasing at an LOD, pulled by
   affect/register.

@@ -60,11 +60,22 @@ rejections are *why* the final frame is what it is.
   ill-defined (depth is genuinely *unbounded* — you can always probe one level
   deeper). So depth cannot be invented late, and cannot be computed early.
 
-- **Eager forward-sim is infeasible.** Generating every NPC's complete interior
-  life, every object's provenance, every relationship's texture, eagerly, on a
-  per-tick budget for a persistent world, is not affordable — `DESIGN.md`'s own
-  reference point (HHS+) already pays *seconds per tick* for a far shallower sim.
-  "Simulate then render" cannot pay for the depth.
+- **Eager forward-sim is plausibly infeasible — but this premise is UNVERIFIED.**
+  The argument: generating every NPC's complete interior life, every object's
+  provenance, every relationship's texture, eagerly, on a per-tick budget for a
+  persistent world, looks unaffordable — `DESIGN.md`'s own reference point (HHS+)
+  already pays *seconds per tick* for a far shallower sim, so "simulate then
+  render" *appears* unable to pay for the depth. **This is a plausible argument,
+  not an established fact.** The 2026-06-19 prior-art pass
+  (`docs/research/crux-prior-art-constraint-generation.md`) targeted exactly this
+  premise — Dwarf Fortress, Caves of Qud history-gen, Talk of the Town, Versu,
+  Bad News — and returned **zero adversarially-verified claims**; DF and Qud
+  demonstrably ship at non-trivial scale, and the `existence` prior-art study
+  shows eager-deep forward-sim is *cheap at N=1*. So treat eager-infeasibility as
+  **plausible-but-unverified**, an open question (see *What the prior art says*
+  below), not a settled rejection. The reframe below does not depend on it being
+  proven: constrain-then-generate is chosen on the lossless/cost grounds that
+  follow, and stands whether or not eager is later shown feasible.
 
 - **Lazy materialization is not the resolution.** Deferring computation to first
   observation, over a referentially-transparent seeded timeline, is real and
@@ -274,6 +285,66 @@ The sub-problems, with the sharp one first:
   affordable budget. How `G`'s per-query cost is bounded as the constraint set
   grows is open.
 
+### What the prior art says (2026-06-19 research pass)
+
+An adversarially-verified deep-research pass mapped the prior art for exactly this
+crux — *deterministic, bounded-cost, on-demand generation that stays consistent
+with an unboundedly-growing fact set without painting into a corner*. The full
+cited map is `docs/research/crux-prior-art-constraint-generation.md`; this is what
+it concluded, used here only to the extent it actually supports.
+
+- **Verdict: known-hard-with-workarounds** — not solved, but not freshly open
+  either. People have attacked precisely this shape (Wave Function Collapse,
+  ASP/SAT-for-PCG, truth-maintenance systems, belief revision, dynamic
+  backtracking); what is *new* is assembling this specific trade — seeded
+  determinism + lazy per-query materialization + correct-by-design global
+  consistency under unbounded facts — which the surveyed literature does not cover.
+  The theoretical floor: **detecting whether a consistent completion exists is
+  NP-hard in general** (stated by WFC's own author).
+
+- **The locality lever — the actionable principle.** Corner-risk scales with
+  **GLOBAL (non-local) constraints, not local ones.** Empirically: local-adjacency
+  problems almost never corner (an ASP surrogate hit *zero* conflicts on real
+  scenarios even with heuristics disabled), while a single global constraint
+  produced *hundreds* of conflicts and broke WFC's global-restart recovery on
+  cases that local backtracking solved instantly. **Design implication:** structure
+  the world so its constraints are mostly **local**, and treat global constraints
+  as the expensive case to **bound and minimize**. This makes the crux's
+  tractability substantially a *design choice*, not a fixed property of the problem.
+
+- **"Incomplete, never wrong" is achievable today — in principle.** SAT/ASP-based
+  generation is **correct-by-design**: it detects unsatisfiability, reports yes/no,
+  and never emits an approximation (shipped in Tanagra, Refraction). So the half of
+  the crux this doc names *Incomplete, never wrong* is solved in principle. **Cost
+  catch:** it is done via whole-artifact **global** solves (exponential worst case),
+  not lazy per-query, and is viable only at **constant-bounded scale** — not yet the
+  unbounded, incremental regime `G` needs.
+
+- **Candidate technique stack for `G` (recommended start, not a decided
+  implementation).** A solver-based (SAT/ASP) formulation + **Ginsberg's dynamic
+  backtracking** — complete, polynomial-*space*, and able to recover from a corner
+  **without discarding committed work**. That last property is the direct match to
+  this crux's "back out of the corner without throwing away the world." Caveats from
+  the research: dynamic backtracking is a search technique over a *fixed* CSP, so its
+  applicability to online constraint-*addition* is an inference beyond the sources;
+  and completeness bounds *memory*, not *time* (worst-case runtime stays
+  exponential). Recommended as the starting point to investigate, nothing more.
+
+- **The genuinely open wall — the residue.** The **unbounded-incremental regime**
+  is the part no surveyed system clears at scale, and it is the formal twin of this
+  crux. Iterated belief revision proves the committed-history state needed to
+  guarantee consistency under *future* additions grows **exponentially** and cannot
+  in general be folded into a single current state — you must carry history, or find
+  a principled criterion for when history can be committed (bounded). This stays the
+  **primary open problem**; the prior art sharpens it, it does not dissolve it.
+
+In sum: the research *sharpens* the crux with evidence — it does not move the
+target or the architecture (constrain-then-generate / observer-indistinguishability
+stay decided), and it does **not** report the crux as solved. The
+satisfiability/painting-into-a-corner sub-problem above is exactly the
+NP-hard-in-general floor, made tractable mostly by keeping constraints local; the
+residue above is its unsolved core.
+
 ## What this gives up
 
 Stated honestly, because the target is a *choice*:
@@ -339,11 +410,33 @@ never detect.
 
 ## Open threads
 
-The crux sub-problems, restated as the open work (all OPEN):
+The crux sub-problems, restated as the open work (all OPEN). The 2026-06-19
+prior-art pass (*What the prior art says*, above;
+`docs/research/crux-prior-art-constraint-generation.md`) reframes several of
+these — verdict **known-hard-with-workarounds**, not freshly open.
 
 - **Painting into a corner / satisfiability** — CSP-under-determinism: draws that
   preserve future satisfiability against an arbitrary, growing constraint set.
-  *The sharp one.*
+  *The sharp one.* **Prior art:** completion-existence is NP-hard *in general*, but
+  corner-risk scales with **global** constraints — so the **locality lever** below
+  makes most of this tractable by design.
+- **The locality lever** — corner-risk is empirically driven by **global
+  (non-local)** constraints; local-adjacency constraints almost never corner.
+  *Structure the world so constraints are mostly local; bound and minimize global
+  ones.* This turns the crux's tractability substantially into a **design choice**
+  (and is itself an open piece of world design: deciding which constraints can be
+  kept local).
+- **The candidate technique stack** — recommended **starting point** (not a
+  decided implementation): solver-based **SAT/ASP** formulation +
+  **Ginsberg's dynamic backtracking** (complete, polynomial-space, recovers from a
+  corner without discarding committed work). Open: its fit to *online
+  constraint-addition* rather than a fixed CSP.
+- **The unbounded-incremental regime — the residue (primary open problem)** — no
+  surveyed system clears bounded per-query cost *and* unbounded incremental fact
+  accumulation at scale. Iterated belief revision shows the committed-history state
+  needed for future consistency grows **exponentially** and cannot in general be
+  folded into one current state; `G` needs a principled policy for when history can
+  be committed (bounded representation). This is the formal twin of the crux.
 - **The constraint language** — what entailments an observation commits, and at
   what abstraction level.
 - **Stable query / fact identity** — a canonical key namespace independent of
@@ -354,16 +447,29 @@ The crux sub-problems, restated as the open work (all OPEN):
   constraint ordering across concurrent observers.
 - **Per-query cost bound** — enforcing "cost proportional to engagement" as the
   constraint set grows.
+- **Is eager forward-sim actually infeasible? (UNVERIFIED premise)** — the
+  rejection of "simulate then render" rests on eager being unaffordable, which the
+  prior-art pass did **not** confirm (zero verified claims; DF/Qud ship at scale;
+  `existence` shows eager-deep cheap at N=1). Constrain-then-generate does not
+  depend on this being proven, but the premise is open.
 
 These are unsolved. The **target** (observer-indistinguishability) and the
 **architecture** (constrain-then-generate) are decided; the **generator that
 satisfies a growing global consistency constraint set deterministically and at
-bounded cost** is the open frontier.
+bounded cost** is the open frontier — **known-hard-with-workarounds**, with the
+unbounded-incremental regime as the unsolved core.
 
 ---
 
 ## Cross-links
 
+- `docs/research/crux-prior-art-constraint-generation.md` — **the cited prior-art
+  map for this crux.** Adversarially-verified deep-research pass (2026-06-19);
+  verdict **known-hard-with-workarounds**. Source for *What the prior art says*:
+  completion-existence NP-hard in general, the locality lever, correct-by-design
+  "incomplete-never-wrong" at constant-bounded scale, the SAT/ASP + Ginsberg
+  dynamic-backtracking candidate stack, and the belief-revision residue. Respect
+  its marked confidence levels and refuted/open caveats.
 - `docs/decisions/prose-generation.md` — **the downstream consumer.** Its *Depth
   is upstream* framing sites this substrate as the binding constraint it depends
   on but does not solve; the realizer is a consumer that **queries `G`** to render,

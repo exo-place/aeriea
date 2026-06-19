@@ -118,6 +118,10 @@
             mold
             # JS tooling for docs
             bun
+            # Python 3 (stdlib only) — for standalone R&D probes under
+            # experiments/ (e.g. experiments/g-toy, the constrain-then-generate
+            # crux feasibility experiment). NOT part of the Godot engine build.
+            python3
             # Virtual framebuffer — lets agents run the real WINDOWED game (not
             # --headless) in a CI / headless environment. --headless skips
             # GDScript parsing and misses parse errors; xvfb-run boots a real

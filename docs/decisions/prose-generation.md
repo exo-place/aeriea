@@ -1,4 +1,4 @@
-# Deterministic prose generation — Opus-4.8-RP craft as the bar, a non-trash floor
+# Deterministic prose generation — exceed Opus-4.8-RP craft per covered case, a non-trash floor
 
 Status: **FOUNDATIONAL R&D DIRECTION — open problem, not a frozen spec** (2026-06-14)
 
@@ -11,8 +11,9 @@ prose-OUTPUT engine: the realizer that turns systemic state plus communicative
 intent into rendered prose. It does **not** cover the player-INPUT half (the
 composable social/physical affordances, designed in `affordance-substrate.md`) —
 that substrate is the input vocabulary and is out of scope here. It states the
-**concrete craft bar** (target Opus-4.8 freeform-RP craft for the same state,
-with a hard non-trash floor), names the previously-missing prose *quality bar* in
+**concrete craft bar** (meet-or-EXCEED Opus-4.8 freeform-RP craft per covered
+case — Opus is a build-time *ingredient*, not a ceiling — with a hard non-trash
+floor), names the previously-missing prose *quality bar* in
 operational terms, sketches a generator architecture, designs the
 semantic-layer→NLG interface, walks one concrete example, and reconciles the
 whole pipeline with the determinism invariant. It is a design doc only: it contains **no engine code**, and the
@@ -27,16 +28,25 @@ buildable shape, while keeping every genuinely-open sub-problem marked open.
 The pivot is to text-based systemic gameplay. The output target is concrete and
 hard, and the bar is now **named, not gestured at**:
 
-- **Ceiling / target — Opus-4.8 freeform-RP craft for the same state.** The
-  measurable reference is the prose **Opus-4.8 would write in freeform roleplay
-  for the same situation/state**. That is the craft level the realizer chases.
-  We do **not** claim to reach it generally — across the full unbounded state
-  space we probably will not — so the goal is to **maximize how often and how
-  closely** the realizer approaches the Opus-4.8-RP ceiling, not to assert we hit
-  it everywhere. (This is the marked moonshot; see *Risks*.)
-- **Floor — still-good prose, non-negotiable.** Falling short of the ceiling
-  **never** licenses trash. Where output cannot reach Opus-4.8-RP craft it must
-  degrade to **good**, never to garbage. **Slot-mad-libs / template boilerplate**
+- **Reference / target — meet-or-EXCEED Opus-4.8 freeform-RP craft per covered
+  case.** The measurable reference is the prose **Opus-4.8 would write in freeform
+  roleplay for the same situation/state**. That reference is not a craft *ceiling*
+  — it is a **build-time ingredient**. Nothing stops the bake pipeline from running
+  Opus-4.8 *itself* at bake time (best-of-N candidate generation, curation,
+  refinement, combination with the true state); by construction that is ≥ a single
+  hot-loop Opus pass. So **on any case we cover, Opus's own output is our FLOOR for
+  that case, and we build upward from it** — out-crafting Opus per covered case is
+  the starting line, not a fantasy. We have, moreover, a craft edge Opus
+  structurally lacks: **exact true state**. Opus in freeform RP confabulates within
+  a context window — it guesses body / history / room and drifts; we render ground
+  truth, and **specificity and consistency ARE craft**. The concession is therefore
+  **COVERAGE, not a craft ceiling**: holding that meet-or-exceed-Opus quality
+  across the combinatorial state space without baking every case is the open
+  moonshot (*coverage-at-quality*; see *Risks*).
+- **Floor — still-good prose, non-negotiable.** Falling short of meet-or-exceed
+  on an uncovered case **never** licenses trash. Where output cannot reach
+  Opus-4.8-RP craft it must degrade to **good**, never to garbage.
+  **Slot-mad-libs / template boilerplate**
   — the existence-style realizer (`docs/research/existence-prose-assessment.md`
   confirmed existence is exactly this floor violation: NT-weighted selection over
   a finite authored vocabulary, "sophisticated mad-libs, not deep prose") — is
@@ -76,17 +86,24 @@ The win is not a single axis. It is a **four-way product**:
 
 > **faithfulness-to-true-rich-state × quality-phrasing × determinism × freshness.**
 
-Read the *quality-phrasing* factor honestly with the bar above: it is **"approach
-Opus-4.8-RP craft, with a non-trash floor"** — the craft level we *chase*, not a
-superiority we *assert*. **We do not claim to out-craft Opus-4.8 generally.** On
-raw craft, Opus-4.8 freeform RP is the ceiling we aim at and often will not fully
-reach. The win lives in the **other three factors** — the axes a hot-loop LLM
-structurally cannot deliver: **faithfulness to true state, determinism/replay,
-freshness/specificity from real ground truth.** A product with a zero factor is
-zero; aeriea is nonzero on all four at once — faithful AND on-bar-for-craft AND
-deterministic AND fresh — a position neither rival can occupy. The superiority
-over an LLM is in faithfulness × determinism × freshness, **not** in raw craft;
-the craft factor is the bar we chase, held to a still-good floor.
+Read the *quality-phrasing* factor honestly with the bar above: it is
+**"meet-or-EXCEED Opus-4.8-RP craft per covered case, with a non-trash floor"** —
+and on covered cases that is a superiority we *do* assert, by construction. Opus
+is a **build-time ingredient**, not a craft ceiling: bake-time best-of-N /
+curation / refinement over Opus's own candidates, *combined with the true state*,
+is ≥ a single hot-loop Opus pass — so per covered case Opus's output is our floor
+and we build past it. We also out-craft Opus on **specificity and consistency**,
+which are craft: Opus confabulates within a context window and drifts; we render
+exact true state. So craft is **no longer ceded** — on covered cases we claim
+craft parity-or-better. The product is still four-way, and we *also* win on the
+three axes a hot-loop LLM structurally cannot deliver: **faithfulness to true
+state, determinism/replay, freshness/specificity from real ground truth.** A
+product with a zero factor is zero; aeriea is nonzero on all four at once —
+faithful AND craft-at-or-above-Opus AND deterministic AND fresh — a position
+neither rival can occupy. The win over a hot-loop LLM is the product **and**
+per-case craft; the **honest caveat** is that broad COVERAGE at that craft —
+generalizing it across the combinatorial state space without baking every case —
+is the unproven moonshot.
 
 - **Handwritten loses on COVERAGE.** Authors write for the states they
   *anticipate*. But the true systemic state space — every body detail, fluid,
@@ -100,38 +117,48 @@ the craft factor is the bar we chase, held to a still-good floor.
   `reference-analysis.md` makes of TiTS/FS — content-deep, then thin at the
   combinatorial edges.)
 
-- **LLM loses on GROUND TRUTH + DETERMINISM.** An LLM is fluent, but it does not
-  *know* the true systemic state — it sees a context window and **confabulates
-  beyond it**, drifts across a long scene, and contradicts established facts
-  (a fluid it forgot, a body part it mis-described, a relationship beat it never
-  saw). It is also non-replayable: the same `seed + event log` does not yield the
-  same text, so it cannot live in a seeded sim. LLM prose is *plausible, not
-  true*, and *not reproducible*.
+- **LLM loses on GROUND TRUTH + DETERMINISM — and, per covered case, on CRAFT
+  too.** An LLM is fluent, but it does not *know* the true systemic state — it sees
+  a context window and **confabulates beyond it**, drifts across a long scene, and
+  contradicts established facts (a fluid it forgot, a body part it mis-described, a
+  relationship beat it never saw). That confabulation is *also* a craft loss:
+  specificity and consistency are craft, and on those we exceed it by construction.
+  It is also non-replayable: the same `seed + event log` does not yield the same
+  text, so it cannot live in a seeded sim. And because Opus is a build-time
+  ingredient we can out-curate, a single hot-loop Opus pass is our floor per
+  covered case, not our ceiling. LLM prose is *plausible, not true*, *not
+  reproducible*, and — per covered case — *out-craftable*. The **only** place a
+  (forbidden) hot-loop Opus would win is the uncovered tail on a genuinely novel
+  state — the GENERALITY concession already accepted, **not** a per-case craft cap.
 
 - **Aeriea wins by holding all four.** The simulation already holds the **full
   true systemic state as ground truth** — every body detail, fluid, position,
   mood, relationship history, sensory specific. The NLG renders *that* state
   (faithfulness: it can describe the actual rich state, not a generic fallback),
-  with phrasing that **targets Opus-4.8-RP craft and never falls below a
+  with phrasing that **meets-or-exceeds Opus-4.8-RP craft per covered case** (Opus
+  as a build-time ingredient + true-state specificity) and **never falls below a
   still-good floor** (quality), **deterministically** (seed + event log →
   bit-for-bit replay), and **freshly** (state-driven and non-repeating across
-  equivalent situations). The win is the *product*: faithful AND on-bar-for-craft
-  AND deterministic AND fresh — a combination unavailable to either rival,
-  because each rival is structurally missing a factor (the author cannot cover
-  the combinatorial state; the LLM cannot be faithful-and-deterministic). The
-  craft factor is the one we **do not** claim to beat an LLM on — we target it;
-  the edge over the LLM is the *other three*.
+  equivalent situations). The win is the *product*: faithful AND
+  craft-at-or-above-Opus AND deterministic AND fresh — a combination unavailable to
+  either rival, because each rival is structurally missing a factor (the author
+  cannot cover the combinatorial state; the LLM cannot be faithful-and-deterministic
+  and, per covered case, is out-craftable). Craft is **not** ceded; the open part is
+  **coverage** — holding that craft across the combinatorial state space.
 
-A precision note against over-claiming from the reference work: `reference-
-analysis.md` establishes that dense composable *procedural recombination*
-delivers **volume and variety** without LLMs (LT's act×target×position×body-state
-combinatorial space). It does **not** claim recombination reaches Opus-4.8-RP
-craft. This doc's harder, unproven claim — **reaching Opus-4.8-RP craft as often
-and as closely as possible** (not merely coverage/volume), with a non-trash floor
-everywhere else — is exactly the moonshot, and it is marked as such throughout
-(see *Risks*). Note what is and is not claimed: we **target** the Opus-4.8-RP
-ceiling, we do **not** assert we exceed it generally; the floor (good, never
-mad-libs) is the non-negotiable we *do* commit to everywhere.
+A precision note on what is and is not claimed: `reference-analysis.md`
+establishes that dense composable *procedural recombination* delivers **volume and
+variety** without LLMs (LT's act×target×position×body-state combinatorial space).
+It does **not** claim recombination reaches Opus-4.8-RP craft. This doc's claim is
+sharper and split in two. **Per covered case** — baked or well-generalized —
+meeting-or-exceeding Opus-4.8-RP craft is structurally clear and *is* claimed:
+Opus is a build-time ingredient (best-of-N / curate / refine) and we add true-state
+specificity. The **unproven moonshot** is **coverage-at-quality** — generalizing
+that craft across the combinatorial state space without baking every case, holding
+quality near the meet-or-exceed-Opus line as states drift from what's baked and
+never dropping to the non-trash floor. The floor (good, never mad-libs) is the
+non-negotiable we commit to everywhere; per-covered-case exceed-Opus is the
+starting line; broad coverage at that craft is the bet (see *Risks*).
 
 ### The substrate-level cut (why the depth is real, not just phrased)
 
@@ -153,10 +180,12 @@ model the phrasing draws from**.
   **surfaces it without inventing**. The depth pre-exists the prose; the realizer
   renders it faithfully.
 
-This is the *quality* factor read at the substrate: aeriea's edge is not a better
-pen than Opus-4.8 — we do not claim that — it is a **real model under the pen**.
-The craft we chase to the Opus-4.8-RP bar; the *grounding* the craft draws from
-is the edge no LLM can match.
+This is the *quality* factor read at the substrate: aeriea's edge over Opus-4.8 is
+**both** a real model under the pen **and** a better pen per covered case — the pen
+is Opus-as-ingredient curated past a single pass, and the **real model under it**
+(true state Opus can only confabulate) is the grounding no LLM can match. The two
+compound; the open question is not whether either holds per case but how broadly
+they hold across the state space.
 
 ---
 
@@ -197,11 +226,13 @@ So the seat of depth is **upstream of this doc entirely**:
 - the **world** — `semantic-layer.md`'s genuine semantic richness.
 
 This is exactly the project's **"simulation underneath, rendering on top."** This
-doc is the rendering: the **faithful, on-bar-for-craft lens**. It is **necessary
-and nowhere near sufficient.** The binding constraint on **reaching the
-Opus-4.8-RP ceiling** is the **brain and the world**, not the realizer — and that
-is a larger problem, sited upstream, that this doc *depends on* but does not
-solve (see *Risks*, *Open threads*).
+doc is the rendering: the **faithful, meet-or-exceed-Opus-per-covered-case lens**.
+It is **necessary and nowhere near sufficient.** The binding constraint on
+**reaching that craft** is the **brain and the world**, not the realizer — a deep
+substrate is what makes both halves of the craft win real (the true state we
+render past Opus, and the depth the lens surfaces) — and that is a larger problem,
+sited upstream, that this doc *depends on* but does not solve (see *Risks*,
+*Open threads*).
 
 ---
 
@@ -211,14 +242,17 @@ solve (see *Risks*, *Open threads*).
 copouts, but it never *defines* the bar operationally. This is that missing spec,
 and the bar is now **concrete and decided**:
 
-- **Ceiling / target — Opus-4.8 freeform-RP craft for the same committed state.**
-  For any given state, the reference is the prose Opus-4.8 would write in freeform
-  roleplay for *that* state. The realizer's craft is scored as **gap-to-Opus**
-  (see *Generator architecture → 5*, the build-time A/B). Reaching it generally is
-  **not** claimed — the goal is to **maximize how often and how closely** we
-  approach it.
+- **Reference / target — meet-or-EXCEED Opus-4.8 freeform-RP craft per covered
+  state.** For any given state, the reference is the prose Opus-4.8 would write in
+  freeform roleplay for *that* state — used as a **build-time ingredient** (best-of-N
+  / curate / refine over Opus's own candidates), so per covered state it is our
+  **floor**, not a ceiling. The realizer's craft is scored as **gap-to-Opus** with
+  target **≥ 0** (meet-or-beat; see *Generator architecture → 5*, the build-time
+  A/B). Per covered state exceed-Opus is the aim; the unclaimed-general part is
+  **coverage** of that quality across the state space.
 - **Floor — still-good prose; boilerplate is a hard failure.** Where output
-  cannot reach the ceiling it degrades to **good**, never to garbage.
+  cannot meet-or-beat Opus on an uncovered state it degrades to **good**, never to
+  garbage.
   **Slot-mad-libs / template boilerplate** — the existence realizer, the negative
   exemplar in `docs/research/existence-prose-assessment.md` — is a **floor
   violation that fails the build** (see stage 5). Determinism and cheapness do
@@ -226,9 +260,10 @@ and the bar is now **concrete and decided**:
 
 Below the headline bar, the bar is operationalized along **six axes**, each with a
 crisp operational definition and a **build-time** measurement. The Opus-4.8-RP
-ceiling gives the depth/quality axes their concrete referent; the boilerplate-fail
-floor gives them a concrete failure condition. These six are the gates the eval
-harness checks (see *Generator architecture → 5*).
+reference gives the depth/quality axes their concrete referent (a meet-or-beat
+target, not a cap); the boilerplate-fail floor gives them a concrete failure
+condition. These six are the gates the eval harness checks (see *Generator
+architecture → 5*).
 
 - **Faithfulness** — every asserted detail is true of the state; **zero
   confabulation**. *Measured:* assert→state-fact provenance check. Every rendered
@@ -259,8 +294,8 @@ harness checks (see *Generator architecture → 5*).
   `reference-analysis.md` "samey/grindy" complaint, answered at the prose layer).
   *Caveat:* freshness measures **non-repetition only** and must **not** be read as
   quality — variety ≠ depth. A generator can produce many different-but-flat
-  sentences and pass freshness; per-instance craft — closing the gap to the
-  Opus-4.8-RP ceiling — lives on the *Depth / nuance* axis below, which freshness
+  sentences and pass freshness; per-instance craft — meeting-or-beating the
+  Opus-4.8-RP reference — lives on the *Depth / nuance* axis below, which freshness
   can mask the absence of.
   *Sharper caveat — variety of conception, not of lexicon:* the variety that
   feeds depth is variety of **conception** — what to select to imply, what to
@@ -274,19 +309,21 @@ harness checks (see *Generator architecture → 5*).
 - **Depth / nuance** — beyond surfacing true state (specificity) and not-repeating
   (freshness), does a sentence carry **more than its literal propositions** —
   implication, subtext, layering, the telling detail that implies the whole,
-  connotation, rhythm matched to content. This is the craft the **Opus-4.8-RP
-  ceiling** sets the bar for, and what makes a skilled human author win *per
-  instance*; variety without it is shallow. **Read this axis correctly: it scores
-  how faithfully the realizer *surfaces* the depth the substrate already holds —
-  not depth the realizer manufactures.** Per *Depth is upstream*, the realizer
-  cannot create depth above the model's ceiling without confabulating; the
-  mechanisms below (and their metrics) raise the prose *toward* that ceiling and
-  guard against flattening the substrate's depth on the way out — they do not lift
-  the ceiling, which is set by model depth. It is the **weakest / least cleanly-
-  measurable axis**, and that is exactly where the (rendering-side) moonshot lives
-  — depth is the sharpened core of the *quality* claim, not a solved sub-problem,
-  and even fully solved it only realizes a deep substrate, never substitutes for a
-  shallow one. *Measured* (honestly, partially):
+  connotation, rhythm matched to content. The **Opus-4.8-RP reference** sets the
+  meet-or-beat bar for this craft (Opus as a build-time ingredient we curate past),
+  and it is what makes a skilled human author win *per instance*; variety without
+  it is shallow. **Read this axis correctly: it scores how faithfully the realizer
+  *surfaces* the depth the substrate already holds — not depth the realizer
+  manufactures.** Per *Depth is upstream*, the realizer cannot create depth above
+  the **substrate's** ceiling without confabulating; the mechanisms below (and their
+  metrics) raise the prose *toward* that substrate ceiling and guard against
+  flattening the substrate's depth on the way out — they do not lift the substrate
+  ceiling, which is set by model depth (this substrate cap is distinct from the
+  Opus reference, which is a per-case meet-or-beat *target*, not a cap). It is the
+  **weakest / least cleanly-measurable axis**, and that is exactly where the
+  (rendering-side) moonshot lives — depth is the sharpened core of the *quality*
+  claim, not a solved sub-problem, and even fully solved it only realizes a deep
+  substrate, never substitutes for a shallow one. *Measured* (honestly, partially):
   - *Implication recovery* — the build-time judge attempts to recover source
     propositions from a rendered clause; depth shows when the judge recovers
     **more** than was literally stated (successful implication), rather than exactly
@@ -296,10 +333,11 @@ harness checks (see *Generator architecture → 5*).
   - *Rhetorical-relation richness* — fraction of inter-clause links that are
     **non-additive** (causal / concessive / contrastive vs. a bare "and").
   - *Gap-to-Opus A/B* — the build-time judge compares the realizer's output
-    against **Opus-4.8's freeform-RP prose for the same committed state** (the
-    ceiling metric), and against handwritten exemplars; note this is taste-laden
-    and inherits the **judge-bias risk already recorded** (below), and depth is
-    where that bias bites hardest.
+    against **Opus-4.8's freeform-RP prose for the same committed state** (target
+    **gap ≥ 0**, meet-or-beat — Opus is a reference and an ingredient, not a cap),
+    and against handwritten exemplars; note this is taste-laden and inherits the
+    **judge-bias risk already recorded** (below), and depth is where that bias
+    bites hardest.
   All of this is **build-time only**, never runtime, like every other axis.
 
 - **Determinism** — seeded replay is bit-for-bit. *Measured:* golden-trace
@@ -308,13 +346,16 @@ harness checks (see *Generator architecture → 5*).
 **Validation is BUILD-TIME ONLY — never runtime.** The harness is golden traces
 plus a **build-time judge** (human and/or an offline LLM evaluated at build time)
 scoring rendered output on the six axes — against **Opus-4.8's freeform-RP prose
-for the same committed state** (the ceiling) and against handwritten exemplars,
-with **boilerplate output flagged as an automatic floor violation** (see stage
-5). An offline LLM used as a build-time judge — and Opus-4.8 used at build time as
-the reference/ceiling — is *permitted* by the leaf / build-time principle ("the
-LLM is an oracle at the leaves, never the control loop"): it is exactly the
-sanctioned build-time-inference position, **a reference/judge at the leaves, not
-in the hot loop.** A **runtime judge would be a hot-loop LLM and is forbidden**.
+for the same committed state** (the meet-or-beat reference) and against handwritten
+exemplars, with **boilerplate output flagged as an automatic floor violation** (see
+stage 5). Note Opus-4.8 has a **dual build-time role**: (a) a reference/judge for
+scoring, AND (b) an **ingredient in generation** (best-of-N / curation / refinement
+that the realizer is built to match-or-beat). **BOTH are build-time only.** An
+offline LLM used as a build-time judge — and Opus-4.8 used at build time as
+reference *and* ingredient — is *permitted* by the leaf / build-time principle
+("the LLM is an oracle at the leaves, never the control loop"): it is exactly the
+sanctioned build-time-inference position, **at the leaves, not in the hot loop.** A
+**runtime judge would be a hot-loop LLM and is forbidden**.
 The quality bar is a build-time gate on the shipped deterministic artifact, not a
 thing consulted while the game runs; determinism is intact.
 
@@ -469,21 +510,26 @@ No runtime evaluation; a runtime judge would be a hot-loop LLM and is forbidden.
 **The concrete craft eval: build-time A/B against Opus-4.8.** For a given
 **committed state**, the harness (1) generates the realizer's prose for that state
 and (2) obtains **Opus-4.8's freeform-RP prose for the same state**. The judge
-then scores **gap-to-Opus** — the ceiling metric, how far the realizer's craft
-falls short of the Opus-4.8-RP reference — and flags any **slot-mad-libs /
-template-boilerplate** output (the existence floor violation; see
-`docs/research/existence-prose-assessment.md`) as an **automatic FLOOR VIOLATION
-that fails the build.** The two together give the depth/quality axes a concrete
-*referent* (Opus-4.8-RP) and the floor a concrete *failure condition*
-(boilerplate = fail). The aggregate goal — **maximize how often and how closely**
-gap-to-Opus approaches zero — is the moonshot, not a claim that it reaches zero
-everywhere; the floor (no boilerplate, ever) is the part we commit to absolutely.
+then scores **gap-to-Opus** with **target gap ≥ 0 (meet-or-beat)** — not "how far
+short" but whether the realizer **matches or exceeds** the Opus-4.8-RP reference on
+that covered state — and flags any **slot-mad-libs / template-boilerplate** output
+(the existence floor violation; see `docs/research/existence-prose-assessment.md`)
+as an **automatic FLOOR VIOLATION that fails the build.** The two together give the
+depth/quality axes a concrete *referent* (Opus-4.8-RP, meet-or-beat) and the floor
+a concrete *failure condition* (boilerplate = fail). On covered states the aim is
+**gap ≥ 0** — clear, since Opus is a build-time **ingredient** (best-of-N / curate /
+refine) and we add true-state specificity; the **moonshot** is holding that gap ≥ 0
+**broadly** across the combinatorial state space without baking every case
+(coverage-at-quality), and the floor (no boilerplate, ever) is the part we commit
+to absolutely.
 
-This A/B is **build-time only**. Opus-4.8 here is a **reference/judge at the
-leaves — NOT in the hot loop.** Generating the Opus-4.8 reference and running the
-judge happen at build time against committed states; nothing about this introduces
-a per-query runtime LLM, and the shipped artifact stays a deterministic function
-of `(intent, brain state, seed)`. Determinism is intact.
+This A/B is **build-time only**, and Opus-4.8 plays its **dual role** here — both
+the **reference/judge** scored against and the **ingredient** (best-of-N / curation
+/ refinement) the realizer is built to match-or-beat — **both at the leaves, NOT in
+the hot loop.** Generating the Opus-4.8 reference, running the curation/refinement,
+and running the judge all happen at build time against committed states; nothing
+about this introduces a per-query runtime LLM, and the shipped artifact stays a
+deterministic function of `(intent, brain state, seed)`. Determinism is intact.
 
 **Metrics are proxies — floors, never objectives (Goodhart).** By Goodhart's law,
 optimizing a proxy destroys the target it stood for. So the cheap metrics — n-gram
@@ -498,20 +544,22 @@ distribution**; the metrics only **diagnose**. The only honest arbiter of depth
 is **holistic preference** — the gap-to-Opus A/B (against Opus-4.8-RP for the same
 state) and preference against handwritten exemplars — taste — the irreducible
 target the proxies approximate but can never *be*. **The gap-to-Opus A/B is
-itself a holistic judge, and is subject to the same guard:** it is the ceiling
+itself a holistic judge, and is subject to the same guard:** it is the meet-or-beat
 *diagnostic*, not a target to be naively optimized into gaming (overfitting the
-judge's surface tics rather than actually closing the craft gap). The boilerplate
+judge's surface tics rather than actually meeting-or-beating Opus on craft). The
+boilerplate
 floor-check, by contrast, is a hard fail, not an objective to push against. The
 build-time-only discipline is unchanged: floors, A/B, and arbiter alike run at
 build time, never runtime.
 
 **OPEN:** the eval methodology specifics — how the gap-to-Opus A/B is obtained and
-scored (acquiring Opus-4.8-RP prose for committed states; thresholding the gap),
-how the boilerplate floor-check is made reliable, exemplar selection, how the six
-axes are scored and thresholded (depth especially — it is the least cleanly
-measurable of the six), and how the judge's taste is calibrated and audited. The
-*shape* is decided (build-time A/B against Opus-4.8, gap-to-Opus as ceiling
-metric, boilerplate as floor-fail); the *specifics* are open.
+scored (acquiring Opus-4.8-RP prose for committed states; running the
+Opus-as-ingredient curation/refinement; thresholding the gap at ≥ 0), how the
+boilerplate floor-check is made reliable, exemplar selection, how the six axes are
+scored and thresholded (depth especially — it is the least cleanly measurable of
+the six), and how the judge's taste is calibrated and audited. The *shape* is
+decided (build-time A/B against Opus-4.8, gap-to-Opus ≥ 0 as the meet-or-beat
+target, boilerplate as floor-fail); the *specifics* are open.
 
 ### The interface
 
@@ -644,9 +692,11 @@ does not break replay.
 
 The **only** LLM use anywhere in this design is **offline / at the leaves**:
 corpus generation/curation for the grammar and surrogate (build time), the
-build-time judge in the eval harness (build time), and **Opus-4.8 as the
-build-time craft reference** — generating freeform-RP prose for committed states
-so the gap-to-Opus A/B has a ceiling to score against (build time). **None is the
+build-time judge in the eval harness (build time), and **Opus-4.8 in its dual
+build-time role** — as the craft **reference** the gap-to-Opus A/B scores against
+(target gap ≥ 0), and as an **ingredient** in generation (best-of-N / curation /
+refinement over Opus's own freeform-RP candidates for committed states, combined
+with the true state) that the realizer is built to match-or-beat. **None is the
 hot loop.** There is no per-query inference at runtime — that remains forbidden,
 and the shipped artifact stays deterministic.
 
@@ -656,13 +706,14 @@ and the shipped artifact stays deterministic.
 
 This is the R&D frontier, **not claimed solved**. Honest risks:
 
-- **The trained surrogate may not approach Opus-4.8-RP craft.** A fixed-weight,
-  deterministic-eval model trained on a buildable corpus might land well below the
-  Opus-4.8-RP ceiling — which is *expected* generally, and accepted: the goal is
-  to maximize how often/closely we approach it, not to hit it. The non-negotiable
-  is the **floor** (good, never boilerplate); the *ceiling* is a bet, not a
-  guarantee. The risk that bites is the surrogate degrading *toward* the floor too
-  often, or — worse — *through* it into mad-libs, which the floor-check must catch.
+- **The trained surrogate may not hold meet-or-exceed-Opus craft as states drift
+  from baked.** A fixed-weight, deterministic-eval model trained on a buildable
+  corpus matches-or-beats Opus on covered cases by construction (Opus is an
+  ingredient), but may **degrade as states drift** from what's baked — the
+  coverage-at-quality moonshot. The non-negotiable is the **floor** (good, never
+  boilerplate); broad coverage at meet-or-exceed is the bet, not a guarantee. The
+  risk that bites is the surrogate degrading *toward* the floor too often on drifted
+  states, or — worse — *through* it into mad-libs, which the floor-check must catch.
 - **The grammar may read stiff, and the corpus may be hard to build.** Compositional
   grammars are notorious for wooden output; the curated/generated corpus that
   feeds both grammar and surrogate is itself a large, unscoped build-time effort.
@@ -679,9 +730,9 @@ This is the R&D frontier, **not claimed solved**. Honest risks:
   flat. The instant the trained realizer optimizes a metric *directly* — including
   the **gap-to-Opus A/B**, a holistic judge gameable like any other — the metric
   stops measuring anything. The mitigation — metrics as floors, holistic taste
-  (gap-to-Opus, preference vs handwritten) as the only arbiter — is itself
-  **unproven and taste-laden**, which is precisely why "approach Opus-4.8-RP craft"
-  stays the marked moonshot.
+  (gap-to-Opus ≥ 0, preference vs handwritten) as the only arbiter — is itself
+  **unproven and taste-laden**, which is precisely why **coverage-at-quality**
+  (holding meet-or-exceed-Opus broadly) stays the marked moonshot.
 - **Combinatorial salience may explode.** Scoring novelty × intensity × relevance
   over rich state, per tick, within an LOD budget, is a hard real-time problem;
   naive salience could be too expensive or too noisy.
@@ -691,31 +742,34 @@ This is the R&D frontier, **not claimed solved**. Honest risks:
 - **Depth resists operational measurement, and the variety metrics can mask its
   absence.** A generator can pass **freshness + specificity** while producing flat
   prose — many different, fully-faithful, fully-specific sentences that still fall
-  far short of the Opus-4.8-RP ceiling (and of a skilled human author) because they
-  carry no implication, subtext, or fusion. This is the **core moonshot risk**:
-  "approach Opus-4.8-RP craft" lives or dies on depth — the one axis we can measure
-  *least* well — and freshness in particular can read as quality while hiding
-  depth's absence. (Note this risk is about the *ceiling*, not the floor: flat-but-
-  faithful prose can still clear the non-trash floor; what it cannot do is approach
-  the ceiling.)
+  short of the meet-or-beat-Opus reference (and of a skilled human author) because
+  they carry no implication, subtext, or fusion. Depth — the one axis we can measure
+  *least* well — is where the per-case meet-or-beat is hardest to *verify*, and
+  freshness in particular can read as quality while hiding depth's absence. (Note
+  this risk is about per-case *craft*, not the floor: flat-but-faithful prose can
+  still clear the non-trash floor; what it risks is the meet-or-beat-Opus target.)
 - **The binding constraint is substrate depth, which is outside this doc's scope.**
-  Per *Depth is upstream*: the realizer's reach toward the Opus-4.8-RP ceiling is
-  set by the depth of the **brain** (`npc-mind-and-language.md`) and the **world**
-  (`semantic-layer.md`), not by the realizer. A shallow brain/world caps prose
-  quality no matter how good the realizer is — a perfect lens over a
-  two-dimensional character still renders a two-dimensional character, and the only
-  way past that is to confabulate, which faithfulness forbids. **The realizer
-  cannot rescue a shallow substrate.** This relocates the *real* moonshot upstream
-  of this doc, onto a larger problem this doc depends on but does not own.
-- **"Approach Opus-4.8-RP craft" is the unproven moonshot.** Coverage/volume
-  superiority follows from composition (`reference-analysis.md`). Reaching
-  Opus-4.8-RP craft — and matching a skilled human author *per instance* — does
-  not follow from anything proven here, and is **not claimed generally**: we
-  target it, maximizing how often/closely we approach it, and we hold a non-trash
-  floor everywhere else. This is the frontier claim, confronted as such — owned,
-  not designed away. Its sharpened core is the depth/nuance axis above — and even
-  that is the *rendering-side* half of the claim; its other, larger half is
-  upstream substrate depth (preceding risk).
+  Per *Depth is upstream*: the realizer's craft is set by the depth of the **brain**
+  (`npc-mind-and-language.md`) and the **world** (`semantic-layer.md`), not by the
+  realizer. A shallow brain/world caps prose quality no matter how good the realizer
+  is — a perfect lens over a two-dimensional character still renders a
+  two-dimensional character, and the only way past that is to confabulate, which
+  faithfulness forbids. **The realizer cannot rescue a shallow substrate.** Both
+  halves of the per-case craft win — the true state we render past Opus, and the
+  depth the lens surfaces — depend on this upstream substrate, a larger problem this
+  doc depends on but does not own.
+- **Coverage-at-quality is the unproven moonshot.** Per-covered-case
+  meet-or-exceed-Opus is structurally clear — Opus is a build-time ingredient
+  (best-of-N / curate / refine) and we add true-state specificity, so out-crafting
+  Opus per covered case is the starting line. What does **not** follow from anything
+  proven here is **generalizing that craft across the combinatorial state space**
+  without baking every case — holding gap-to-Opus ≥ 0 as states drift from baked,
+  never dropping to the non-trash floor. That is the frontier claim, confronted as
+  such — owned, not designed away. Its sharpened core is the depth/nuance axis above
+  — and even per-case depth is the *rendering-side* half, whose other, larger half
+  is upstream substrate depth (preceding risk). The **only** thing genuinely ceded
+  to a (forbidden) hot-loop Opus is the uncovered tail on a novel state — the
+  generality concession, **not** a per-case craft cap.
 
 ---
 
@@ -731,8 +785,8 @@ This is the R&D frontier, **not claimed solved**. Honest risks:
   prose for committed states; how the comparison is scored and thresholded), how
   the boilerplate floor-check is made reliable, exemplar selection, scoring and
   thresholding of the six axes, and judge calibration and auditing. (The *shape*
-  is decided — build-time A/B against Opus-4.8, gap-to-Opus as ceiling metric,
-  boilerplate as floor-fail; the *specifics* are open.)
+  is decided — build-time A/B against Opus-4.8, gap-to-Opus ≥ 0 as the meet-or-beat
+  target, boilerplate as floor-fail; the *specifics* are open.)
 - **How to GENERATE and MEASURE depth / nuance** — the telling-detail /
   synecdoche salience move, multi-proposition fusion, subtext from the
   literal-vs-stance gap, RST-style rhetorical-relation grammar, and the depth
@@ -798,8 +852,8 @@ These are unsolved. The architecture is a *direction*, not an implementation.
   precedent.** Supplies the handwritten exemplars (TiTS, LT) and the "generalize,
   don't multiply" act×target×position×body-state precedent the grammar carries
   from interaction to prose. Note: it credits recombination with *volume/variety*,
-  not *craft* — this doc's craft claim (approach the Opus-4.8-RP ceiling) is the
-  harder, unproven one.
+  not *craft* — this doc's craft claim (meet-or-exceed Opus-4.8-RP per covered case,
+  with broad coverage-at-quality as the unproven part) is the harder one.
 - `docs/research/existence-prose-assessment.md` — **the negative exemplar of the
   floor.** An evidence study of `existence`'s realizer confirming it is exactly the
   forbidden floor violation: NT-weighted selection over a finite authored

@@ -48,7 +48,7 @@ func _ready() -> void:
 
 	_face = FaceRig.new()
 	add_child(_face)
-	_face.setup(1234, _rig.skeleton)
+	_face.setup(1234, _rig.skeleton, _rig.mesh_instance)
 
 	# Camera framed on the head (eye height from the rig).
 	var cam := Camera3D.new()

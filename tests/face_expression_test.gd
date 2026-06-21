@@ -27,6 +27,7 @@ func _ready() -> void:
 	_test_talk_pulse()
 	_test_maren_chain()
 	_test_coverage()
+	_test_blendshape_sink()
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
 
@@ -137,5 +138,51 @@ func _test_coverage() -> void:
 	_ok(cov["driven_by_bone"].has("mouth_open") and cov["driven_by_bone"].has("look_dir")
 		and cov["driven_by_bone"].has("eyes_closed"),
 		"bone-driven channels reported (jaw/eyes/lids)")
-	_ok(cov["gap_no_geometry"].has("mouth_smile") and cov["gap_no_geometry"].has("brows_angry"),
-		"gap channels (no expression blendshape) reported honestly")
+	# The expression-import closed the smile/sad/brow gap: these now have geometry.
+	_ok(cov["driven_by_blendshape"].has("mouth_smile") and cov["driven_by_blendshape"].has("brows_angry")
+		and cov["driven_by_blendshape"].has("mouth_sad"),
+		"affect channels now driven by imported CC0 expression blendshapes")
+	# Honest about what is still uncovered (no faithful CC0 AU) and approximated.
+	_ok(cov["gap_no_geometry"].has("mouth_panting") and cov["gap_no_geometry"].has("talking"),
+		"still-uncovered channels reported honestly (no panting/viseme AU)")
+	_ok(cov["approximated"].has("eyes_sexy") and cov["approximated"].has("mouth_blep"),
+		"approximated channels flagged honestly (near-miss CC0 AU)")
+
+
+# The MESH actually carries the channel-named expression blendshapes, and the sink
+# drives them: pushing a happy vs sad affect produces DIFFERENT blendshape weights.
+func _test_blendshape_sink() -> void:
+	var mesh: ArrayMesh = load("res://assets/body/base_body.res")
+	_ok(mesh != null, "base_body.res loads")
+	if mesh == null:
+		return
+	var have := {}
+	for i in mesh.get_blend_shape_count():
+		have[str(mesh.get_blend_shape_name(i))] = true
+	for n in ["MouthSmile", "MouthSad", "BrowsAngry", "EyesClosed", "MouthSnarl", "BrowsShy"]:
+		_ok(have.has(n), "mesh declares expression blendshape '%s'" % n)
+	# Drive a real MeshInstance and confirm the sink writes distinct weights per affect.
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh.duplicate(true)
+	add_child(mi)
+	var happy_w := _drive_weight(mi, ExprState.new(0.9, 0.4, 0.0, 1.0), "MouthSmile")
+	var sad_w := _drive_weight(mi, ExprState.new(-0.9, 0.1, 0.0, 1.0), "MouthSmile")
+	_ok(happy_w > 0.3 and sad_w < 0.05, "happy drives MouthSmile blendshape; sad does not")
+	var sad_frown := _drive_weight(mi, ExprState.new(-0.9, 0.1, 0.0, 1.0), "MouthSad")
+	_ok(sad_frown > 0.3, "sad drives the MouthSad blendshape")
+	var angry := _drive_weight(mi, ExprState.new(0.0, 0.3, 0.95, 1.0), "BrowsAngry")
+	_ok(angry > 0.5, "high tension drives the BrowsAngry blendshape")
+	mi.queue_free()
+
+
+func _drive_weight(mi: MeshInstance3D, e: ExprState, shape: String) -> float:
+	var rig := FaceRig.new()
+	add_child(rig)
+	rig.set_process(false)
+	rig.setup(7, null, mi)
+	rig.apply_expression(e)
+	for i in 30:
+		rig.step(1.0 / 60.0)
+	var w := float(mi.get("blend_shapes/%s" % shape))
+	rig.queue_free()
+	return w

@@ -44,6 +44,7 @@ data/targets/macrodetails/universal-female-young-averagemuscle-maxweight.target 
 data/targets/macrodetails/height/female-young-averagemuscle-averageweight-maxheight.target  (412 KB)  height_max blendshape
 data/targets/macrodetails/proportions/female-young-averagemuscle-averageweight-idealproportions.target     proportions_ideal
 data/targets/macrodetails/proportions/female-young-averagemuscle-averageweight-uncommonproportions.target  proportions_uncommon
+data/targets/expression/units/caucasian/{eye,eyebrows,mouth}-*.target  (15 files)  facial-expression action units (see below)
 data/rigs/default.mhskel                                           (116 KB)  skeleton (bone tree + joint cubes)
 data/rigs/default_weights.mhw                                      (898 KB)  per-vertex LBS skin weights (Slice 3)
 ```
@@ -78,6 +79,34 @@ genital *targets* and *helper geometry* are vendored so the NSFW-first full-body
 is served; the Layer-1 body gate (DESIGN.md / `body-parameterization.md` §5) is
 unaffected — it guards the NSFW *verb* affordances on adult body-state, independent of
 whether the genital mesh renders.
+
+Facial-expression action units — the 15 CC0 FACS-like `.target` files under
+`data/targets/expression/units/caucasian/` that `tools/body_converter.gd`
+(`EXPR_BLENDSHAPES`) composes into the facial-expression blendshapes that drive the
+`FaceRig` channels (`scripts/body/face/face_rig.gd`). These close the prior gap where
+the head had the expression RIG but ZERO expression geometry. The caucasian race set
+is used (the base mesh's own race anchor). Each is the same ASCII sparse-delta
+`.target` format as the macro anchors, byte-identical to the pinned `v1.3.0` source
+(verified by `cmp`), and explicitly CC0 (per-file `# This asset was explicitly
+released as CC0 in september 2020` header + `LICENSE.md` §C "Targets"):
+
+```
+eye-{left,right}-closure.target          → EyesClosed   (full lid closure)
+eye-{left,right}-slit.target             → EyesSexy     (narrowed fissure; approximated)
+eyebrows-{left,right}-inner-up.target    → BrowsShy     (inner-brow raise, worry/shy)
+eyebrows-{left,right}-down.target        → BrowsAngry   (brow lower/furrow)
+mouth-open.target                        → MouthOpen    (jaw-drop mouth, lip geometry)
+mouth-corner-puller.target               → MouthSmile   (zygomatic smile)
+mouth-depression.target                  → MouthSad     (corner depressor frown)
+mouth-{upward-retraction,eversion}.target→ MouthSnarl   (upper-lip raise + sneer)
+mouth-{protusion,pursing}.target         → MouthBlep    (lip protrude+purse; approximated*)
+```
+
+`*` Approximations are honest: the CC0 unit set has no dedicated "sultry"/half-lidded
+unit (the eye-slit AU is the closest) and no tongue-protrusion unit (a true blep needs
+the tongue proxy, which has no expression target). The `MouthPanting`, `Talking`
+(viseme detail), and `LookCross` channels have NO faithful CC0 AU and remain
+geometry-uncovered (see `face_rig.gd` BLENDSHAPE COVERAGE).
 
 Modifier-definition JSON (Slice B — the data-driven modifier registry,
 `docs/decisions/body-parameterization.md` §6; parsed by

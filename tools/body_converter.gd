@@ -99,6 +99,63 @@ const AXIS_TARGETS := [
 	["proportions_uncommon", "macrodetails/proportions/female-young-averagemuscle-averageweight-uncommonproportions.target"],
 ]
 
+## FACIAL EXPRESSION blendshapes (the channel-geometry that closes the FaceRig gap).
+##
+## MakeHuman v1.3.0 ships CC0 FACS-like "action unit" expression targets under
+## data/targets/expression/units/<race>/ (verified explicitly CC0 — LICENSE.md §C
+## "Targets", LICENSE.ASSETS.md "# Creative Commons CC0 1.0 Universal"; same `.target`
+## ASCII sparse-delta format as the macro anchors above, keyed by BASE vertex index).
+## We import the CAUCASIAN unit set (the same race anchor the base mesh uses) and
+## COMPOSE the per-side units into the FaceRig's channel-named blendshapes, so each
+## resolved channel (scripts/body/face/face_rig.gd val_*) has geometry to drive.
+##
+## Each entry: [blendshape name == FaceRig sink output, [AU target files summed]].
+## Summing left+right symmetric units gives a single symmetric channel (the FaceRig
+## drives one scalar per channel); the names match FaceRig._drive_head's set() keys.
+## These are aeriea's OWN CC0 MakeHuman targets — NO BDCC2 art (Path-A discipline).
+##
+## COVERAGE (honest): MakeHuman's caucasian unit set is a FACS muscle vocabulary, not
+## a 1:1 match for the rig's affect channels. The mapping below is the best faithful
+## composition; channels with no faithful AU (MouthBlep — there is no tongue-out AU;
+## MouthPanting — no dedicated AU; EyesSexy approximated by the eye-slit AU) are noted.
+## Paths are relative to data/targets/ (same root as AXIS_TARGETS).
+const EXPR_BLENDSHAPES := [
+	# EyesClosed — full lid closure (both eyes). Already bone-drivable (orbicularis);
+	# this gives the SKIN/lid geometry the bones can't move on their own.
+	["EyesClosed", [
+		"expression/units/caucasian/eye-left-closure.target",
+		"expression/units/caucasian/eye-right-closure.target"]],
+	# EyesSexy — lidded "bedroom"/half-closed eyes. APPROXIMATED by the eye-slit AU
+	# (narrowed palpebral fissure); MakeHuman has no dedicated "sultry" unit.
+	["EyesSexy", [
+		"expression/units/caucasian/eye-left-slit.target",
+		"expression/units/caucasian/eye-right-slit.target"]],
+	# BrowsShy — inner-brow raise (the worried/shy/sad "AU1" oblique brow).
+	["BrowsShy", [
+		"expression/units/caucasian/eyebrows-left-inner-up.target",
+		"expression/units/caucasian/eyebrows-right-inner-up.target"]],
+	# BrowsAngry — brow LOWER/furrow ("AU4").
+	["BrowsAngry", [
+		"expression/units/caucasian/eyebrows-left-down.target",
+		"expression/units/caucasian/eyebrows-right-down.target"]],
+	# MouthOpen — jaw-drop mouth opening (supplements the jaw BONE with lip geometry).
+	["MouthOpen", ["expression/units/caucasian/mouth-open.target"]],
+	# MouthSmile — lip-corner puller (zygomatic, "AU12").
+	["MouthSmile", ["expression/units/caucasian/mouth-corner-puller.target"]],
+	# MouthSad — lip-corner depressor (frown, "AU15").
+	["MouthSad", ["expression/units/caucasian/mouth-depression.target"]],
+	# MouthSnarl — upper-lip raise + eversion (sneer, "AU9/10").
+	["MouthSnarl", [
+		"expression/units/caucasian/mouth-upward-retraction.target",
+		"expression/units/caucasian/mouth-eversion.target"]],
+	# MouthBlep — no tongue-protrusion AU exists in the CC0 unit set; the closest lip
+	# shape is a protrusion+purse (lips pushed forward). APPROXIMATE; not a true blep
+	# (a real blep needs the TONGUE proxy, future work). Gives the channel SOME geometry.
+	["MouthBlep", [
+		"expression/units/caucasian/mouth-protusion.target",
+		"expression/units/caucasian/mouth-pursing.target"]],
+]
+
 
 func _ready() -> void:
 	var code := _run()
@@ -307,6 +364,63 @@ func _run() -> int:
 		})
 		print("body_converter: blendshape '%s' <- %s (%d base verts moved, %d render verts)" % [axis_name, rel, moved_base.size(), moved])
 
+	# --- facial EXPRESSION blendshapes (close the FaceRig channel gap) ----------
+	# Same DELTA/RELATIVE pipeline as the macro anchors above; the only difference is
+	# that each channel COMPOSES (sums) one or more CC0 action-unit `.target` files
+	# (left+right symmetric units -> one symmetric channel). The resulting blendshape
+	# is named EXACTLY as the FaceRig sink's set("blend_shapes/<name>") key, so the
+	# rig drives it with no further mapping. Normals stay ZERO deltas for the same
+	# octahedral-compression reason as the macros (face morphs are small; the
+	# FaceRig drives these as live GPU blendshapes, so per-frame CPU normal re-bake
+	# would be too costly — the slight shading staleness under a small face morph is
+	# acceptable, and documented in face_rig.gd).
+	var expr_axes := []
+	for entry in EXPR_BLENDSHAPES:
+		var bs_name: String = entry[0]
+		var rels: Array = entry[1]
+		# Accumulate deltas across all AU files for this channel, keyed by BASE vert.
+		var acc := {}    # base vert -> summed Vector3 delta (MH units)
+		var missing := false
+		for rel2 in rels:
+			var tp := data_root.path_join("targets").path_join(String(rel2))
+			var ds := _parse_target(tp)
+			if ds.is_empty():
+				push_error("body_converter: expression target empty/failed: %s" % tp)
+				missing = true
+				break
+			for k in ds:
+				acc[k] = acc.get(k, Vector3.ZERO) + ds[k]
+		if missing or acc.is_empty():
+			push_error("body_converter: expression channel '%s' had no deltas — SKIPPED" % bs_name)
+			continue
+		# Scatter the summed BASE-keyed deltas onto every render vert (UV-seam-safe,
+		# exactly as the macro loop) and build the RELATIVE vertex-delta array.
+		var ev_delta := PackedVector3Array()
+		var en_delta := PackedVector3Array()
+		ev_delta.resize(rn)   # zero-initialised
+		en_delta.resize(rn)   # zero normal deltas (see octahedral note above)
+		var emoved_base := {}
+		for ri in rn:
+			var b := render_to_base[ri]
+			if not acc.has(b):
+				continue
+			var d: Vector3 = acc[b]
+			ev_delta[ri] = Vector3(d.x * MH_TO_METERS, d.y * MH_TO_METERS, d.z * MH_TO_METERS)
+			emoved_base[b] = true
+		var eba := []
+		eba.resize(Mesh.ARRAY_MAX)
+		eba[Mesh.ARRAY_VERTEX] = ev_delta
+		eba[Mesh.ARRAY_NORMAL] = en_delta
+		mesh.add_blend_shape(bs_name)
+		blend_arrays.append(eba)
+		expr_axes.append({
+			"channel": bs_name,
+			"blend_shape_index": manifest_axes.size() + expr_axes.size(),
+			"source_targets": rels,
+			"moved_vertices": emoved_base.size(),
+		})
+		print("body_converter: expression blendshape '%s' <- %s (%d base verts moved)" % [bs_name, str(rels), emoved_base.size()])
+
 	# add the surface with all blendshapes attached. The CUSTOM0 channel format
 	# (ARRAY_CUSTOM_RGBA8_UNORM) must be declared in the format flags or the custom
 	# array is ignored — Godot reads the per-custom-channel format from these bits.
@@ -337,6 +451,7 @@ func _run() -> int:
 		"render_vertex_count": rn,
 		"triangle_count": tris.size() / 3,
 		"axes": manifest_axes,
+		"expression_blendshapes": expr_axes,
 		"rig": {
 			"skeleton": "rigs/default.mhskel",
 			"weights": "rigs/default_weights.mhw",

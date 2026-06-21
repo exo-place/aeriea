@@ -19,24 +19,31 @@
 ##     RandomNumberGenerator handed to each gesture + per-frame integration. Same
 ##     seed + same dt sequence -> same resolved face (determinism invariant).
 ##
-## ---- BLENDSHAPE COVERAGE (the real unknown, RESOLVED) --------------------------
-## aeriea's CC0 head (assets/body/base_body.res) declares ONLY 9 MACRO BODY
-## blendshapes (age/gender/muscle/weight/height/proportions). It has ZERO facial
-## EXPRESSION blendshapes (no Eyes_Close, Mouth_Smile, Brows_*, etc.). MakeHuman
-## DOES ship `data/targets/expression/*` (CC0) but they are not imported into
-## aeriea's mesh pipeline yet (Slice B/C work).
-##
-## So the channels split into:
-##   DRIVABLE NOW via face BONES present in the CC0 default rig:
-##     - MouthOpen   -> `jaw` pitch (jaw drop; skin follows via LBS)
-##     - LookDir     -> `eye.L`/`eye.R` yaw+pitch (eyes track)
-##     - EyesClosed  -> `orbicularis03/04.L/R` (orbital sphincter -> lid closure)
-##   NOT DRIVABLE (no blendshape, no dedicated bone) — reported as the GAP:
-##     - MouthSmile, MouthSad, MouthSnarl, BrowsShy, BrowsAngry,
-##       MouthBlep, MouthPanting, EyesSexy, LookCross, Talking(viseme detail)
-## The resolved values for the gap channels are still COMPUTED and exposed (tests
-## assert on them, and a future expression-blendshape import wires them with zero
-## rig change) — they simply have no geometry to move on today's head.
+## ---- BLENDSHAPE COVERAGE (the gap, NOW CLOSED) ---------------------------------
+## aeriea's CC0 head (assets/body/base_body.res) declares the 9 MACRO BODY
+## blendshapes (age/gender/muscle/weight/height/proportions) AND, since the
+## expression-import (tools/body_converter.gd EXPR_BLENDSHAPES), 9 facial
+## EXPRESSION blendshapes composed from MakeHuman's CC0 FACS action-unit targets
+## (data/targets/expression/units/caucasian/*, explicitly CC0). The blendshapes are
+## named EXACTLY as this rig's channels, so _drive_head sets them with no mapping:
+##     EyesClosed, EyesSexy, BrowsShy, BrowsAngry, MouthOpen,
+##     MouthSmile, MouthSad, MouthSnarl, MouthBlep
+## The sink drives BOTH the face BONES (jaw / eyes / lids — pose detail, eyeball
+## tracking) AND these blendshapes (the lip/brow/lid GEOMETRY the bones can't move):
+##   BONE-driven (pose):   MouthOpen->jaw, LookDir->eye.L/R, EyesClosed->orbicularis
+##   BLENDSHAPE-driven (geometry, NOW): EyesClosed, EyesSexy, BrowsShy, BrowsAngry,
+##     MouthOpen, MouthSmile, MouthSad, MouthSnarl, MouthBlep
+## STILL UNCOVERED (no faithful CC0 AU in MakeHuman's unit set):
+##   - MouthPanting   — no dedicated panting AU (would need an open+breath cycle)
+##   - Talking        — viseme DETAIL (the jaw bone gives gross talk motion; there
+##                      are no phoneme/viseme blendshapes in the CC0 unit set)
+##   - LookCross      — eye convergence (a bone/IK concern, not a blendshape)
+## NOTE (approximations, honest): EyesSexy uses the eye-SLIT AU (narrowed fissure),
+## not a dedicated "sultry" unit; MouthBlep uses lip protrusion+purse — a true blep
+## needs the TONGUE proxy, which has no expression target. These channels have SOME
+## geometry but are not a perfect match.
+## The resolved values for any still-uncovered channel are still COMPUTED and exposed
+## (tests assert on them) — they simply have no geometry to move on today's head.
 class_name FaceRig
 extends Node
 
@@ -73,6 +80,18 @@ var _affect: FaceGesture = null
 var skeleton: Skeleton3D = null
 var _bone_index := {}
 
+## The MeshInstance3D carrying the facial EXPRESSION blendshapes (the body mesh —
+## BodyRig.mesh_instance). Set by the host alongside the skeleton. When present, the
+## sink drives the channel-named blendshapes (geometry); when null the sink falls
+## back to bones-only (graceful degradation, pre-expression-import behaviour).
+var face_mesh: MeshInstance3D = null
+var _face_blendshapes := {}   # channel blendshape name -> present on the mesh?
+
+## The facial-expression blendshape names this sink drives, in the mesh. Each name
+## is set EXACTLY as baked by tools/body_converter.gd EXPR_BLENDSHAPES (== rig channel).
+const EXPR_SHAPES := ["EyesClosed", "EyesSexy", "BrowsShy", "BrowsAngry",
+	"MouthOpen", "MouthSmile", "MouthSad", "MouthSnarl", "MouthBlep"]
+
 ## Bone names (CC0 MakeHuman default rig).
 const BONE_JAW := "jaw"
 const BONE_EYE_L := "eye.L"
@@ -91,7 +110,7 @@ var _rest_q := {}   # bone name -> rest local quaternion
 
 ## Seed the rig's RNG and build the gesture stack. Call once after the node is in
 ## the tree (or explicitly in tests). `seed` makes blink/look-wander replayable.
-func setup(seed: int = 0, skel: Skeleton3D = null) -> void:
+func setup(seed: int = 0, skel: Skeleton3D = null, mesh: MeshInstance3D = null) -> void:
 	rng.seed = seed
 	skeleton = skel
 	if skeleton != null:
@@ -99,7 +118,24 @@ func setup(seed: int = 0, skel: Skeleton3D = null) -> void:
 			var bn := skeleton.get_bone_name(i)
 			_bone_index[bn] = i
 			_rest_q[bn] = skeleton.get_bone_pose_rotation(i)
+	set_face_mesh(mesh)
 	_build_gestures()
+
+
+## Bind the MeshInstance3D carrying the expression blendshapes (the body mesh). Records
+## which channel blendshapes are actually present so the sink only sets real ones.
+func set_face_mesh(mesh: MeshInstance3D) -> void:
+	face_mesh = mesh
+	_face_blendshapes.clear()
+	if face_mesh == null or not (face_mesh.mesh is ArrayMesh):
+		return
+	var am := face_mesh.mesh as ArrayMesh
+	var have := {}
+	for i in am.get_blend_shape_count():
+		have[str(am.get_blend_shape_name(i))] = true
+	for name in EXPR_SHAPES:
+		if have.has(name):
+			_face_blendshapes[name] = true
 
 
 func _build_gestures() -> void:
@@ -186,9 +222,20 @@ func _apply_overrides() -> void:
 			FaceValue.LookDir: val_look_dir = face_override.get_override(field, Vector2.ZERO)
 
 
-## The SINK: map the resolved channels onto the head's available BONES. Channels
-## with no geometry (the gap) are intentionally not driven here (see class doc).
+## The SINK: map the resolved channels onto the head's available BONES (pose) AND the
+## channel-named expression BLENDSHAPES (geometry). Each output is independent — a host
+## may supply only a skeleton (bones), only a mesh (blendshapes), or both.
 func _drive_head() -> void:
+	_drive_face_bones()
+	# --- expression GEOMETRY: drive the channel-named blendshapes ----------------
+	# The lip/brow/lid SHAPE the bones can't move. Each resolved channel sets its
+	# identically-named blendshape (baked by body_converter EXPR_BLENDSHAPES). A
+	# channel with no blendshape on this mesh is simply not set (see set_face_mesh).
+	_drive_face_shapes()
+
+
+## Drive the face BONES (jaw drop, eyeball look, lid squeeze). No-op without a skeleton.
+func _drive_face_bones() -> void:
 	if skeleton == null:
 		return
 	# MouthOpen + a fraction of Talking -> jaw drop.
@@ -201,6 +248,30 @@ func _drive_head() -> void:
 	# LookDir -> eye yaw (x) + pitch (y).
 	_set_eye_look(BONE_EYE_L, val_look_dir)
 	_set_eye_look(BONE_EYE_R, val_look_dir)
+
+
+## Set the expression blendshape weights from the resolved channels. Pure read of the
+## val_* channels; deterministic (same channels -> same weights). No-op if no face mesh.
+func _drive_face_shapes() -> void:
+	if face_mesh == null or _face_blendshapes.is_empty():
+		return
+	# Talking adds a fraction of mouth-open geometry (the jaw bone gives the gross
+	# motion; this lets the lips part on speech). Same mix as the jaw bone above.
+	var mouth_open_amt := clampf(maxf(val_mouth_open, val_talking * 0.6), 0.0, 1.0)
+	var weights := {
+		"EyesClosed": clampf(val_eyes_closed, 0.0, 1.0),
+		"EyesSexy": clampf(val_eyes_sexy, 0.0, 1.0),
+		"BrowsShy": clampf(val_brows_shy, 0.0, 1.0),
+		"BrowsAngry": clampf(val_brows_angry, 0.0, 1.0),
+		"MouthOpen": mouth_open_amt,
+		"MouthSmile": clampf(val_mouth_smile, 0.0, 1.0),
+		"MouthSad": clampf(val_mouth_sad, 0.0, 1.0),
+		"MouthSnarl": clampf(val_mouth_snarl, 0.0, 1.0),
+		"MouthBlep": clampf(val_mouth_blep, 0.0, 1.0),
+	}
+	for name in weights:
+		if _face_blendshapes.has(name):
+			face_mesh.set("blend_shapes/%s" % name, float(weights[name]))
 
 
 func _set_bone_pitch(bn: String, angle: float) -> void:
@@ -237,8 +308,13 @@ func resolved() -> Dictionary:
 ## the gap (computed but not rendered). Reported by the demo + asserted by tests.
 static func channel_coverage() -> Dictionary:
 	return {
+		# Driven via face BONES (pose detail + eyeball tracking).
 		"driven_by_bone": ["mouth_open", "look_dir", "eyes_closed"],
-		"gap_no_geometry": ["mouth_smile", "mouth_sad", "mouth_snarl", "brows_shy",
-			"brows_angry", "mouth_blep", "mouth_panting", "eyes_sexy", "look_cross",
-			"talking"],
+		# Driven via the imported CC0 expression BLENDSHAPES (lip/brow/lid geometry).
+		"driven_by_blendshape": ["eyes_closed", "eyes_sexy", "brows_shy", "brows_angry",
+			"mouth_open", "mouth_smile", "mouth_sad", "mouth_snarl", "mouth_blep"],
+		# Approximated by a near-miss CC0 AU (geometry present, not a perfect match).
+		"approximated": ["eyes_sexy", "mouth_blep"],
+		# STILL no geometry — no faithful CC0 AU / not a blendshape concern.
+		"gap_no_geometry": ["mouth_panting", "look_cross", "talking"],
 	}

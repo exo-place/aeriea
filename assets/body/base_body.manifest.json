@@ -56,6 +56,86 @@
 			"source_target": "targets/macrodetails/proportions/female-young-averagemuscle-averageweight-uncommonproportions.target"
 		}
 	],
+	"expression_blendshapes": [
+		{
+			"blend_shape_index": 9,
+			"channel": "EyesClosed",
+			"moved_vertices": 230,
+			"source_targets": [
+				"expression/units/caucasian/eye-left-closure.target",
+				"expression/units/caucasian/eye-right-closure.target"
+			]
+		},
+		{
+			"blend_shape_index": 10,
+			"channel": "EyesSexy",
+			"moved_vertices": 338,
+			"source_targets": [
+				"expression/units/caucasian/eye-left-slit.target",
+				"expression/units/caucasian/eye-right-slit.target"
+			]
+		},
+		{
+			"blend_shape_index": 11,
+			"channel": "BrowsShy",
+			"moved_vertices": 84,
+			"source_targets": [
+				"expression/units/caucasian/eyebrows-left-inner-up.target",
+				"expression/units/caucasian/eyebrows-right-inner-up.target"
+			]
+		},
+		{
+			"blend_shape_index": 12,
+			"channel": "BrowsAngry",
+			"moved_vertices": 130,
+			"source_targets": [
+				"expression/units/caucasian/eyebrows-left-down.target",
+				"expression/units/caucasian/eyebrows-right-down.target"
+			]
+		},
+		{
+			"blend_shape_index": 13,
+			"channel": "MouthOpen",
+			"moved_vertices": 1149,
+			"source_targets": [
+				"expression/units/caucasian/mouth-open.target"
+			]
+		},
+		{
+			"blend_shape_index": 14,
+			"channel": "MouthSmile",
+			"moved_vertices": 781,
+			"source_targets": [
+				"expression/units/caucasian/mouth-corner-puller.target"
+			]
+		},
+		{
+			"blend_shape_index": 15,
+			"channel": "MouthSad",
+			"moved_vertices": 625,
+			"source_targets": [
+				"expression/units/caucasian/mouth-depression.target"
+			]
+		},
+		{
+			"blend_shape_index": 16,
+			"channel": "MouthSnarl",
+			"moved_vertices": 775,
+			"source_targets": [
+				"expression/units/caucasian/mouth-upward-retraction.target",
+				"expression/units/caucasian/mouth-eversion.target"
+			]
+		},
+		{
+			"blend_shape_index": 17,
+			"channel": "MouthBlep",
+			"moved_vertices": 864,
+			"source_targets": [
+				"expression/units/caucasian/mouth-protusion.target",
+				"expression/units/caucasian/mouth-pursing.target"
+			]
+		}
+	],
 	"license": "CC0-1.0 (MakeHuman core base mesh + targets, explicitly CC0 since Sept 2020)",
 	"mh_to_meters": 0.1,
 	"render_vertex_count": 14517,

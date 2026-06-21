@@ -50,6 +50,7 @@ SUITES=(
   gaze_test
   sim_clock_test
   memory_test
+  relationship_mood_test
   body_asset_test
   body_gate_test
   body_modifier_registry_test

@@ -46,6 +46,7 @@ SUITES=(
   interaction_behavior_test
   interaction_golden_trace_test
   text_slice_test
+  maren_history_test
   face_expression_test
   gaze_test
   sim_clock_test

@@ -21,6 +21,7 @@ extends Control
 const KIT_PATH := "res://interaction/sandbox.kit.json"
 const InterpScript := preload("res://scripts/interaction/interaction_interpreter.gd")
 const NpcRealizerScript := preload("res://scripts/text/npc_realizer.gd")
+const MarenHistory := preload("res://scripts/text/maren_history.gd")
 
 const NPC_ID := "npc_maren"
 ## One chosen verb = one interaction step. dt=1.0 makes add_fill `rate` read as a
@@ -38,6 +39,11 @@ var _kit: InteractionKit
 var _interp
 var _host
 var _rng := RandomNumberGenerator.new()
+## The history stack (memory + relationship + mood -> ExprState + callbacks). Wires
+## the affordance events Maren accumulates over time, off a seeded deterministic clock.
+var _history: MarenHistory
+## Seconds the player "leaves" before returning (the wait command). One workday.
+const LEAVE_SECONDS := 9 * 3600
 ## The verb names currently offered (index -> name), recomputed each turn so the
 ## menu shows only verbs whose guard passes (respecting preconditions).
 var _menu: Array[String] = []
@@ -128,6 +134,7 @@ func _setup_sim() -> void:
 	_interp.setup(_kit, _host)
 	_interp.add_instance(NPC_ID, NPC_ID)
 	_interp.reset_state()
+	_history = MarenHistory.new(RNG_SEED)
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +179,24 @@ func _present_menu() -> void:
 	for i in _menu.size():
 		var prompt_text := _verb_prompt(it, _menu[i])
 		lines.append("  [b]%d[/b]) %s" % [i + 1, prompt_text])
+	lines.append("  [b]wait[/b]) Step away and come back later (advance time)")
 	_append_line("[color=#778899]" + "\n".join(lines) + "[/color]")
+
+
+## Advance the timeline: the player leaves and returns hours later. The history stack
+## decays (memory + annoyance) deterministically off the seeded clock — but the
+## accumulated memory persists, so Maren greets the player as someone she REMEMBERS.
+func _leave_and_return() -> void:
+	_history.advance(LEAVE_SECONDS)
+	var hrs := LEAVE_SECONDS / 3600
+	_append_line("[i]You step away. Time passes — about %d hours. When you come back, she's still here.[/i]" % hrs,
+		Color(0.6, 0.65, 0.7))
+	# On return: her face reflects the DECAYED-but-remembered history; a callback may fire.
+	var callback := _history.memory_callback()
+	if callback != "":
+		_append_line(callback, Color(0.85, 0.8, 0.7))
+	_append_line(_describe(), Color(0.78, 0.82, 0.88))
+	_append_line(_face_read(""), Color(0.5, 0.62, 0.6))
 
 
 func _verb_prompt(it: InteractionKit.Interactable, verb_name: String) -> String:
@@ -195,6 +219,12 @@ func _submit(raw: String) -> void:
 	_input.clear()
 	_input.grab_focus()
 	if line.is_empty():
+		return
+	# "wait" / "leave" — advance the deterministic timeline (the player leaves and
+	# returns later). Memory decays, annoyance fades — and Maren still REMEMBERS.
+	if line.to_lower() == "wait" or line.to_lower() == "leave":
+		_leave_and_return()
+		_present_menu()
 		return
 	var chosen := _resolve_choice(line)
 	if chosen == "":
@@ -234,13 +264,34 @@ func _fire(verb_name: String) -> void:
 	rec["selected"] = "none"                 # disarm
 
 	var after := _snapshot(_interp.state.get(NPC_ID, {}))
+
+	# History wiring: the affordance event -> memory + relationship. One interaction is
+	# one timeline step (the realizer reads the change; the history accrues it).
+	_history.record_event(verb_name, after)
+
 	_append_line(NpcRealizerScript.describe_outcome(before, after, verb_name, _rng), Color(0.9, 0.88, 0.82))
+	# Memory callback as DIALOGUE (show-don't-tell): "you keep saying that", a
+	# remembered slight, a kept gift — surfaced from accumulated memory, not narrated.
+	var callback := _history.memory_callback()
+	if callback != "":
+		_append_line(callback, Color(0.85, 0.8, 0.7))
 	_append_line(_describe(after), Color(0.78, 0.82, 0.88))
+	_append_line(_face_read(String(after.get("last_social_act", ""))), Color(0.5, 0.62, 0.6))
 
 
 func _describe(state: Dictionary = {}) -> String:
 	var s := state if not state.is_empty() else _snapshot(_interp.state.get(NPC_ID, {}))
 	return NpcRealizerScript.describe_npc(s, _rng)
+
+
+## The FACE read — the same affect the prose shows, surfaced as the ExprState the
+## expression rig would render (show-don't-tell made literal: this is what her face
+## does). Driven by the history stack's Mood projection.
+func _face_read(last_social_act: String) -> String:
+	var e := _history.current_expr(last_social_act)
+	var emp := (" emphasis=%s" % e.emphasis) if e.emphasis != "" else ""
+	return "[i](face: valence %+.2f, tension %.2f, attention %.2f, arousal %.2f%s)[/i]" \
+		% [e.valence, e.tension, e.attention, e.arousal, emp]
 
 
 func _snapshot(rec: Dictionary) -> Dictionary:

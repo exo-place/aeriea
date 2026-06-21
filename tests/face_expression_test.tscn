@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://face_expression_test_v1"]
+
+[ext_resource type="Script" path="res://tests/face_expression_test.gd" id="1_facetest"]
+
+[node name="FaceExpressionTest" type="Node"]
+script = ExtResource("1_facetest")

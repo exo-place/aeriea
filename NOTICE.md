@@ -50,6 +50,13 @@ blendshape clips, textures) is used — the rig drives aeriea's own CC0 MakeHuma
 head. The conversational-emotion adapter (`gestures/affect_expression.gd`) and
 the ExprState seam are aeriea-authored, not from BDCC2.
 
+## Gaze (`scripts/body/face/gaze_rig.gd`) — NOT third-party
+
+The gaze rig is aeriea-authored, backed by Godot's **built-in** `LookAtModifier3D`
+pattern (engine-native since 4.4). **No BDCC2 code is mined here** — BDCC2's
+`doll.gd` only showed the chest->neck->head wiring pattern, which is an idea, not
+code. Listed here only to record that this file is deliberately attribution-free.
+
 ## MakeHuman — base mesh, rig, proxies, targets (CC0-1.0)
 
 aeriea's body/head mesh, skeleton, proxies, and morph targets derive from

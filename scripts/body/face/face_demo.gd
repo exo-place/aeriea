@@ -8,6 +8,7 @@ extends Node3D
 
 const BodyRig := preload("res://scripts/body/body_rig.gd")
 const FaceRig := preload("res://scripts/body/face/face_rig.gd")
+const GazeRig := preload("res://scripts/body/face/gaze_rig.gd")
 const MarenAffect := preload("res://scripts/body/face/maren_affect.gd")
 
 # A few npc_maren states spanning the relationship space (mood x rapport).
@@ -24,6 +25,8 @@ const STATE_SECONDS := 2.0
 var _capture_dir := ""
 var _rig: BodyRig
 var _face: FaceRig
+var _gaze: GazeRig
+var _cam: Camera3D
 var _t := 0.0
 var _idx := -1
 
@@ -50,6 +53,11 @@ func _ready() -> void:
 	add_child(_face)
 	_face.setup(1234, _rig.skeleton, _rig.mesh_instance)
 
+	# Gaze: head/neck orient toward the camera (the "player"), modulated by attention.
+	_gaze = GazeRig.new()
+	add_child(_gaze)
+	_gaze.setup(_rig.skeleton)
+
 	# Camera framed on the head (eye height from the rig).
 	var cam := Camera3D.new()
 	var eye_y := _rig.eye_height() if _rig.skeleton != null else 1.6
@@ -57,6 +65,7 @@ func _ready() -> void:
 	add_child(cam)
 	cam.position = Vector3(0, eye_y, 0.55)
 	cam.look_at(Vector3(0, eye_y, 0), Vector3.UP)
+	_cam = cam
 
 	for arg in OS.get_cmdline_user_args() + OS.get_cmdline_args():
 		if arg.begins_with("--capture-dir="):
@@ -74,13 +83,18 @@ func _run_capture() -> void:
 	for s in STATES:
 		var e := MarenAffect.to_expr(s)
 		_face.apply_expression(e)
+		# Gaze toward the camera, scaled by attention: a guarded/withdrawn Maren
+		# barely turns; an engaged one meets the lens.
+		_gaze.set_look_target(_cam.global_position, e.attention)
 		var tl := MarenAffect.talk_length_for(String(s["last_social_act"]))
 		if tl > 0.0:
 			_face.do_talk(tl)
 		# Settle the rig deterministically (no _process; step manually).
 		_face.set_process(false)
+		_gaze.set_process(false)
 		for i in 30:
 			_face.step(1.0 / 60.0)
+			_gaze.step(1.0 / 60.0)
 		await RenderingServer.frame_post_draw
 		var img := get_viewport().get_texture().get_image()
 		var path := "%s/maren_%s.png" % [_capture_dir, String(s["label"]).replace("/", "_").replace(" ", "_")]
@@ -97,6 +111,7 @@ func _process(delta: float) -> void:
 		var s: Dictionary = STATES[idx]
 		var e := MarenAffect.to_expr(s)
 		_face.apply_expression(e)
+		_gaze.set_look_target(_cam.global_position, e.attention)
 		var tl := MarenAffect.talk_length_for(String(s["last_social_act"]))
 		if tl > 0.0:
 			_face.do_talk(tl)

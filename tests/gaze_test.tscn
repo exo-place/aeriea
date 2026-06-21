@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://gaze_test_v1"]
+
+[ext_resource type="Script" path="res://tests/gaze_test.gd" id="1_gazetest"]
+
+[node name="GazeTest" type="Node"]
+script = ExtResource("1_gazetest")

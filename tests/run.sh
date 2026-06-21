@@ -47,6 +47,7 @@ SUITES=(
   interaction_golden_trace_test
   text_slice_test
   face_expression_test
+  gaze_test
   body_asset_test
   body_gate_test
   body_modifier_registry_test

@@ -49,6 +49,7 @@ func _ready() -> void:
 	_test_describe_pure()
 	_test_fixed_sequence_stable()
 	_test_faithfulness_bands()
+	_test_show_dont_tell()
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
 
@@ -178,43 +179,143 @@ func _step(interp, host, verb: String) -> String:
 
 
 # ---------------------------------------------------------------------------
-# (c) Faithfulness sanity — phrasing bands never contradict the state.
+# (c) Faithfulness sanity — behavioural tells never contradict the state.
+# A high-mood/high-rapport read must never show CLOSED/GUARDED/COLD body language,
+# and a low-mood/low-rapport read must never show OPEN/EASY/UNGUARDED body language.
+# (Behavioural vocabulary, not named feelings — see the show-don't-tell test below.)
 # ---------------------------------------------------------------------------
 
-const HOSTILE := ["upset", "wary", "closed off", "stiffen", "flinch", "stings", "hurt", "put off", "draining"]
-const WARM := ["lit up", "warmth", "melts", "trusts", "old friend", "pleased", "make her day"]
+# Cold/guarded BEHAVIOURS that must never appear on a warm, close read.
+const COLD_TELLS := [
+	"out of reach", "squared", "arms are folded", "back foot", "sidelong",
+	"thin line", "won't meet", "goes still", "flattening", "looks down at her hands",
+	"middle distance", "room between you", "drawn back", "arm's length",
+]
+# Open/easy BEHAVIOURS that must never appear on a sour, distant read.
+const OPEN_TELLS := [
+	"eyes bright", "holding yours", "leans in", "loosens", "grin", "shoulders loose",
+	"breaking before she can", "closing the last of the gap", "ducks her head, but",
+	"leans into your side",
+]
 
 func _test_faithfulness_bands() -> void:
 	var happy := {"mood": 0.95, "rapport": 0.9, "last_social_act": "complimented", "times_complimented": 6.0}
 	var happy_text := NpcRealizerScript.describe_npc(happy).to_lower()
-	var hostile_hit := ""
-	for w: String in HOSTILE:
+	var cold_hit := ""
+	for w: String in COLD_TELLS:
 		if happy_text.contains(w):
-			hostile_hit = w
-	_assert("high mood/rapport never reads hostile", hostile_hit == "",
-		"text=[%s] hit=[%s]" % [happy_text, hostile_hit])
+			cold_hit = w
+	_assert("high mood/rapport never shows cold/guarded body language", cold_hit == "",
+		"text=[%s] hit=[%s]" % [happy_text, cold_hit])
 
 	var sour := {"mood": 0.1, "rapport": 0.1, "last_social_act": "pushed_away", "times_complimented": 0.0}
 	var sour_text := NpcRealizerScript.describe_npc(sour).to_lower()
-	var warm_hit := ""
-	for w: String in WARM:
+	var open_hit := ""
+	for w: String in OPEN_TELLS:
 		if sour_text.contains(w):
-			warm_hit = w
-	_assert("low mood/rapport never reads warm", warm_hit == "",
-		"text=[%s] hit=[%s]" % [sour_text, warm_hit])
+			open_hit = w
+	_assert("low mood/rapport never shows open/easy body language", open_hit == "",
+		"text=[%s] hit=[%s]" % [sour_text, open_hit])
 
-	# A cooling outcome (push_away) from a warm state must read as a setback, and a
-	# warming outcome (offer_gift) must never read as cooling.
+	# A cooling outcome (push_away) from a warm state must read as a physical setback
+	# (rocking back / going still / face shutting), and a warming outcome (offer_gift)
+	# must never read as a flinch.
 	var warm_before := {"mood": 0.8, "rapport": 0.7}
 	var pushed := {"mood": 0.65, "rapport": 0.58}
 	var push_text := NpcRealizerScript.describe_outcome(warm_before, pushed, "push_away").to_lower()
-	var push_ok := push_text.contains("flinch") or push_text.contains("sting") or push_text.contains("stiffen") or push_text.contains("tighten")
-	_assert("a real mood drop reads as a setback", push_ok, push_text)
+	var push_ok := push_text.contains("rocks back") or push_text.contains("goes still") \
+		or push_text.contains("squares") or push_text.contains("stalls") or push_text.contains("goes out of her face")
+	_assert("a real mood drop reads as a physical setback", push_ok, push_text)
 
 	var gift_after := {"mood": 0.95, "rapport": 0.85}
 	var gift_text := NpcRealizerScript.describe_outcome(warm_before, gift_after, "offer_gift").to_lower()
-	var gift_bad := gift_text.contains("flinch") or gift_text.contains("sting") or gift_text.contains("stiffen")
-	_assert("a warming outcome never reads hostile", not gift_bad, gift_text)
+	var gift_bad := gift_text.contains("rocks back") or gift_text.contains("goes still") \
+		or gift_text.contains("squares") or gift_text.contains("goes out of her face")
+	_assert("a warming outcome never reads as a setback", not gift_bad, gift_text)
+
+
+# ---------------------------------------------------------------------------
+# (d) SHOW, DON'T TELL — the realizer must render state through observable
+# behaviour and never NAME the feeling/meter or print field names/numbers.
+# ---------------------------------------------------------------------------
+
+# Abstractions that LABEL the interior state or the meters directly. The realizer
+# removed all of these in favour of behaviour; their reappearance is a regression
+# toward telling. Word-boundary matched so we don't false-positive on substrings
+# (e.g. "content" inside "contentment" is still telling, but "warm" must not flag
+# inside an honest phrase — see the curated list / boundary check below).
+const BANNED_ABSTRACTIONS := [
+	"mood", "rapport", "trust", "trusts", "content", "happy", "guard down",
+	"warms to it", "her feelings", "relationship", "affection", "fond",
+	"pleased", "upset", "comfortable", "at ease",
+]
+# State field names that must never leak into prose.
+const FIELD_NAMES := ["last_social_act", "times_complimented", "selected"]
+
+func _contains_word(haystack: String, word: String) -> bool:
+	# Multi-word phrases: plain substring is fine. Single words: require boundaries
+	# so "warm" doesn't trip on "warmth" of a cooling line etc. — but every entry
+	# in BANNED_ABSTRACTIONS that is a single token is itself a banned token, so a
+	# boundaried match is exactly what we want.
+	if word.contains(" "):
+		return haystack.contains(word)
+	var idx := haystack.find(word)
+	while idx != -1:
+		var before_ok := idx == 0 or not _is_word_char(haystack[idx - 1])
+		var after_i := idx + word.length()
+		var after_ok := after_i >= haystack.length() or not _is_word_char(haystack[after_i])
+		if before_ok and after_ok:
+			return true
+		idx = haystack.find(word, idx + 1)
+	return false
+
+func _is_word_char(c: String) -> bool:
+	return c.length() == 1 and (c.to_lower() != c.to_upper() or c >= "0" and c <= "9")
+
+func _scan_banned(text: String) -> String:
+	var lower := text.to_lower()
+	for w: String in BANNED_ABSTRACTIONS:
+		if _contains_word(lower, w):
+			return w
+	for f: String in FIELD_NAMES:
+		if lower.contains(f):
+			return f
+	# No bare numbers (a leaked meter value like "0.7" or "rapport 70").
+	for i in text.length():
+		if text[i] >= "0" and text[i] <= "9":
+			return "digit:" + text[i]
+	return ""
+
+func _test_show_dont_tell() -> void:
+	# A spread of states covering every band and combination, plus the live sequence.
+	var states := [
+		{"mood": 0.95, "rapport": 0.9, "last_social_act": "complimented", "times_complimented": 6.0},
+		{"mood": 0.5, "rapport": 0.3, "last_social_act": "none", "times_complimented": 0.0},
+		{"mood": 0.15, "rapport": 0.1, "last_social_act": "pushed_away", "times_complimented": 0.0},
+		{"mood": 0.7, "rapport": 0.6, "last_social_act": "teased", "times_complimented": 3.0},
+		{"mood": 0.4, "rapport": 0.5, "last_social_act": "greeted", "times_complimented": 2.0},
+		{"mood": 0.85, "rapport": 0.5, "last_social_act": "given_gift", "times_complimented": 4.0},
+		{"mood": 0.25, "rapport": 0.75, "last_social_act": "pushed_away", "times_complimented": 5.0},
+	]
+	for s: Dictionary in states:
+		var t := NpcRealizerScript.describe_npc(s)
+		var hit := _scan_banned(t)
+		_assert("describe_npc SHOWS (no named feeling/field/number) for %s" % _key(s),
+			hit == "", "hit=[%s] text=[%s]" % [hit, t])
+
+	# describe_outcome across the verb set, at low and high rapport, also clean.
+	var verbs := ["greet", "compliment", "tease", "push_away", "offer_gift"]
+	var before_lo := {"mood": 0.5, "rapport": 0.25, "times_complimented": 0.0}
+	var after_lo := {"mood": 0.62, "rapport": 0.35, "times_complimented": 1.0}
+	var before_hi := {"mood": 0.8, "rapport": 0.72, "times_complimented": 3.0}
+	var after_hi := {"mood": 0.92, "rapport": 0.82, "times_complimented": 4.0}
+	var after_cool := {"mood": 0.62, "rapport": 0.6, "times_complimented": 3.0}
+	for v: String in verbs:
+		for pair in [[before_lo, after_lo], [before_hi, after_hi], [before_hi, after_cool]]:
+			var ot := NpcRealizerScript.describe_outcome(pair[0], pair[1], v)
+			var hit := _scan_banned(ot)
+			_assert("describe_outcome SHOWS (no named feeling/field/number) verb=%s" % v,
+				hit == "", "hit=[%s] text=[%s]" % [hit, ot])
 
 
 # ---------------------------------------------------------------------------

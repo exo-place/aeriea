@@ -50,6 +50,29 @@ blendshape clips, textures) is used — the rig drives aeriea's own CC0 MakeHuma
 head. The conversational-emotion adapter (`gestures/affect_expression.gd`) and
 the ExprState seam are aeriea-authored, not from BDCC2.
 
+## BDCC2 — sim systems: clock, memory, mood, relationship (MIT)
+
+aeriea's deterministic NPC-history stack under `scripts/sim/` is ported (Path A:
+mined as replaceable surface behind aeriea's own seams) from **BDCC2** by
+**alexofp / Rahi** (MIT, **Copyright (c) 2025 Rahi**; full text above).
+
+- `scripts/sim/sim_clock.gd` — from BDCC2 `Game/Systems/MemorySystem/TimeManager.gd`
+  (the frame-delta `_physics_process` accrual + `Network`/`Bins` networking cut;
+  time advances off aeriea's seeded timeline via `advance()`).
+- `scripts/sim/memory.gd` — from BDCC2 `Game/Systems/MemorySystem/`
+  (`MemoryBase.gd`, `MemoryEntry.gd`, `MemoryHolder.gd`). `GM.main.timeManager` ->
+  injected SimClock; `GlobalRegistry.getMemory` -> aeriea def table; `WeakRef`
+  character back-pointers -> plain id keying; `ReactionSystem`/`Bins`/`Log` dropped.
+- `scripts/sim/mood_values.gd` — from BDCC2 `Game/PawnAI/Mood/MoodValues.gd`
+  (the MoodStat-enum switch + chained setters dropped; pure additive scalar bank).
+- `scripts/sim/relationship.gd` + `scripts/sim/mood.gd` — from BDCC2
+  `Game/Systems/RelationshipSystem/` + `Game/PawnAI/Mood/MoodHandler.gd` (the
+  `GM.GB` balance consts -> aeriea data; `characterRegistry`/`CharacterPawn` ->
+  id keying; `Network`/`Log` dropped; Mood's output is an aeriea `ExprState`).
+
+`scripts/sim/memory_defs.gd` (the memory-type library AS DATA) is aeriea-authored,
+replacing BDCC2's `GlobalRegistry` memory registry.
+
 ## Gaze (`scripts/body/face/gaze_rig.gd`) — NOT third-party
 
 The gaze rig is aeriea-authored, backed by Godot's **built-in** `LookAtModifier3D`

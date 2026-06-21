@@ -49,6 +49,7 @@ SUITES=(
   face_expression_test
   gaze_test
   sim_clock_test
+  memory_test
   body_asset_test
   body_gate_test
   body_modifier_registry_test

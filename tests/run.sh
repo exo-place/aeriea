@@ -45,6 +45,7 @@ SUITES=(
   golden_trace_test
   interaction_behavior_test
   interaction_golden_trace_test
+  text_slice_test
   body_asset_test
   body_gate_test
   body_modifier_registry_test

@@ -78,6 +78,12 @@ func _init_state_for(instance_id: String, def_id: String) -> void:
 		rec["pressed"] = false
 	elif def_id == "gate":
 		rec["open"] = false
+	elif def_id == "npc_maren":
+		rec["selected"] = "none"
+		rec["mood"] = 0.5
+		rec["rapport"] = 0.3
+		rec["last_social_act"] = "none"
+		rec["times_complimented"] = 0.0
 	elif def_id == "intimacy_test_marker":
 		rec["fired"] = false
 	state[instance_id] = rec
@@ -190,6 +196,35 @@ func _fire_verb(def_id_inst: String, self_id: String, frame: ResolvedFrame, dt: 
 		if kind == "command" and (name_hint == "" or name_hint == "toggle") and (true):
 			_e_toggle_state("lever", _self, "self", "thrown", frame)
 			_events.append({ "from": _self, "event": "lever_changed" })
+			return true
+	elif _def == "npc_maren":
+		var _owner: InteractionKit.Interactable = kit.interactables["npc_maren"]
+		if kind == "command" and (name_hint == "" or name_hint == "greet") and (_g_state_enum("npc_maren", _self, "self", "selected", "greet")):
+			_e_add_fill("npc_maren", _self, "self", "mood", frame, 0.05, dt)
+			_e_set_state("npc_maren", _self, "self", "last_social_act", frame, "greeted")
+			return true
+		if kind == "command" and (name_hint == "" or name_hint == "compliment") and ((_g_state_enum("npc_maren", _self, "self", "selected", "compliment") and _g_state_cmp("npc_maren", _self, "self", "mood", "ge", 0.3))):
+			_e_add_fill("npc_maren", _self, "self", "mood", frame, 0.12, dt)
+			_e_add_fill("npc_maren", _self, "self", "rapport", frame, 0.1, dt)
+			_e_add_fill("npc_maren", _self, "self", "times_complimented", frame, 1.0, dt)
+			_e_set_state("npc_maren", _self, "self", "last_social_act", frame, "complimented")
+			return true
+		if kind == "command" and (name_hint == "" or name_hint == "tease") and ((_g_state_enum("npc_maren", _self, "self", "selected", "tease") and _g_state_cmp("npc_maren", _self, "self", "rapport", "ge", 0.5))):
+			if _g_state_cmp("npc_maren", _self, "self", "rapport", "ge", 0.7):
+				_e_add_fill("npc_maren", _self, "self", "mood", frame, 0.06, dt)
+			if _g_state_cmp("npc_maren", _self, "self", "rapport", "lt", 0.7):
+				_e_add_fill("npc_maren", _self, "self", "mood", frame, -0.1, dt)
+			_e_set_state("npc_maren", _self, "self", "last_social_act", frame, "teased")
+			return true
+		if kind == "command" and (name_hint == "" or name_hint == "push_away") and (_g_state_enum("npc_maren", _self, "self", "selected", "push_away")):
+			_e_add_fill("npc_maren", _self, "self", "mood", frame, -0.15, dt)
+			_e_add_fill("npc_maren", _self, "self", "rapport", frame, -0.12, dt)
+			_e_set_state("npc_maren", _self, "self", "last_social_act", frame, "pushed_away")
+			return true
+		if kind == "command" and (name_hint == "" or name_hint == "offer_gift") and ((_g_state_enum("npc_maren", _self, "self", "selected", "offer_gift") and _g_state_cmp("npc_maren", _self, "self", "rapport", "ge", 0.2))):
+			_e_add_fill("npc_maren", _self, "self", "mood", frame, 0.15, dt)
+			_e_add_fill("npc_maren", _self, "self", "rapport", frame, 0.15, dt)
+			_e_set_state("npc_maren", _self, "self", "last_social_act", frame, "given_gift")
 			return true
 	elif _def == "intimacy_test_marker":
 		var _owner: InteractionKit.Interactable = kit.interactables["intimacy_test_marker"]

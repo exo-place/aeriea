@@ -234,6 +234,82 @@
     },
 
     {
+      "comment": "TEXT SLICE — npc_maren: a stateful NPC expressed PURELY AS AFFORDANCE DATA (no engine change), the first playable text-gameplay node. State: mood/rapport (continuous relationship axes), last_social_act (enum memory of the most recent interaction), times_complimented (a remembered count). Verb dispatch in the text slice is data: the host sets the `selected` enum to the chosen verb name before each step, and every verb guards on `state_enum selected == <name>` (combined via `all` with its real precondition), so exactly one command verb's guard passes and fires — verb SELECTION is the substrate's guard layer, not a host bypass. After firing, the host resets `selected` to \"none\". Every guard/effect op used here ALREADY existed: command verb, state_enum, state_cmp, all, set_state, add_fill (continuous mood/rapport with lo/hi clamp), GUARDED effects (the tease branch: one add_fill when rapport high, another when low, mutually exclusive via their own `when`). offer_gift is a GUARDED COMMAND (not a held-item place verb): expressing a literal 'held gift' headlessly would require a separate gift interactable + carry state — out of scope for the smallest slice — so it is a command guarded on rapport, noted as the deliberate simplification in scripts/text/README.md.",
+      "id": "npc_maren",
+      "tags": ["npc"],
+      "state": {
+        "selected": { "type": "enum", "init": "none" },
+        "mood": { "type": "number", "init": 0.5, "lo": 0.0, "hi": 1.0 },
+        "rapport": { "type": "number", "init": 0.3, "lo": 0.0, "hi": 1.0 },
+        "last_social_act": { "type": "enum", "init": "none" },
+        "times_complimented": { "type": "number", "init": 0.0, "lo": 0.0, "hi": 999.0 }
+      },
+      "verbs": [
+        {
+          "name": "greet", "kind": "command", "target": "self",
+          "when": { "op": "state_enum", "scope": "self", "field": "selected", "eq": "greet" },
+          "prompt": "Greet Maren",
+          "do": [
+            { "do": "add_fill", "scope": "self", "field": "mood", "rate": 0.05 },
+            { "do": "set_state", "scope": "self", "field": "last_social_act", "value": "greeted" }
+          ]
+        },
+        {
+          "name": "compliment", "kind": "command", "target": "self",
+          "when": { "op": "all", "of": [
+            { "op": "state_enum", "scope": "self", "field": "selected", "eq": "compliment" },
+            { "op": "state_cmp", "scope": "self", "field": "mood", "cmp": "ge", "value": 0.3 }
+          ] },
+          "prompt": "Compliment Maren",
+          "do": [
+            { "do": "add_fill", "scope": "self", "field": "mood", "rate": 0.12 },
+            { "do": "add_fill", "scope": "self", "field": "rapport", "rate": 0.1 },
+            { "do": "add_fill", "scope": "self", "field": "times_complimented", "rate": 1.0 },
+            { "do": "set_state", "scope": "self", "field": "last_social_act", "value": "complimented" }
+          ]
+        },
+        {
+          "name": "tease", "kind": "command", "target": "self",
+          "when": { "op": "all", "of": [
+            { "op": "state_enum", "scope": "self", "field": "selected", "eq": "tease" },
+            { "op": "state_cmp", "scope": "self", "field": "rapport", "cmp": "ge", "value": 0.5 }
+          ] },
+          "prompt": "Tease Maren",
+          "do": [
+            { "do": "add_fill", "scope": "self", "field": "mood", "rate": 0.06,
+              "when": { "op": "state_cmp", "scope": "self", "field": "rapport", "cmp": "ge", "value": 0.7 } },
+            { "do": "add_fill", "scope": "self", "field": "mood", "rate": -0.1,
+              "when": { "op": "state_cmp", "scope": "self", "field": "rapport", "cmp": "lt", "value": 0.7 } },
+            { "do": "set_state", "scope": "self", "field": "last_social_act", "value": "teased" }
+          ]
+        },
+        {
+          "name": "push_away", "kind": "command", "target": "self",
+          "when": { "op": "state_enum", "scope": "self", "field": "selected", "eq": "push_away" },
+          "prompt": "Push Maren away",
+          "do": [
+            { "do": "add_fill", "scope": "self", "field": "mood", "rate": -0.15 },
+            { "do": "add_fill", "scope": "self", "field": "rapport", "rate": -0.12 },
+            { "do": "set_state", "scope": "self", "field": "last_social_act", "value": "pushed_away" }
+          ]
+        },
+        {
+          "name": "offer_gift", "kind": "command", "target": "self",
+          "when": { "op": "all", "of": [
+            { "op": "state_enum", "scope": "self", "field": "selected", "eq": "offer_gift" },
+            { "op": "state_cmp", "scope": "self", "field": "rapport", "cmp": "ge", "value": 0.2 }
+          ] },
+          "prompt": "Offer Maren a gift",
+          "do": [
+            { "do": "add_fill", "scope": "self", "field": "mood", "rate": 0.15 },
+            { "do": "add_fill", "scope": "self", "field": "rapport", "rate": 0.15 },
+            { "do": "set_state", "scope": "self", "field": "last_social_act", "value": "given_gift" }
+          ]
+        }
+      ]
+    },
+
+    {
       "comment": "SLICE 2 — LAYER-1 NSFW GATE PROOF (NOT REAL CONTENT). A TEST-ONLY placeholder verb tagged nsfw/intimate, present BEFORE any real NSFW content is authored, to prove by construction that the affordance substrate's guard layer gates the INTERSECTION (child-range body-state × NSFW verb). The verb does nothing but emit a marker event; its sole purpose is to be GUARDED on body_is_adult. At child-range body-state the body_is_adult guard is false -> this verb is NOT in the live verb set and CANNOT fire (structurally unavailable). At adult body-state the guard is true -> it is available. This is the gate hook wired from the first body-state slice (body-and-locomotion-slice.md §2.2; DESIGN.md Layer 1, non-toggle, gate the configuration not the primitive). The body_is_adult guard op is the GENERAL primitive every future NSFW/intimate verb will guard on; the age morph axis is untouched (fully continuous, child bodies still render for ordinary NPCs). When real intimate verbs land they reuse this exact guard.",
       "id": "intimacy_test_marker",
       "tags": ["nsfw", "intimate", "test_placeholder"],

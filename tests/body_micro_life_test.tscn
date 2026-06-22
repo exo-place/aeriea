@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://body_micro_life_test_v1"]
+
+[ext_resource type="Script" path="res://tests/body_micro_life_test.gd" id="1_microlife"]
+
+[node name="BodyMicroLifeTest" type="Node3D"]
+script = ExtResource("1_microlife")

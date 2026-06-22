@@ -59,6 +59,7 @@ SUITES=(
   body_proxy_test
   body_locomotion_test
   body_motion_matching_test
+  body_micro_life_test
   interpreter_slice1_test
   legend_projection_test
   creator_history_test

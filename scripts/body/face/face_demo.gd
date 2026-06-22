@@ -118,3 +118,9 @@ func _process(delta: float) -> void:
 		print("[%5.1fs] state=%-12s -> valence=%+.2f tension=%.2f attention=%.2f emphasis='%s'"
 			% [_t, s["label"], e.valence, e.tension, e.attention, e.emphasis])
 	# FaceRig._process drives itself; we only push affect on state change.
+	# Drive the body micro-life (breathing/sway/saccade/jiggle) at rest, and feed the
+	# eye micro-saccade offset into the face so the eyes are never dead-still in idle.
+	if _rig != null:
+		_rig.set_movement_state(true, 0.0)
+		_rig.apply_pose(delta)
+		_face.extra_look = _rig.saccade_offset()

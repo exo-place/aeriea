@@ -69,6 +69,12 @@ var val_talking: float = 0.0
 var val_look_dir: Vector2 = Vector2.ZERO
 var val_look_cross: float = 0.0
 
+## Render-side MICRO-SACCADE offset, ADDED to the resolved look when driving the eye
+## bones. Set each frame by the host (BodyRig.saccade_offset()) so small irregular eye
+## darts layer UNDER the gaze/LookWander look (the eyes are never dead-still) without
+## being clobbered by _reset_vals. Cosmetic; not part of the resolved-channel state.
+var extra_look: Vector2 = Vector2.ZERO
+
 var gestures: Array = []
 var face_override := FaceOverrideProfile.new()
 var rng := RandomNumberGenerator.new()
@@ -245,9 +251,11 @@ func _drive_face_bones() -> void:
 	var lid := clampf(val_eyes_closed, 0.0, 1.0)
 	for bn in ORBI_L + ORBI_R:
 		_set_bone_pitch(bn, lid * lid_close_rad)
-	# LookDir -> eye yaw (x) + pitch (y).
-	_set_eye_look(BONE_EYE_L, val_look_dir)
-	_set_eye_look(BONE_EYE_R, val_look_dir)
+	# LookDir -> eye yaw (x) + pitch (y), PLUS the micro-saccade jitter (layered under
+	# the gaze/LookWander look so the eyes are never dead-still).
+	var look := val_look_dir + extra_look
+	_set_eye_look(BONE_EYE_L, look)
+	_set_eye_look(BONE_EYE_R, look)
 
 
 ## Set the expression blendshape weights from the resolved channels. Pure read of the

@@ -83,6 +83,19 @@ const SHOULDER_L := "upperarm01.L"
 const SHOULDER_R := "upperarm01.R"
 const ROOT_BONE := "root"
 
+const SpringBone := preload("res://scripts/body/spring_bone.gd")
+const MicroLifeParams := preload("res://scripts/body/micro_life_params.gd")
+
+## Soft-region bones the jiggle layer drives (spring-bones). breast.L/R exist in the
+## CC0 MakeHuman default rig; belly/glute have NO dedicated bones in this rig (a GAP —
+## see apply_micro_life), so they are listed for when the rig is extended but resolve
+## to nothing today (graceful: the registry simply skips absent bones).
+const SOFT_REGION_BONES := ["breast.L", "breast.R", "belly", "glute.L", "glute.R"]
+## Name fragments that mark a HAIR bone for the hair spring-bone chain. The CC0 default
+## rig has NO hair bones (the base is bald-rigged) — so this matches nothing today and
+## hair secondary motion is a documented GAP until a hair-bone chain is added to the rig.
+const HAIR_BONE_FRAGMENTS := ["hair"]
+
 ## Tuning (render-side only).
 @export var stride_length: float = 0.9      ## metres of speed-phase per cycle
 @export var max_leg_swing_deg: float = 35.0  ## peak thigh swing at run speed
@@ -126,6 +139,30 @@ var _smoothed_speed: float = 0.0
 ## relaxed idle. A pure accumulator of the per-frame delta — no Math.random, no
 ## wall-clock: the pose is a reproducible function of (seed, accumulated idle time).
 var _idle_time: float = 0.0
+
+# --- procedural MICRO-LIFE + SECONDARY-MOTION (render-side cosmetic juice) ------
+## The single TUNABLE dial-board for breathing / sway / saccades / hair / jiggle.
+## Built as a conservative default if left null; override (inspector or code) to
+## retune. Pure data — never feeds the sim.
+@export var micro: MicroLifeParams = null
+## A COSMETIC RNG stream, SEPARATE from any sim RNG: it drives only the irregular
+## render-side bits (breath rate jitter, micro-saccade timing/targets). Seeded so the
+## visual is reproducible, but kept OUT of the sim/event-log timeline — nothing here
+## advances or is read by the deterministic sim (see apply_micro_life's contract).
+var _cosmetic_rng := RandomNumberGenerator.new()
+## Spring-bone instances: name -> SpringBone, for hair and soft-region jiggle.
+var _hair_springs := {}
+var _jiggle_springs := {}
+## Micro-saccade state (render-side; advanced by delta + cosmetic rng).
+var _saccade_offset: Vector2 = Vector2.ZERO
+var _saccade_target: Vector2 = Vector2.ZERO
+var _saccade_timer: float = 0.0
+## Current breath phase (radians) — integrated with a jittered per-cycle rate so the
+## breath is alive (not metronomic) yet reproducible from the cosmetic seed.
+var _breath_phase: float = 0.0
+var _breath_cycle_rate: float = 1.0   # current cycle's rate multiplier (jittered)
+## Exertion multiplier on breath rate (1 = calm; raise it later when winded).
+var exertion_breath_mult: float = 1.0
 
 ## Set by the host each frame BEFORE _apply_pose: the current MovementState read.
 var grounded: bool = true
@@ -246,7 +283,54 @@ func build() -> bool:
 	# re-morphs are stable and non-cumulative.
 	apply_body_state(body_state)
 
+	# --- procedural micro-life + secondary-motion layer ----------------------
+	# Build the tunable params (conservative default if none supplied) and register
+	# the spring-bone chains for hair + soft-region jiggle. RENDER-SIDE / cosmetic.
+	_setup_micro_life()
+
 	return true
+
+
+## Initialise the micro-life layer: default params if none, seed the COSMETIC rng,
+## and register spring-bones for any present hair / soft-region bones. Idempotent.
+func _setup_micro_life(p_seed: int = 0) -> void:
+	if micro == null:
+		micro = MicroLifeParams.new()
+	_cosmetic_rng.seed = p_seed
+	_breath_cycle_rate = 1.0 + _cosmetic_rng.randf_range(-1.0, 1.0) * micro.breath_rate_jitter
+	_hair_springs.clear()
+	_jiggle_springs.clear()
+	if skeleton == null:
+		return
+	# Hair: register any bone whose name marks it as hair. The CC0 default rig has none
+	# (bald-rigged) -> this stays empty and hair motion is a documented gap.
+	for i in skeleton.get_bone_count():
+		var bn := skeleton.get_bone_name(i)
+		for frag in HAIR_BONE_FRAGMENTS:
+			if bn.to_lower().contains(frag):
+				_hair_springs[bn] = _make_spring(i)
+				break
+	# Soft-region jiggle: breast.L/R exist; belly/glute are absent in this rig (gap).
+	for bn in SOFT_REGION_BONES:
+		if _bone_index.has(bn):
+			_jiggle_springs[bn] = _make_spring(_bone_index[bn])
+
+
+## Build a SpringBone for `idx`, tracking a tip one bone-length down the bone's local
+## Y (the MakeHuman bone axis). Length is estimated from the child bone if present, so
+## the tracked tip is at the soft region's free end (where swing is visible).
+func _make_spring(idx: int) -> SpringBone:
+	var sb := SpringBone.new()
+	sb.bone_idx = idx
+	sb.rest_local = _rest_local.get(skeleton.get_bone_name(idx), Transform3D.IDENTITY)
+	# Estimate bone length from the first child's local offset; fall back to 8 cm.
+	var length := 0.08
+	for c in skeleton.get_bone_count():
+		if skeleton.get_bone_parent(c) == idx:
+			length = maxf(length, skeleton.get_bone_pose_position(c).length())
+			break
+	sb.tip_local = Vector3(0.0, length, 0.0)
+	return sb
 
 
 ## Re-morph the SKINNED body to `state` with CORRECT normals under morph.
@@ -498,6 +582,16 @@ func apply_pose(delta: float) -> void:
 	# A pure delta accumulator — no Math.random, no wall-clock; the idle pose is a
 	# reproducible function of accumulated idle time. Bounded to keep it stable.
 	_idle_time = fposmod(_idle_time + delta, TAU * 1000.0)
+	# Advance the breath phase by the (jittered, exertion-scaled) breath rate. When a
+	# breath cycle completes (phase wraps past TAU), redraw the next cycle's rate jitter
+	# from the COSMETIC rng so the breath is never perfectly periodic — yet stays
+	# reproducible from the cosmetic seed. Pure render-side.
+	if micro != null and micro.breathing_enabled:
+		var rate := TAU * micro.breath_rate_hz * exertion_breath_mult * _breath_cycle_rate
+		_breath_phase += rate * delta
+		if _breath_phase >= TAU:
+			_breath_phase = fposmod(_breath_phase, TAU)
+			_breath_cycle_rate = 1.0 + _cosmetic_rng.randf_range(-1.0, 1.0) * micro.breath_rate_jitter
 
 	# Slice 4 — Motion Matching drives the gross body when a DB is loaded; foot-IK
 	# (below) stays the ground-adaptation layer on top. Falls through to the
@@ -510,6 +604,7 @@ func apply_pose(delta: float) -> void:
 		# ground-adaptation layer that respects the MM pose is the documented
 		# Slice-4 refinement (decision doc §3.2); until then MM ground contact comes
 		# from the captured clips themselves, so IK is skipped under MM.
+		apply_micro_life(delta)
 		return
 
 	# Seed the layered bones with the captured MOCAP IDLE stance before re-posing (so
@@ -560,6 +655,8 @@ func apply_pose(delta: float) -> void:
 
 	if grounded and foot_ik_enabled and _space != null:
 		_apply_foot_ik()
+
+	apply_micro_life(delta)
 
 
 # --- Slice 4: Motion-Matching pose ------------------------------------------
@@ -629,9 +726,16 @@ func _apply_motion_matching() -> void:
 ## invariant for this render layer. NO authored stance: this only ADDS life (a faint
 ## breath + sway) on top of the captured mocap pose; the stand itself is the mocap.
 func _idle_micro(bname: String, w: float) -> Quaternion:
-	var t := _idle_time
-	var breath := sin(t * 1.6) * w              # ~0.25 Hz breathing
-	var sway := sin(t * 0.5) * w                 # ~0.08 Hz weight shift
+	# Breath uses the JITTERED render-side breath phase (alive, not metronomic); sway
+	# uses the plain idle clock. Both amplitudes/enables come from the tunable params,
+	# so the rates are dialable rather than the former hardcoded sin() frequencies.
+	var p := micro if micro != null else MicroLifeParams.new()
+	var breath := 0.0
+	if p.breathing_enabled:
+		breath = sin(_breath_phase) * w * p.breath_amplitude
+	var sway := 0.0
+	if p.sway_enabled:
+		sway = sin(_idle_time * (TAU * p.sway_rate_hz)) * w * p.sway_amplitude
 	match bname:
 		"spine01":
 			return Quaternion(Vector3.RIGHT, -breath * 0.015) * Quaternion(Vector3.BACK, sway * 0.01)
@@ -656,6 +760,85 @@ func _idle_micro(bname: String, w: float) -> Quaternion:
 ## Expose the matched frame for tests (which DB frame the MM search chose).
 func motion_matched_frame() -> int:
 	return _mm_frame
+
+
+# ---------------------------------------------------------------------------
+# §micro-life — procedural SECONDARY MOTION (hair + soft-region jiggle) and the
+# eye-saccade jitter. RENDER-SIDE / COSMETIC.
+#
+# === HOW THIS IS KEPT OFF THE SIM-DETERMINISM PATH ===
+# 1. It is called ONLY at the tail of apply_pose() — itself a documented render-side
+#    read of MovementState that never writes the sim (movement-substrate §6 excludes
+#    animation from the sim hash).
+# 2. The irregular bits (breath-rate jitter, micro-saccade timing/targets) draw from
+#    `_cosmetic_rng` — a stream SEPARATE from any sim RNG. It is seeded (reproducible
+#    visuals) but the sim never advances it and never reads it, so it cannot perturb
+#    the seeded sim timeline.
+# 3. The spring-bones are explicitly FRAME-DRIVEN (real delta) — allowed because their
+#    state is private to this node, layered onto bone poses only, and NEVER read back
+#    into any sim quantity. Nothing here returns into MovementState or the event log.
+# Net: same as the rest of the render layer, the golden-trace / behavioral suites are
+# the regression guard — they construct a body-less player so this path can't touch them.
+# ---------------------------------------------------------------------------
+
+## Advance + apply the secondary-motion layer for this frame. Layers ADDITIVELY on top
+## of the already-computed gross pose (locomotion/MM + foot-IK), so it never fights the
+## base animation — it only adds the lag/settle of soft tissue and hair.
+func apply_micro_life(delta: float) -> void:
+	if skeleton == null or micro == null or delta <= 0.0:
+		return
+	# Eye micro-saccades (advances the offset the face rig layers under its gaze).
+	if micro.saccade_enabled:
+		_step_saccade(delta)
+	# Hair spring-bones (gap on the CC0 default rig — empty registry, no-op there).
+	if micro.hair_enabled:
+		for bn in _hair_springs:
+			var sb: SpringBone = _hair_springs[bn]
+			var q := sb.step(skeleton, delta, micro.hair_stiffness, micro.hair_damping,
+				micro.hair_inertia, micro.hair_max_angle)
+			if q != Quaternion.IDENTITY:
+				var i: int = sb.bone_idx
+				skeleton.set_bone_pose_rotation(i, (skeleton.get_bone_pose_rotation(i) * q).normalized())
+	# Soft-region jiggle (breast.L/R present; conservative gain by default).
+	if micro.jiggle_enabled:
+		for bn in _jiggle_springs:
+			var sb2: SpringBone = _jiggle_springs[bn]
+			var q2 := sb2.step(skeleton, delta, micro.jiggle_stiffness, micro.jiggle_damping,
+				micro.jiggle_gain, micro.jiggle_max_angle)
+			if q2 != Quaternion.IDENTITY:
+				var j: int = sb2.bone_idx
+				skeleton.set_bone_pose_rotation(j, (skeleton.get_bone_pose_rotation(j) * q2).normalized())
+
+
+## Advance the micro-saccade: small, irregular eye darts. New target chosen at jittered
+## intervals from the COSMETIC rng; the offset eases toward it each frame. Exposed via
+## saccade_offset() so the FaceRig can ADD it under its gaze/LookWander (never fights).
+func _step_saccade(delta: float) -> void:
+	_saccade_timer -= delta
+	if _saccade_timer <= 0.0:
+		# Next interval jittered ±50% around the mean; small new target.
+		_saccade_timer = micro.saccade_interval_s * _cosmetic_rng.randf_range(0.5, 1.5)
+		var a := micro.saccade_amplitude
+		_saccade_target = Vector2(_cosmetic_rng.randf_range(-a, a), _cosmetic_rng.randf_range(-a, a))
+	# Fast ease (saccades are quick darts).
+	var t := clampf(delta * 25.0, 0.0, 1.0)
+	_saccade_offset = _saccade_offset.lerp(_saccade_target, t)
+
+
+## The current micro-saccade eye offset in normalized look units (~[-amp, amp]).
+## The FaceRig adds this UNDER its gaze/LookWander so the eyes are never dead-still.
+func saccade_offset() -> Vector2:
+	return _saccade_offset
+
+
+## Snapshot the micro-life layer (for tests / debug). Pure read.
+func micro_life_state() -> Dictionary:
+	return {
+		"breath_phase": _breath_phase,
+		"saccade_offset": _saccade_offset,
+		"hair_springs": _hair_springs.size(),
+		"jiggle_springs": _jiggle_springs.size(),
+	}
 
 
 # --- analytic two-bone foot-IK ----------------------------------------------

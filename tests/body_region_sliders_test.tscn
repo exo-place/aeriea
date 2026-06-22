@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://body_region_sliders_test_v1"]
+
+[ext_resource type="Script" path="res://tests/body_region_sliders_test.gd" id="1_regionslidertest"]
+
+[node name="BodyRegionSlidersTest" type="Node"]
+script = ExtResource("1_regionslidertest")

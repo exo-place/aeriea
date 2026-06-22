@@ -92,6 +92,12 @@ var _use_gpu_picker: bool = false
 var _value_labels: Dictionary = {}   ## field -> Label showing current value
 var _sliders: Dictionary = {}        ## field -> HSlider
 
+## DATA-DRIVEN per-region detail sliders (RegionSliders). Kept SEPARATE from `_sliders`
+## (the headline-axis dials) because these write BodyState.modifiers[<full_name>] rather
+## than a BodyState field. spec_name -> { slider, value_lbl, full_names:PackedStringArray,
+## kind:String }. Restored from state via _restore_modifier_sliders.
+var _modifier_sliders: Dictionary = {}
+
 # ---------------------------------------------------------------------------
 # Edit HISTORY — a branching undo TREE over BodyState dicts (HistoryTree). Every
 # settled axis change commits a node; undo/redo walk the tree; the history panel
@@ -101,6 +107,7 @@ var _sliders: Dictionary = {}        ## field -> HSlider
 # ---------------------------------------------------------------------------
 const HistoryTreeScript := preload("res://scripts/util/history_tree.gd")
 const CreatorIOScript := preload("res://scripts/body/creator_io.gd")
+const RegionSlidersScript := preload("res://scripts/body/region_sliders.gd")
 
 var _history: HistoryTree
 ## Per-axis pending value during a slider drag — committed once on drag-end so we
@@ -637,6 +644,7 @@ func _build_ui() -> void:
 
 	# Corner panels (own CanvasLayer-sibling Controls, anchored to other screen corners).
 	_build_undo_redo_corner(canvas)
+	_build_region_sliders_panel(canvas)
 	_build_history_panel(canvas)
 	_build_legend_panel(canvas)
 
@@ -959,6 +967,168 @@ func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float,
 	parent.add_child(row)
 
 
+# ---------------------------------------------------------------------------
+# DATA-DRIVEN per-region detail sliders (RegionSliders). A scrollable corner panel
+# (TOP-RIGHT, under the undo/redo icons) with one collapsible group per body region and
+# one slider per RegionSliders spec. Each slider writes BodyState.modifiers[<full_name>]
+# (signed [-1,1] for bidirectional axes, [0,1] for unipolar) and re-bakes the morph LIVE
+# through the SAME BodyState→registry→DetailLibrary path the macro axes and drag-to-modify
+# use. Pure DATA: the panel is generated from the RegionSliders table, never hand-listed.
+# ---------------------------------------------------------------------------
+func _build_region_sliders_panel(canvas: CanvasLayer) -> void:
+	var panel := PanelContainer.new()
+	panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	panel.position = Vector2(-16, 64)   # below the undo/redo corner icons
+	panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	panel.custom_minimum_size = Vector2(320, 0)
+	canvas.add_child(panel)
+
+	var outer := VBoxContainer.new()
+	outer.add_theme_constant_override("separation", 4)
+	panel.add_child(outer)
+
+	var hdr := Label.new()
+	hdr.text = "body regions — detail sliders"
+	outer.add_child(hdr)
+
+	# Scroll so the deep table never overruns the screen.
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(300, 460)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	outer.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 2)
+	scroll.add_child(list)
+
+	for grp in RegionSlidersScript.GROUPS:
+		var group_label: String = grp[0]
+		# Collapsible region group: a header button that toggles its contents.
+		var group_box := VBoxContainer.new()
+		group_box.add_theme_constant_override("separation", 1)
+		var contents := VBoxContainer.new()
+		contents.add_theme_constant_override("separation", 1)
+		var toggle := Button.new()
+		toggle.toggle_mode = true
+		toggle.button_pressed = true
+		toggle.text = "▾ %s" % group_label
+		toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		toggle.toggled.connect(func(on: bool) -> void:
+			contents.visible = on
+			toggle.text = "%s %s" % ["▾" if on else "▸", group_label])
+		group_box.add_child(toggle)
+		for spec in grp[1]:
+			_build_modifier_row(contents, spec[0], spec[1], spec[2], spec[3])
+		group_box.add_child(contents)
+		list.add_child(group_box)
+		list.add_child(HSeparator.new())
+
+
+## One detail-slider row, bound to a RegionSliders spec. The slider's range/default come from
+## the modifier KIND (bidirectional → [-1,1] @ 0; unipolar → [0,1] @ 0). value_changed writes
+## EVERY resolved full_name (a bilateral stem drives both L/R) into BodyState.modifiers and
+## re-bakes; history is committed once on drag-end (or immediately for a click/keyboard step).
+func _build_modifier_row(parent: VBoxContainer, spec_name: String, display: String,
+		lo_pole: String, hi_pole: String) -> void:
+	var full_names := RegionSlidersScript.resolve_full_names(spec_name)
+	# Kind/range from the registry (first resolved modifier; a bilateral pair shares a kind).
+	var reg := BodyState.registry()
+	var by: Dictionary = reg.get("by_full_name", {})
+	var kind := RegionSlidersScript.KIND_BIDIRECTIONAL
+	if full_names.size() > 0 and by.has(full_names[0]):
+		kind = String(by[full_names[0]]["kind"])
+	var lo := RegionSlidersScript.BIDIR_MIN if kind == RegionSlidersScript.KIND_BIDIRECTIONAL else RegionSlidersScript.UNIPOLAR_MIN
+	var hi := RegionSlidersScript.BIDIR_MAX if kind == RegionSlidersScript.KIND_BIDIRECTIONAL else RegionSlidersScript.UNIPOLAR_MAX
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 3)
+
+	var name_lbl := Label.new()
+	name_lbl.text = display
+	name_lbl.custom_minimum_size = Vector2(94, 0)
+	name_lbl.add_theme_font_size_override("font_size", 11)
+	row.add_child(name_lbl)
+
+	var lo_lbl := Label.new()
+	lo_lbl.text = lo_pole
+	lo_lbl.custom_minimum_size = Vector2(44, 0)
+	lo_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lo_lbl.add_theme_font_size_override("font_size", 9)
+	row.add_child(lo_lbl)
+
+	var slider := HSlider.new()
+	slider.min_value = lo
+	slider.max_value = hi
+	slider.step = RegionSlidersScript.STEP
+	slider.value = float(_body_state.modifiers.get(full_names[0], 0.0))
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.custom_minimum_size = Vector2(70, 0)
+	slider.value_changed.connect(func(v: float) -> void:
+		_set_modifier(full_names, v)
+		_apply_state()
+		_update_modifier_value_label(spec_name)
+		if not bool(_drag_pending.get(spec_name, false)) and not _suspend_commit:
+			_commit_modifier(spec_name, display, v))
+	slider.drag_started.connect(func() -> void: _drag_pending[spec_name] = true)
+	slider.drag_ended.connect(func(changed: bool) -> void:
+		_drag_pending[spec_name] = false
+		if changed and not _suspend_commit:
+			_commit_modifier(spec_name, display, float(slider.value)))
+	row.add_child(slider)
+
+	var hi_lbl := Label.new()
+	hi_lbl.text = hi_pole
+	hi_lbl.custom_minimum_size = Vector2(44, 0)
+	hi_lbl.add_theme_font_size_override("font_size", 9)
+	row.add_child(hi_lbl)
+
+	var val_lbl := Label.new()
+	val_lbl.custom_minimum_size = Vector2(34, 0)
+	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	val_lbl.add_theme_font_size_override("font_size", 10)
+	val_lbl.text = "%+.2f" % float(slider.value)
+	row.add_child(val_lbl)
+
+	_modifier_sliders[spec_name] = {
+		"slider": slider, "value_lbl": val_lbl, "full_names": full_names, "kind": kind,
+	}
+	parent.add_child(row)
+
+
+## Write `v` into BodyState.modifiers for every resolved full_name (clearing near-zero so a
+## neutral body stays a tiny dict — matching the drag path's housekeeping).
+func _set_modifier(full_names: PackedStringArray, v: float) -> void:
+	for fn in full_names:
+		if absf(v) < 1e-6:
+			_body_state.modifiers.erase(fn)
+		else:
+			_body_state.modifiers[fn] = v
+
+
+## Update one region slider's numeric value label from its current slider value.
+func _update_modifier_value_label(spec_name: String) -> void:
+	var e = _modifier_sliders.get(spec_name, null)
+	if e != null:
+		(e["value_lbl"] as Label).text = "%+.2f" % float((e["slider"] as HSlider).value)
+
+
+## Commit one settled region-slider change as a history node.
+func _commit_modifier(spec_name: String, display: String, value: float) -> void:
+	_history.commit(_body_state.to_dict(), "%s = %+.2f" % [display, value])
+	_refresh_history_panel()
+
+
+## Restore every region slider from the live BodyState.modifiers (called by _restore_current
+## after a headline-axis restore). Suspends commits while syncing.
+func _restore_modifier_sliders() -> void:
+	for spec_name in _modifier_sliders:
+		var e = _modifier_sliders[spec_name]
+		var fn := (e["full_names"] as PackedStringArray)[0]
+		var v := float(_body_state.modifiers.get(fn, 0.0))
+		(e["slider"] as HSlider).value = v
+		(e["value_lbl"] as Label).text = "%+.2f" % v
+
+
 func _format_value(field: String) -> String:
 	var v := float(_body_state.get(field))
 	match field:
@@ -1043,6 +1213,10 @@ func _restore_current() -> void:
 		var v := float(bs.get(field))
 		_body_state.set(field, v)
 		(_sliders[field] as HSlider).value = v
+	# The detail envelope is a whole-map replacement (restored dict's modifiers), then the
+	# region sliders re-sync to it. Replace the live map so cleared modifiers actually clear.
+	_body_state.modifiers = bs.modifiers.duplicate()
+	_restore_modifier_sliders()
 	_suspend_commit = false
 	_apply_state()
 	_refresh_history_panel()

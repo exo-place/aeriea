@@ -36,24 +36,13 @@ const SLOT_HAIR := "hair"
 const SLOT_EARS := "ears"
 const SLOT_TAIL := "tail"
 const SLOT_HORNS := "horns"
-## CORE-BODY slot: the HEAD itself. Unlike the accessory slots (which ATTACH a GLB + its own
-## little skeleton under a bone), a core-body part is RE-SKINNED onto aeriea's OWN 169-bone
-## skeleton (a committed ArrayMesh whose verts ride a mapped aeriea bone) — so it DEFORMS with
-## the body via aeriea's LBS, exactly like the base body mesh. See tools/bdcc2_head_reskin.gd.
-## The default ("human") keeps aeriea's own head (no overlay); a BDCC2 id overlays the
-## re-skinned animal head riding the `head` bone and hides aeriea's default face proxy surfaces.
-const SLOT_HEAD := "head"
-## CORE-BODY slot: the LEGS. The MULTI-BONE generalization of the head slot. Where a head
-## re-skins onto ONE bone, a leg part is skinned across MANY bones (thigh/shin/foot/toe) and
-## re-skinned onto aeriea's corresponding MH leg bones via the bone-map (tools/bdcc2_body_reskin.gd):
-## a committed ArrayMesh carrying REAL aeriea bone indices, so it DEFORMS joint-by-joint when
-## aeriea walks (bend the knee, the shin follows). The default ("human") keeps aeriea's own legs
-## (no overlay); a BDCC2 id overlays the re-skinned digitigrade / plantigrade leg variant.
-const SLOT_LEGS := "legs"
-const SLOTS := [SLOT_HAIR, SLOT_EARS, SLOT_TAIL, SLOT_HORNS, SLOT_HEAD, SLOT_LEGS]
-
-## Re-skinned core-body assets live here (ArrayMesh .res produced by tools/bdcc2_head_reskin.gd).
-const RESKIN_DIR := "res://assets/body/parts/bdcc2/reskin/"
+## NOTE. There is NO core-body HEAD or LEGS swap slot. The body renders the pure MakeHuman base
+## mesh directly. An earlier experiment grafted BDCC2 head/leg meshes onto the MH skeleton via
+## weight-transfer re-skin (with base-mesh masking to hide the double-render); that produced a
+## visibly-wrong second head/feet on top of the MH base and has been removed. The slots here are
+## all ACCESSORY-attach slots (a GLB + its own little skeleton riding an aeriea bone) — they sit
+## ON TOP of the base mesh and do not replace it.
+const SLOTS := [SLOT_HAIR, SLOT_EARS, SLOT_TAIL, SLOT_HORNS]
 
 ## The "none / default" id for a slot: empty geometry (a clean human head/back), never a
 ## broken state. Every slot has it; it is the per-slot fallback. For hair, the project's
@@ -72,10 +61,6 @@ const SLOT_ATTACH_BONE := {
 	SLOT_EARS: "head",
 	SLOT_TAIL: "spine05",
 	SLOT_HORNS: "head",
-	SLOT_HEAD: "head",
-	# Legs are MULTI-BONE: no single attach bone. The re-skin carries per-vertex aeriea bone
-	# indices; this fallback is only used for the single-bind path (unused for legs).
-	SLOT_LEGS: "root",
 }
 
 ## The registry: slot -> ordered Array of part rows. Each row:
@@ -145,50 +130,7 @@ const PARTS := {
 			"glbs": [{"glb": PARTS_DIR + "horns/HornChaosL.glb", "attach_bone": "head"},
 					 {"glb": PARTS_DIR + "horns/HornChaosR.glb", "attach_bone": "head"}]},
 	],
-	# CORE-BODY HEAD swap. The default keeps aeriea's OWN head (no overlay mesh). A BDCC2 id is a
-	# RE-SKINNED ArrayMesh (tools/bdcc2_head_reskin.gd): its verts are rebound onto aeriea's `head`
-	# bone, so it DEFORMS with the skeleton (rides the head bone when the body nods/turns) via
-	# aeriea's own LBS — a true weight-transfer, not a static attach. `reskin` = the committed .res;
-	# `attach_bone` = the aeriea bone the verts ride. Applying it hides aeriea's default face proxy
-	# surfaces (eyes/brows/lashes) so the two heads don't co-render. (alexofp/Rahi, BDCC2, MIT.)
-	SLOT_HEAD: [
-		{"id": "human", "name": "Human (aeriea default)", "reskin": "", "source": "aeriea-cc0"},
-		{"id": "canine", "name": "Canine Head", "reskin": RESKIN_DIR + "canine_head.res",
-			"attach_bone": "head", "source": "bdcc2"},
-		{"id": "feline", "name": "Feline Head", "reskin": RESKIN_DIR + "feline_head.res",
-			"attach_bone": "head", "source": "bdcc2"},
-	],
-	# CORE-BODY LEGS swap — the MULTI-BONE re-skin (tools/bdcc2_body_reskin.gd). Each BDCC2 id is a
-	# committed ArrayMesh whose verts carry REAL aeriea bone indices spanning the leg chain
-	# (upperleg01/lowerleg01/foot/toe1-1, L+R), so it DEFORMS joint-by-joint with aeriea's skeleton
-	# under aeriea's OWN LBS — a true multi-bone weight transfer. `multibone: true` selects the full
-	# identity-Skin bind path in BodyRig (bind i -> aeriea bone i). The default keeps aeriea's own
-	# legs (no overlay). (alexofp/Rahi, BDCC2, MIT — legs mined from FeminineBody.glb.)
-	SLOT_LEGS: [
-		{"id": "human", "name": "Human (aeriea default)", "reskin": "", "source": "aeriea-cc0"},
-		{"id": "digitigrade", "name": "Digitigrade Legs", "reskin": RESKIN_DIR + "digi_legs.res",
-			"multibone": true, "source": "bdcc2"},
-		{"id": "plantigrade", "name": "Plantigrade Legs", "reskin": RESKIN_DIR + "planti_legs.res",
-			"multibone": true, "source": "bdcc2"},
-	],
 }
-
-
-## True iff (slot, id) is a MULTI-BONE re-skin (verts carry per-vertex aeriea bone indices
-## across many bones, bound with a full identity Skin) vs a SINGLE-bone re-skin (head: one bind).
-static func is_multibone(slot: String, id: String) -> bool:
-	return bool(get_part(slot, id).get("multibone", false))
-
-
-## True iff (slot, id) is a RE-SKINNED core-body part (carries a `reskin` .res to bind onto
-## aeriea's own skeleton), vs an attached-GLB accessory or an empty/default.
-static func is_reskin(slot: String, id: String) -> bool:
-	return String(get_part(slot, id).get("reskin", "")) != ""
-
-
-## The committed re-skin ArrayMesh path for (slot, id), or "" if it is not a re-skin part.
-static func reskin_path(slot: String, id: String) -> String:
-	return String(get_part(slot, id).get("reskin", ""))
 
 
 ## All slot names in stable order.

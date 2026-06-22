@@ -1,6 +1,0 @@
-[gd_scene load_steps=2 format=3 uid="uid://embodiment_polish_render_v1"]
-
-[ext_resource type="Script" path="res://tools/embodiment_polish_render.gd" id="1_ep"]
-
-[node name="EmbodimentPolishRender" type="Node3D"]
-script = ExtResource("1_ep")

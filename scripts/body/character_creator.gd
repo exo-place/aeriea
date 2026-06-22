@@ -16,8 +16,13 @@
 extends Node3D
 
 # ---------------------------------------------------------------------------
-# Orbit camera tuning. The camera orbits a pivot (the body's torso height) at a
-# yaw/pitch/distance the mouse drives. 1u = 1m (units-and-scale.md).
+# Orbit camera tuning. The camera orbits a pivot at the body's vertical CENTER at
+# a yaw/pitch/distance the mouse drives. 1u = 1m (units-and-scale.md).
+#
+# CONTROL SCHEME (creator camera):
+#   left-drag: orbit · right-drag: pan · scroll: zoom · WASD: fly in the camera's
+#   local plane (W/S forward/back, A/D left/right) · Space: fly up · Ctrl: fly down
+#   WHILE a fly key is held (otherwise Ctrl is the legend hold-to-peek / tap-to-pin).
 # ---------------------------------------------------------------------------
 const MIN_PITCH := deg_to_rad(-85.0)
 const MAX_PITCH := deg_to_rad(85.0)
@@ -26,12 +31,14 @@ const MAX_DIST := 8.0
 const ORBIT_SPEED := 0.0075  ## radians per pixel of mouse drag
 const ZOOM_STEP := 0.88      ## multiplicative zoom per scroll notch
 const PAN_SPEED := 0.0025    ## metres per pixel of right-drag pan
+const FLY_SPEED := 2.4       ## metres/second — WASD/Space/Ctrl free-fly speed
 
 var _rig: BodyRig
 var _body_state: BodyState = BodyState.new()
 
 var _camera: Camera3D
-var _pivot: Vector3 = Vector3(0.0, 0.95, 0.0)   ## orbit target (torso height)
+var _pivot: Vector3 = Vector3(0.0, 0.85, 0.0)   ## orbit target — recomputed to the body's
+                                                ## vertical CENTER in _recenter_pivot()
 var _yaw: float = 0.0          ## radians; CANONICAL FORWARD: the un-rotated rig's
                                ## anatomical face points +Z. yaw=0 puts the camera on
                                ## +Z (in front of the face), so the creator opens on the
@@ -41,6 +48,16 @@ var _distance: float = 3.2     ## metres
 
 var _dragging_orbit: bool = false
 var _dragging_pan: bool = false
+
+## Free-fly key state (WASD + Space/Ctrl). Polled per-frame in _process to translate the
+## camera frame-rate-independently. Ctrl only counts as "fly down" while a WASD/Space key is
+## held (otherwise Ctrl is the legend hold-to-peek / tap-to-pin — see _unhandled_input).
+var _fly_fwd: bool = false   ## W
+var _fly_back: bool = false  ## S
+var _fly_left: bool = false  ## A
+var _fly_right: bool = false ## D
+var _fly_up: bool = false    ## Space
+var _fly_down: bool = false  ## Ctrl (only when another fly key is active)
 
 # ---------------------------------------------------------------------------
 # DRAG-TO-MODIFY (Slice D, body-parameterization.md). Asian-MMO-style direct
@@ -138,6 +155,7 @@ func _ready() -> void:
 	_build_morph_drag()
 	_build_camera()
 	_build_ui()
+	_recenter_pivot()
 	_update_camera()
 
 
@@ -286,6 +304,62 @@ func _update_camera() -> void:
 	var pos := _pivot + dir * _distance
 	_camera.global_position = pos
 	_camera.look_at(_pivot, Vector3.UP)
+
+
+## Set the orbit pivot to the body's VERTICAL CENTER (mid-torso/navel height) so orbiting is
+## maximally useful — derived from the body's ACTUAL standing extent, not a hardcoded torso
+## height, so it tracks height_cm changes. We use the POSED skeleton's bone world-y extremes
+## (feet bone ↔ head bone) rather than the un-skinned mesh AABB: the mesh's bind-pose AABB sits
+## in a rotated/offset frame and overstates the extent, whereas the posed bone positions give
+## the true standing span (verified: ~0.02 m feet → ~1.66 m head → center ~0.84 m for the
+## neutral build). The pivot is centred on x=0 (the body's sagittal plane), y at half-height.
+func _recenter_pivot() -> void:
+	if _rig == null or _rig.skeleton == null:
+		return
+	var sk := _rig.skeleton
+	if sk.get_bone_count() == 0:
+		return
+	var ymin := INF
+	var ymax := -INF
+	for bi in sk.get_bone_count():
+		var gp_y: float = (sk.global_transform * sk.get_bone_global_pose(bi)).origin.y
+		ymin = minf(ymin, gp_y)
+		ymax = maxf(ymax, gp_y)
+	if ymin == INF:
+		return
+	_pivot = Vector3(0.0, (ymin + ymax) * 0.5, 0.0)
+
+
+## Per-frame free-fly: poll the WASD/Space/Ctrl key state and translate the camera in its own
+## local plane (W/S = forward/back, A/D = left/right) plus world up/down, frame-rate-independent.
+## Free-fly is ADDITIVE — it moves both the camera and the orbit pivot together so the next
+## orbit/pan/zoom keeps working from the new vantage (the spherical relationship is preserved).
+func _process(delta: float) -> void:
+	if _camera == null:
+		return
+	var move := Vector3.ZERO
+	var basis := _camera.global_transform.basis
+	if _fly_fwd:
+		move += -basis.z   # camera forward
+	if _fly_back:
+		move += basis.z
+	if _fly_left:
+		move += -basis.x
+	if _fly_right:
+		move += basis.x
+	if _fly_up:
+		move += Vector3.UP
+	# Ctrl is "fly down" ONLY while another fly key is active (otherwise Ctrl = legend peek/pin).
+	var horiz_active := _fly_fwd or _fly_back or _fly_left or _fly_right or _fly_up
+	if _fly_down and horiz_active:
+		move += Vector3.DOWN
+	if move == Vector3.ZERO:
+		return
+	var step := move.normalized() * FLY_SPEED * delta
+	# Shift the pivot by the same step so the orbit radius/angles stay valid; _update_camera
+	# then places the camera at pivot + dir*distance, i.e. the camera moves by `step` too.
+	_pivot += step
+	_update_camera()
 
 
 # ---------------------------------------------------------------------------
@@ -484,12 +558,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		# while merely HOLDING Ctrl peeks the legend. This is display-only — it changes no
 		# binding. (The keycode for the modifier itself is KEY_CTRL.)
 		if k.keycode == KEY_CTRL:
+			# Ctrl drives BOTH the legend peek/pin AND free-fly "down" (the latter only takes
+			# effect while a WASD/Space key is also held — see _process). Tracking _fly_down here
+			# keeps the two uses non-conflicting: a bare Ctrl tap still pins the legend.
 			if k.pressed and not k.echo:
 				_ctrl_down = true
+				_fly_down = true
 				_ctrl_used_combo = false
 				_update_legend_visibility()
 			elif not k.pressed:
 				_ctrl_down = false
+				_fly_down = false
 				if not _ctrl_used_combo:
 					_legend_pinned = not _legend_pinned
 				_update_legend_visibility()
@@ -520,6 +599,32 @@ func _unhandled_input(event: InputEvent) -> void:
 				_status_lbl.text = "picker: %s" % ("GPU ID-buffer" if _use_gpu_picker else "CPU grid")
 			get_viewport().set_input_as_handled()
 			return
+		# FREE-FLY keys (WASD = move in the camera's local plane, Space = up; Ctrl = down is
+		# handled in the KEY_CTRL block above). Track press/release state; _process applies the
+		# translation per-frame. Skip while Ctrl is held so Ctrl-combos (e.g. Ctrl+Z, Ctrl+S) and
+		# typing in text fields aren't hijacked as fly input.
+		if not k.ctrl_pressed and not k.echo:
+			match k.keycode:
+				KEY_W:
+					_fly_fwd = k.pressed
+					get_viewport().set_input_as_handled()
+					return
+				KEY_S:
+					_fly_back = k.pressed
+					get_viewport().set_input_as_handled()
+					return
+				KEY_A:
+					_fly_left = k.pressed
+					get_viewport().set_input_as_handled()
+					return
+				KEY_D:
+					_fly_right = k.pressed
+					get_viewport().set_input_as_handled()
+					return
+				KEY_SPACE:
+					_fly_up = k.pressed
+					get_viewport().set_input_as_handled()
+					return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		match mb.button_index:
@@ -742,6 +847,7 @@ func _build_legend_panel(canvas: CanvasLayer) -> void:
 
 	for line in [
 		"drag: orbit    right-drag: pan    scroll: zoom",
+		"WASD: fly    Space: up    Ctrl(+WASD): down",
 		"M: sculpt mode (drag body to morph)",
 		"P: picker backend (CPU grid / GPU id)",
 		"H: toggle history panel",

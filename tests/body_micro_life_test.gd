@@ -137,7 +137,88 @@ func _ready() -> void:
 		rig.grounded == g_before and is_equal_approx(rig.horizontal_speed, s_before),
 		"grounded %s->%s speed %.3f->%.3f" % [g_before, rig.grounded, s_before, rig.horizontal_speed])
 
+	# --- 8. BDCC2 SWAPPABLE HAIR ---------------------------------------------
+	# The first real "swappable part": a BDCC2-mined rigged hair GLB attaches under the
+	# head bone, registers spring bones on ITS OWN skeleton, deflects under body motion via
+	# aeriea's spring physics, and swaps cleanly with the CC0 cap. (Assets: alexofp/Rahi,
+	# BDCC2, MIT — see NOTICE.md.)
+	var rig3 := BodyRig.new(); add_child(rig3); rig3.build()
+	rig3.use_motion_matching = false; rig3.foot_ik_enabled = false
+	rig3._setup_micro_life(0)
+	# default style is the CC0 cap (hair on the body skeleton's hair01/02/03 chain).
+	_assert("default hairstyle is the CC0 cap", rig3.current_hairstyle == "cap",
+		"hairstyle=%s" % rig3.current_hairstyle)
+	# apply a BDCC2 ponytail: a separate hair skeleton attaches under the head bone.
+	var ok_pt := rig3.apply_hairstyle("ponytail1")
+	_assert("BDCC2 ponytail1 applies", ok_pt, "ok=%s" % ok_pt)
+	var hskel := rig3._hair_skeleton()
+	_assert("BDCC2 hair attaches its OWN skeleton under the head bone", hskel != null,
+		"hair_skel=%s" % (hskel != null))
+	if hskel != null:
+		_assert("BDCC2 hair skeleton has physics bones (Tail/Back/…)", hskel.get_bone_count() >= 2,
+			"bones=%d" % hskel.get_bone_count())
+		var has_mesh := false
+		for child in hskel.get_children():
+			if child is MeshInstance3D and (child as MeshInstance3D).mesh != null:
+				has_mesh = true
+		_assert("BDCC2 hair has a real skinned mesh on the head", has_mesh, "mesh=%s" % has_mesh)
+	_assert("BDCC2 hair registers spring bones on its own skeleton",
+		rig3.micro_life_state()["hair_springs"] >= 1,
+		"hair_springs=%d" % rig3.micro_life_state()["hair_springs"])
+	# the BDCC2 hair bones must DEFLECT under body shake (aeriea's springs drive them).
+	var bdcc2_dev := _bdcc2_hair_deflection(rig3, hskel)
+	_assert("BDCC2 hair SWAYS via aeriea's spring physics (>1mrad)", bdcc2_dev > 1e-3,
+		"max deflection=%.5f rad" % bdcc2_dev)
+	# swap to a DIFFERENT BDCC2 style: a new skeleton/mesh replaces the old one.
+	rig3.apply_hairstyle("short")
+	var hskel2 := rig3._hair_skeleton()
+	_assert("swap to a different BDCC2 style replaces the hair skeleton",
+		hskel2 != null and hskel2 != hskel, "new_skel=%s changed=%s" % [hskel2 != null, hskel2 != hskel])
+	_assert("ShortHair registers its own (different) spring count",
+		rig3.micro_life_state()["hair_springs"] >= 1,
+		"hair_springs=%d" % rig3.micro_life_state()["hair_springs"])
+	# swap back to the CC0 cap: BDCC2 hair torn down, cap chain re-registered on the body.
+	rig3.apply_hairstyle("cap")
+	_assert("swap back to CC0 cap tears down the BDCC2 hair skeleton",
+		rig3._hair_skeleton() == null, "hair_skel=%s" % (rig3._hair_skeleton() != null))
+	_assert("CC0 cap re-registers the hair01/02/03 chain on the body skeleton",
+		rig3.micro_life_state()["hair_springs"] >= 1,
+		"hair_springs=%d" % rig3.micro_life_state()["hair_springs"])
+	# unknown id falls back to the cap (never a bald head). Apply a BDCC2 style first so
+	# the fallback has to actually CHANGE state (tear down BDCC2 hair, restore the cap).
+	rig3.apply_hairstyle("long")
+	rig3.apply_hairstyle("nonexistent_style")
+	_assert("unknown hairstyle id falls back to the CC0 cap",
+		rig3.current_hairstyle == "cap" and rig3._hair_skeleton() == null,
+		"hairstyle=%s hair_skel=%s" % [rig3.current_hairstyle, rig3._hair_skeleton() != null])
+
 	_finish()
+
+
+## Settle the rig still with its current (BDCC2) hairstyle, then shake the body and
+## return the max deflection (rad) of the first physics bone on the attached hair
+## skeleton — i.e. confirm aeriea's spring physics actually sways the BDCC2 geometry.
+func _bdcc2_hair_deflection(rig: BodyRig, hskel: Skeleton3D) -> float:
+	if hskel == null:
+		return 0.0
+	var bi := -1
+	for i in hskel.get_bone_count():
+		var n := hskel.get_bone_name(i).to_lower()
+		if n != "root" and n != "neutral_bone":
+			bi = i; break
+	if bi < 0:
+		return 0.0
+	rig.set_movement_state(true, 0.0)
+	rig.global_position = Vector3.ZERO
+	for i in 30:
+		rig.apply_pose(1.0 / 60.0)
+	var settled := hskel.get_bone_pose_rotation(bi)
+	var dev := 0.0
+	for i in 40:
+		rig.global_position = Vector3(0.05 * sin(i * 1.7), 0.07 * sin(i * 1.4), 0.04 * cos(i * 1.9))
+		rig.apply_pose(1.0 / 60.0)
+		dev = maxf(dev, settled.angle_to(hskel.get_bone_pose_rotation(bi)))
+	return dev
 
 
 ## Settle a fresh rig still, then shake its global transform; return the max deflection

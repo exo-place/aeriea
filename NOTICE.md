@@ -80,6 +80,35 @@ pattern (engine-native since 4.4). **No BDCC2 code is mined here** — BDCC2's
 `doll.gd` only showed the chest->neck->head wiring pattern, which is an idea, not
 code. Listed here only to record that this file is deliberately attribution-free.
 
+## BDCC2 — rigged hairstyle meshes / ART (MIT)
+
+aeriea's swappable hairstyles under `assets/body/hair/bdcc2/` are the **actual rigged
+hair meshes** mined from **BDCC2** by **alexofp / Rahi** (MIT, **Copyright (c) 2025
+Rahi**; full license text above). They are used as-is per BDCC2's README invitation to
+"use as a base for your own game." This is BDCC2 **art** (unlike the Path-A code mining
+elsewhere in this file) — the owner accepts BDCC2's MIT art-license under attribution;
+a courtesy confirmation with Rahi about the art reuse is an outstanding nicety, not a
+blocker.
+
+- Upstream: BDCC2 `Mesh/Parts/Hair/*/<Name>.glb` (the GLB geometry + skeleton only;
+  BDCC2's wigglebone addon and Kajiya-Kay hair shader are NOT mined — aeriea drives the
+  bones with its OWN spring-bone physics, `scripts/body/spring_bone.gd`).
+- Mined GLBs (15): `Ponytail1`–`Ponytail4`, `PonytailsBack`, `LongHair`, `LongCuteHair`,
+  `LongChaosHair`, `LongSideHair`, `LongHairBow`, `ShortHair`, `ShortHair2`, `SideHair`,
+  `FerriHair`, `CoolBangsHair`.
+- Each GLB ships its own little `Skeleton3D` (a `Root` bone + 1–6 physics bones such as
+  `Tail1`/`Back.L`/`Front.R`/`WiggleL`/`Bang.L`); aeriea attaches that skeleton under the
+  character's `head` bone (`BoneAttachment3D`) and registers a `SpringBone` on every
+  non-`Root` bone, so aeriea's spring physics sways BDCC2's geometry. Swap surface:
+  `HairLibrary` (`scripts/body/hair_library.gd`) + `BodyRig.apply_hairstyle(id)`.
+
+Some BDCC2 hair scene node names hint at per-asset contributors (e.g. `KidlatHair`,
+`ArticaHair`, `FerriHair`). BDCC2 records no separate per-mesh contributor credits in its
+repo beyond the project-wide MIT copyright to Rahi; if upstream later documents individual
+hair-mesh authors, they should be added here.
+
+aeriea claims **no ownership** of these meshes; they remain © 2025 Rahi under MIT.
+
 ## MakeHuman — base mesh, rig, proxies, targets (CC0-1.0)
 
 aeriea's body/head mesh, skeleton, proxies, and morph targets derive from

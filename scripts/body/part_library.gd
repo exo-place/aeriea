@@ -36,7 +36,17 @@ const SLOT_HAIR := "hair"
 const SLOT_EARS := "ears"
 const SLOT_TAIL := "tail"
 const SLOT_HORNS := "horns"
-const SLOTS := [SLOT_HAIR, SLOT_EARS, SLOT_TAIL, SLOT_HORNS]
+## CORE-BODY slot: the HEAD itself. Unlike the accessory slots (which ATTACH a GLB + its own
+## little skeleton under a bone), a core-body part is RE-SKINNED onto aeriea's OWN 169-bone
+## skeleton (a committed ArrayMesh whose verts ride a mapped aeriea bone) — so it DEFORMS with
+## the body via aeriea's LBS, exactly like the base body mesh. See tools/bdcc2_head_reskin.gd.
+## The default ("human") keeps aeriea's own head (no overlay); a BDCC2 id overlays the
+## re-skinned animal head riding the `head` bone and hides aeriea's default face proxy surfaces.
+const SLOT_HEAD := "head"
+const SLOTS := [SLOT_HAIR, SLOT_EARS, SLOT_TAIL, SLOT_HORNS, SLOT_HEAD]
+
+## Re-skinned core-body assets live here (ArrayMesh .res produced by tools/bdcc2_head_reskin.gd).
+const RESKIN_DIR := "res://assets/body/parts/bdcc2/reskin/"
 
 ## The "none / default" id for a slot: empty geometry (a clean human head/back), never a
 ## broken state. Every slot has it; it is the per-slot fallback. For hair, the project's
@@ -55,6 +65,7 @@ const SLOT_ATTACH_BONE := {
 	SLOT_EARS: "head",
 	SLOT_TAIL: "spine05",
 	SLOT_HORNS: "head",
+	SLOT_HEAD: "head",
 }
 
 ## The registry: slot -> ordered Array of part rows. Each row:
@@ -122,7 +133,31 @@ const PARTS := {
 			"glbs": [{"glb": PARTS_DIR + "horns/HornChaosL.glb", "attach_bone": "head", "offset": Vector3(-0.013, -0.318, 0.057)},
 					 {"glb": PARTS_DIR + "horns/HornChaosR.glb", "attach_bone": "head", "offset": Vector3(0.027, -0.318, 0.057)}]},
 	],
+	# CORE-BODY HEAD swap. The default keeps aeriea's OWN head (no overlay mesh). A BDCC2 id is a
+	# RE-SKINNED ArrayMesh (tools/bdcc2_head_reskin.gd): its verts are rebound onto aeriea's `head`
+	# bone, so it DEFORMS with the skeleton (rides the head bone when the body nods/turns) via
+	# aeriea's own LBS — a true weight-transfer, not a static attach. `reskin` = the committed .res;
+	# `attach_bone` = the aeriea bone the verts ride. Applying it hides aeriea's default face proxy
+	# surfaces (eyes/brows/lashes) so the two heads don't co-render. (alexofp/Rahi, BDCC2, MIT.)
+	SLOT_HEAD: [
+		{"id": "human", "name": "Human (aeriea default)", "reskin": "", "source": "aeriea-cc0"},
+		{"id": "canine", "name": "Canine Head", "reskin": RESKIN_DIR + "canine_head.res",
+			"attach_bone": "head", "source": "bdcc2"},
+		{"id": "feline", "name": "Feline Head", "reskin": RESKIN_DIR + "feline_head.res",
+			"attach_bone": "head", "source": "bdcc2"},
+	],
 }
+
+
+## True iff (slot, id) is a RE-SKINNED core-body part (carries a `reskin` .res to bind onto
+## aeriea's own skeleton), vs an attached-GLB accessory or an empty/default.
+static func is_reskin(slot: String, id: String) -> bool:
+	return String(get_part(slot, id).get("reskin", "")) != ""
+
+
+## The committed re-skin ArrayMesh path for (slot, id), or "" if it is not a re-skin part.
+static func reskin_path(slot: String, id: String) -> String:
+	return String(get_part(slot, id).get("reskin", ""))
 
 
 ## All slot names in stable order.

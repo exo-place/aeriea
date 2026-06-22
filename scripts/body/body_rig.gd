@@ -490,16 +490,85 @@ func apply_part(slot: String, id: String) -> bool:
 	# The hair slot also drives the CC0 cap proxy surface: it shows ONLY when the cap is on.
 	if slot == PartLibrary.SLOT_HAIR and _proxy_surface.has("hair"):
 		_set_hair_cap_visible(not is_bdcc2)
+	# CORE-BODY head: hide aeriea's default face proxy surfaces when an animal head overlays.
+	if slot == PartLibrary.SLOT_HEAD:
+		_set_default_head_visible(not PartLibrary.is_reskin(slot, id))
 	if is_bdcc2:
-		var attached := _attach_part_glbs(slot, id)
+		# A RE-SKINNED core-body part (head) binds onto aeriea's OWN skeleton; an accessory
+		# part attaches its own GLB skeleton under a bone. Branch on which.
+		var attached := _attach_reskin_part(slot, id) if PartLibrary.is_reskin(slot, id) \
+			else _attach_part_glbs(slot, id)
 		if not attached:
 			# Load failed — fall back to the slot default so the slot is never broken.
 			_current_part[slot] = PartLibrary.default_id(slot)
 			if slot == PartLibrary.SLOT_HAIR and _proxy_surface.has("hair"):
 				_set_hair_cap_visible(true)
+			if slot == PartLibrary.SLOT_HEAD:
+				_set_default_head_visible(true)
 			_register_part_springs()
 			return false
 	_register_part_springs()
+	return true
+
+
+## Show/hide aeriea's OWN head/face geometry when a re-skinned animal head overlays it. The
+## body mesh's skull verts cannot be partially hidden, but the FACE-defining proxy surfaces
+## (eyes / eyebrows / eyelashes / hair cap) can — hiding them stops aeriea's human face from
+## co-rendering through the swapped animal head. (The base-mesh scalp reads as the head's
+## interior under the animal shell; the silhouette is the swapped head.)
+func _set_default_head_visible(vis: bool) -> void:
+	if proxy_instance == null or proxy_instance.mesh == null:
+		return
+	for piece in ["eyes", "brows", "lashes", "hair"]:
+		if _proxy_surface.has(piece):
+			var kind := "default"
+			for s in ProxyMorph.surfaces():
+				if String(s["name"]) == piece:
+					kind = String(s["material"]); break
+			# Only force the hair cap off for an animal head; when restoring (vis=true) let
+			# the hair SLOT decide the cap's visibility (a BDCC2 hairstyle may own it).
+			if piece == "hair" and vis:
+				_set_hair_cap_visible(not PartLibrary.is_bdcc2(PartLibrary.SLOT_HAIR, current_part(PartLibrary.SLOT_HAIR)))
+			else:
+				proxy_instance.set_surface_override_material(_proxy_surface[piece], _proxy_material(kind, vis))
+
+
+## Build a MeshInstance3D for a RE-SKINNED core-body part (e.g. an animal head): a committed
+## ArrayMesh whose verts are bound to a SINGLE aeriea bone (the part's attach_bone). We give it
+## a one-bind Skin on that bone and parent it under aeriea's OWN skeleton, so aeriea's LBS skins
+## it and it DEFORMS with the body — riding the mapped bone when the skeleton animates. Returns
+## true on success. RENDER-SIDE: the re-skin asset is deterministic geometry.
+func _attach_reskin_part(slot: String, id: String) -> bool:
+	var path := PartLibrary.reskin_path(slot, id)
+	if path == "" or not ResourceLoader.exists(path):
+		return false
+	var mesh := load(path)
+	if not (mesh is ArrayMesh):
+		return false
+	var bone := String(PartLibrary.get_part(slot, id).get("attach_bone", PartLibrary.SLOT_ATTACH_BONE.get(slot, "head")))
+	var bi := skeleton.find_bone(bone)
+	if bi < 0:
+		return false
+	# Single-bind skin: bind 0 -> the chosen aeriea bone (bind pose = inverse of its GLOBAL
+	# rest, matching how the body Skin is built — so the re-skinned verts, baked into that
+	# bone's rest-local frame, reseat into world correctly and then follow the bone's pose).
+	var skin := Skin.new()
+	skin.add_bind(0, skeleton.get_bone_global_rest(bi).affine_inverse())
+	skin.set_bind_name(0, bone)
+	var mi := MeshInstance3D.new()
+	mi.name = "%sReskin" % slot.capitalize()
+	mi.mesh = (mesh as ArrayMesh)
+	# A plain skin material so the re-skinned head reads as flesh/fur (texture work is future).
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = SKIN_ALBEDO
+	mat.roughness = SKIN_ROUGHNESS
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = mat
+	skeleton.add_child(mi)
+	mi.skin = skin
+	mi.skeleton = mi.get_path_to(skeleton)
+	# Track it in _part_attachments so the uniform teardown (queue_free) handles it on a swap.
+	_part_attachments[slot] = [mi]
 	return true
 
 

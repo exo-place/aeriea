@@ -115,6 +115,34 @@ const SpringBone := preload("res://scripts/body/spring_bone.gd")
 const MicroLifeParams := preload("res://scripts/body/micro_life_params.gd")
 const PartLibrary := preload("res://scripts/body/part_library.gd")
 
+## --- per-region base-mesh masking --------------------------------------------
+## When a CORE-BODY part (head / legs) is RE-SKINNED in, aeriea's OWN base-mesh geometry in
+## that region (the human skull / the human legs) still co-renders UNDER the swapped part —
+## a double-render with clip-through. To replace cleanly, the base-mesh verts of that region
+## are MASKED (collapsed to a degenerate point so their triangles render nothing) whenever the
+## region's slot holds a re-skin part, and restored when the slot returns to "human".
+##
+## Region membership is computed once at build() from the base mesh's ARRAY_BONES: a vertex
+## belongs to a region iff its DOMINANT (max-weight) bone is in that region's bone set. The
+## region bone sets are BONE-SUBTREE based (the head bone + all face descendants; the
+## upperleg bones + all leg/foot/toe descendants), derived from the rig hierarchy — DATA, not
+## a hand-listed magic set. The collapse is re-applied after every morph re-bake (the bake
+## rewrites ARRAY_VERTEX from neutral) so the mask survives morphs; restoring re-bakes then
+## re-applies only the still-active masks. RENDER-SIDE / cosmetic: touches only the rendered
+## ArrayMesh positions, never the sim.
+##
+## Slot -> the bone names whose SUBTREE roots the region. The head region is the head bone's
+## subtree (skull + all face bones); the legs region is the two upperleg subtrees (thigh down
+## through foot/toe). Pelvis/glute/belly stay BODY (they are the hip/torso, not the leg part).
+const REGION_ROOT_BONES := {
+	PartLibrary.SLOT_HEAD: ["head"],
+	PartLibrary.SLOT_LEGS: ["upperleg01.L", "upperleg01.R"],
+}
+## A sentinel collapse point well below the feet; all masked verts of a region collapse to ONE
+## shared point so every triangle touching a masked vert is zero-area (renders no fragments)
+## and the collapsed cluster sits off-screen under the floor regardless.
+const MASK_COLLAPSE_POINT := Vector3(0.0, -1000.0, 0.0)
+
 ## Soft-region bones the jiggle layer drives (spring-bones). breast.L/R come straight
 ## from the CC0 MakeHuman default rig; belly + glute.L/R are INJECTED by the body
 ## pipeline (tools/body_converter.gd) — deterministic bones placed from the existing
@@ -147,6 +175,10 @@ var _skin_material: StandardMaterial3D
 var proxy_instance: MeshInstance3D
 ## Map: piece name -> surface index in the proxy mesh (for show/hide + tests).
 var _proxy_surface := {}
+## Proxy pieces EXPLICITLY force-hidden via set_proxy_visible(piece, false) (a manual override on
+## top of the authoritative derive). piece name -> true. Honoured by _proxy_piece_visible so a
+## morph re-bake keeps a manually-hidden piece hidden. (genitals use show_genitals, not this.)
+var _proxy_force_hidden := {}
 
 ## Live eye parameters (a copy of EYE_PARAMS_DEFAULT, overridable via set_eye_params).
 var _eye_params: Dictionary = EYE_PARAMS_DEFAULT.duplicate(true)
@@ -198,6 +230,12 @@ var _current_part := {}
 ## slot's bone (so the part rides that bone). slot -> Array[BoneAttachment3D]. Empty for a
 ## slot showing its empty/default. Freed + cleared on a swap.
 var _part_attachments := {}
+## Per-region base-mesh vertex membership: slot -> PackedInt32Array of base-mesh vertex
+## indices belonging to that region (dominant bone in the region's subtree). Built once in
+## build(); used to collapse/restore those verts when a core-body re-skin masks the region.
+var _region_verts := {}
+## Slots whose base-mesh region is CURRENTLY masked (collapsed). Re-asserted after each bake.
+var _masked_regions := {}
 ## Micro-saccade state (render-side; advanced by delta + cosmetic rng).
 var _saccade_offset: Vector2 = Vector2.ZERO
 var _saccade_target: Vector2 = Vector2.ZERO
@@ -357,6 +395,10 @@ func build() -> bool:
 	# apply_body_state(). Absent artifact => skipped (body still renders).
 	_build_proxies(skin)
 
+	# Precompute per-region base-mesh vertex membership (head / legs) from the base mesh's
+	# ARRAY_BONES, so a core-body re-skin can mask its region's base geometry (no double-render).
+	_compute_region_verts()
+
 	# Slice 4 — load the committed Motion-Matching DB if present and wire the
 	# deterministic matcher. Absent DB => graceful degradation to the Slice-3
 	# procedural cycle (decision doc §3.2). RENDER-SIDE only.
@@ -514,21 +556,31 @@ func apply_part(slot: String, id: String) -> bool:
 	# The hair slot also drives the CC0 cap proxy surface: it shows ONLY when the cap is on.
 	if slot == PartLibrary.SLOT_HAIR and _proxy_surface.has("hair"):
 		_set_hair_cap_visible(not is_bdcc2)
-	# CORE-BODY head: hide aeriea's default face proxy surfaces when an animal head overlays.
+	# CORE-BODY head: hide aeriea's default face proxy surfaces when an animal head overlays,
+	# AND mask the base-mesh skull region so the human skull doesn't co-render under it.
 	if slot == PartLibrary.SLOT_HEAD:
-		_set_default_head_visible(not PartLibrary.is_reskin(slot, id))
+		var reskinning_head := PartLibrary.is_reskin(slot, id)
+		_set_default_head_visible(not reskinning_head)
+		_set_region_masked(PartLibrary.SLOT_HEAD, reskinning_head)
+	# CORE-BODY legs: mask the base-mesh leg region so the human legs don't co-render under the
+	# swapped digi/planti legs.
+	if slot == PartLibrary.SLOT_LEGS:
+		_set_region_masked(PartLibrary.SLOT_LEGS, PartLibrary.is_reskin(slot, id))
 	if is_bdcc2:
 		# A RE-SKINNED core-body part (head) binds onto aeriea's OWN skeleton; an accessory
 		# part attaches its own GLB skeleton under a bone. Branch on which.
 		var attached := _attach_reskin_part(slot, id) if PartLibrary.is_reskin(slot, id) \
 			else _attach_part_glbs(slot, id)
 		if not attached:
-			# Load failed — fall back to the slot default so the slot is never broken.
+			# Load failed — fall back to the slot default so the slot is never broken, and
+			# restore the base-mesh region (no orphaned mask with no part over it).
 			_current_part[slot] = PartLibrary.default_id(slot)
 			if slot == PartLibrary.SLOT_HAIR and _proxy_surface.has("hair"):
 				_set_hair_cap_visible(true)
 			if slot == PartLibrary.SLOT_HEAD:
 				_set_default_head_visible(true)
+			if REGION_ROOT_BONES.has(slot):
+				_set_region_masked(slot, false)
 			_register_part_springs()
 			return false
 	_register_part_springs()
@@ -540,21 +592,127 @@ func apply_part(slot: String, id: String) -> bool:
 ## (eyes / eyebrows / eyelashes / hair cap) can — hiding them stops aeriea's human face from
 ## co-rendering through the swapped animal head. (The base-mesh scalp reads as the head's
 ## interior under the animal shell; the silhouette is the swapped head.)
-func _set_default_head_visible(vis: bool) -> void:
-	if proxy_instance == null or proxy_instance.mesh == null:
+func _set_default_head_visible(_vis: bool) -> void:
+	# The animal-head face hide is now DERIVED authoritatively in _proxy_piece_visible (which
+	# reads the current head part) and applied — material AND geometric collapse — by
+	# _apply_proxy_materials. So this just re-applies from the current state; `_vis` is implied
+	# by whether the active head is a re-skin. (The legacy direct-material path used wrong piece
+	# names — "brows"/"lashes" instead of "eyebrows"/"eyelashes" — and the transparent-material
+	# hide didn't actually stop rendering; both are fixed by the derive + collapse path.)
+	_apply_proxy_materials()
+
+
+# --- per-region base-mesh masking --------------------------------------------------------
+
+## Compute, once at build, which base-mesh vertices belong to each maskable region (head /
+## legs). A vertex is in a region iff its DOMINANT (highest-weight) bone is in that region's
+## bone SUBTREE (the region root bone + all its skeletal descendants — DATA from the rig
+## hierarchy, not a hand-listed set). Fills _region_verts: slot -> PackedInt32Array.
+func _compute_region_verts() -> void:
+	_region_verts.clear()
+	if mesh_instance == null or mesh_instance.mesh == null:
 		return
-	for piece in ["eyes", "brows", "lashes", "hair"]:
-		if _proxy_surface.has(piece):
-			var kind := "default"
-			for s in ProxyMorph.surfaces():
-				if String(s["name"]) == piece:
-					kind = String(s["material"]); break
-			# Only force the hair cap off for an animal head; when restoring (vis=true) let
-			# the hair SLOT decide the cap's visibility (a BDCC2 hairstyle may own it).
-			if piece == "hair" and vis:
-				_set_hair_cap_visible(not PartLibrary.is_bdcc2(PartLibrary.SLOT_HAIR, current_part(PartLibrary.SLOT_HAIR)))
-			else:
-				proxy_instance.set_surface_override_material(_proxy_surface[piece], _proxy_material(kind, vis))
+	var mesh := mesh_instance.mesh as ArrayMesh
+	if mesh.get_surface_count() == 0:
+		return
+	var arrays := mesh.surface_get_arrays(0)
+	var vbones = arrays[Mesh.ARRAY_BONES]
+	var vweights = arrays[Mesh.ARRAY_WEIGHTS]
+	if not (vbones is PackedInt32Array) or not (vweights is PackedFloat32Array):
+		return
+	var nverts: int = (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+	for slot in REGION_ROOT_BONES:
+		var region_bones := _region_bone_set(REGION_ROOT_BONES[slot])
+		var hits := PackedInt32Array()
+		for vi in nverts:
+			# Dominant bone = the influence with the largest weight (4 per vertex).
+			var best_b := -1
+			var best_w := -1.0
+			for k in 4:
+				var w: float = vweights[vi * 4 + k]
+				if w > best_w:
+					best_w = w
+					best_b = vbones[vi * 4 + k]
+			if best_b >= 0 and region_bones.has(best_b):
+				hits.append(vi)
+		_region_verts[slot] = hits
+
+
+## The set (as a Dictionary used as a set: bone_index -> true) of every bone in the SUBTREE
+## rooted at each name in `roots` (the root bones themselves plus all descendants), resolved
+## via the skeleton's parent links.
+func _region_bone_set(roots: Array) -> Dictionary:
+	var out := {}
+	for rname in roots:
+		if _bone_index.has(rname):
+			out[int(_bone_index[rname])] = true
+	# Iteratively pull in children whose parent is already in the set (the rig is small).
+	var changed := true
+	while changed:
+		changed = false
+		for i in skeleton.get_bone_count():
+			if out.has(i):
+				continue
+			var p := skeleton.get_bone_parent(i)
+			if p >= 0 and out.has(p):
+				out[i] = true
+				changed = true
+	return out
+
+
+## Mask (true) or restore (false) a region's base-mesh geometry. Masking collapses the
+## region's base verts to MASK_COLLAPSE_POINT (degenerate triangles -> no fragments);
+## restoring re-bakes the morph (which rewrites positions from neutral) and re-asserts any
+## OTHER region still masked. Tracks the live set in _masked_regions so the collapse is
+## re-applied after every morph re-bake. RENDER-SIDE only.
+func _set_region_masked(slot: String, masked: bool) -> void:
+	if masked:
+		_masked_regions[slot] = true
+		_collapse_region_verts(slot)
+	else:
+		_masked_regions.erase(slot)
+		# Re-bake from neutral to restore this region's positions, then re-assert other masks.
+		apply_body_state(body_state)
+
+
+## Collapse one region's base-mesh verts to the sentinel point IN PLACE on the current baked
+## surface (called after masking and re-asserted after every morph bake). Rebuilds surface 0
+## with the same arrays/blends/format so the skin binding is unchanged.
+func _collapse_region_verts(slot: String) -> void:
+	if mesh_instance == null or mesh_instance.mesh == null:
+		return
+	var idx = _region_verts.get(slot, null)
+	if idx == null or (idx as PackedInt32Array).is_empty():
+		return
+	var mesh := mesh_instance.mesh as ArrayMesh
+	if mesh.get_surface_count() == 0:
+		return
+	var arrays := mesh.surface_get_arrays(0)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	for vi in (idx as PackedInt32Array):
+		verts[vi] = MASK_COLLAPSE_POINT
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	var blends := mesh.surface_get_blend_shape_arrays(0)
+	var fmt := mesh.surface_get_format(0)
+	mesh.clear_surfaces()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, blends, {}, fmt)
+	mesh.surface_set_name(0, "body")
+
+
+## True iff a region's base-mesh geometry is currently masked (for tests / debug).
+func is_region_masked(slot: String) -> bool:
+	return _masked_regions.has(slot)
+
+
+## Number of base-mesh verts in a region (for tests / debug).
+func region_vert_count(slot: String) -> int:
+	var idx = _region_verts.get(slot, null)
+	return (idx as PackedInt32Array).size() if idx != null else 0
+
+
+## The base-mesh vertex indices of a region (for tests / debug). Empty if none.
+func region_vert_indices(slot: String) -> PackedInt32Array:
+	return _region_verts.get(slot, PackedInt32Array())
 
 
 ## Build a MeshInstance3D for a RE-SKINNED core-body part — a committed ArrayMesh whose verts
@@ -598,12 +756,12 @@ func _attach_reskin_part(slot: String, id: String) -> bool:
 	var mi := MeshInstance3D.new()
 	mi.name = "%sReskin" % slot.capitalize()
 	mi.mesh = (mesh as ArrayMesh)
-	# A plain skin material so the re-skinned part reads as flesh/fur (texture work is future).
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = SKIN_ALBEDO
-	mat.roughness = SKIN_ROUGHNESS
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mi.material_override = mat
+	# SHARE the body's skin material so the re-skinned head/leg matches the body's skin tone
+	# exactly (not a grey blob, not a tone mismatch at the neck/hip seam) — same discipline as
+	# the genital proxy sharing _skin_material. We use a per-part DUPLICATE (not the shared
+	# instance) only to flip cull off (the re-skin shells can be thin / one-sided), keeping
+	# every tunable skin property (albedo/roughness) tracking the body skin.
+	mi.material_override = _reskin_skin_material()
 	skeleton.add_child(mi)
 	mi.skin = skin
 	mi.skeleton = mi.get_path_to(skeleton)
@@ -675,16 +833,30 @@ func _attach_one_glb(row: Dictionary, slot: String) -> BoneAttachment3D:
 	var sc := float(row.get("scale", 1.0))
 	var off: Vector3 = row.get("offset", Vector3.ZERO)
 	part_root.transform = Transform3D(Basis.IDENTITY.scaled(Vector3(sc, sc, sc)), off)
+	# Replace the GLB's plain default material so the mined part doesn't render as a light
+	# untextured blob. Hair gets the matte-keratin hair material; ears/tail/horns get a
+	# skin/fur material matching the body (so a swapped ear/tail reads as flesh-fur, not grey).
+	var part_mat: Material = _hair_part_material() if slot == PartLibrary.SLOT_HAIR else _reskin_skin_material()
+	_apply_material_recursive(part_root, part_mat)
 	return att
 
 
-## Show/hide the CC0 helper-hair cap surface on the proxy mesh. _proxy_material("hair",
-## false) returns a fully-transparent material (the surface stays in the single-draw mesh
-## with stable indices but renders nothing) — the established proxy show/hide mechanism.
-func _set_hair_cap_visible(vis: bool) -> void:
-	if proxy_instance == null or proxy_instance.mesh == null:
-		return
-	proxy_instance.set_surface_override_material(_proxy_surface["hair"], _proxy_material("hair", vis))
+## Set material_override on every MeshInstance3D under `node` (depth-first). Used to give an
+## attached GLB part aeriea's own material instead of the GLB's plain default.
+func _apply_material_recursive(node: Node, mat: Material) -> void:
+	if node is MeshInstance3D:
+		(node as MeshInstance3D).material_override = mat
+	for c in node.get_children():
+		_apply_material_recursive(c, mat)
+
+
+## Show/hide the CC0 helper-hair cap surface. The cap's visibility is DERIVED authoritatively in
+## _proxy_piece_visible (cap shows only when the cap is the active hair part and no animal head is
+## on) and applied — material AND geometric collapse — by _apply_proxy_materials, so this just
+## re-applies from current state. (`vis` is implied by the active hair part / head; the old
+## transparent-only path did not actually stop the cap rendering.)
+func _set_hair_cap_visible(_vis: bool) -> void:
+	_apply_proxy_materials()
 
 
 ## Re-morph the SKINNED body to `state` with CORRECT normals under morph.
@@ -703,6 +875,10 @@ func apply_body_state(state: BodyState) -> void:
 	if mesh_instance == null or mesh_instance.mesh == null:
 		return
 	body_state.apply_morph_cpu(mesh_instance)
+	# Re-assert any active base-mesh region masks: the morph bake rewrites ARRAY_VERTEX from
+	# neutral, so the collapsed-region verts must be re-collapsed after every re-bake.
+	for slot in _masked_regions:
+		_collapse_region_verts(slot)
 	# Morph-follow the proxy pieces (eyes/teeth/tongue/genitals) through the SAME
 	# BodyState projection, so they stay seated + correctly lit under every morph.
 	if proxy_instance != null and proxy_instance.mesh != null:
@@ -795,6 +971,11 @@ func _apply_proxy_materials() -> void:
 		return
 	var mesh := proxy_instance.mesh as ArrayMesh
 	var surfaces := ProxyMorph.surfaces()
+	# Hidden surfaces to collapse geometrically (transparent-material hiding alone does NOT stop
+	# the surface rendering — the alpha-0 skinned surface still draws — so a hidden proxy piece
+	# must also have its geometry collapsed to degenerate triangles). Collected here and applied
+	# in ONE mesh rebuild below; re-evaluated on every bake (this runs after each ProxyMorph bake).
+	var hide := []
 	for si in mesh.get_surface_count():
 		var sname := str(mesh.surface_get_name(si))
 		var mat_kind := "default"
@@ -802,14 +983,72 @@ func _apply_proxy_materials() -> void:
 			if String(s["name"]) == sname:
 				mat_kind = String(s["material"])
 				break
-		var visible := true
-		if sname == "genitals":
-			visible = show_genitals
-		elif sname == "hair":
-			# The CC0 cap shows ONLY when the cap style is active; a BDCC2 hairstyle
-			# replaces it (its own mesh is attached under the head bone).
-			visible = not PartLibrary.is_bdcc2(PartLibrary.SLOT_HAIR, current_part(PartLibrary.SLOT_HAIR))
+		var visible := _proxy_piece_visible(sname)
 		proxy_instance.set_surface_override_material(si, _proxy_material(mat_kind, visible))
+		if not visible:
+			hide.append(si)
+	_collapse_proxy_surfaces(hide)
+
+
+## The authoritative visibility of a proxy piece, the SINGLE source of truth re-evaluated on
+## every bake (so a morph re-bake never wrongly re-shows a hidden piece):
+##   - genitals follow show_genitals (NSFW-first attachable);
+##   - the face pieces (eyes/eyebrows/eyelashes) + the CC0 hair cap are HIDDEN when a re-skinned
+##     animal HEAD is on (they are aeriea's human face — they must not co-render through it);
+##   - otherwise the CC0 hair cap shows only when the cap style is the active hair part.
+func _proxy_piece_visible(sname: String) -> bool:
+	# An explicit manual force-hide (set_proxy_visible(piece,false)) wins over the derive.
+	if _proxy_force_hidden.has(sname):
+		return false
+	var animal_head := PartLibrary.is_reskin(PartLibrary.SLOT_HEAD, current_part(PartLibrary.SLOT_HEAD))
+	if sname == "genitals":
+		return show_genitals
+	if sname in ["eyes", "eyebrows", "eyelashes"]:
+		return not animal_head
+	if sname == "hair":
+		if animal_head:
+			return false
+		# The CC0 cap shows ONLY when the cap style is active; a BDCC2 hairstyle replaces it.
+		return not PartLibrary.is_bdcc2(PartLibrary.SLOT_HAIR, current_part(PartLibrary.SLOT_HAIR))
+	return true
+
+
+## Collapse the listed proxy surfaces' geometry to MASK_COLLAPSE_POINT (degenerate triangles ->
+## no fragments) in ONE mesh rebuild, preserving every surface's blendshapes/format/name and the
+## current override materials. Surfaces not listed keep their (just-baked) positions. This is the
+## real hide — the transparent material is kept too (for the existing alpha-based tests) but does
+## not by itself stop the surface drawing. Called from _apply_proxy_materials after each bake.
+func _collapse_proxy_surfaces(indices: Array) -> void:
+	if indices.is_empty() or proxy_instance == null or proxy_instance.mesh == null:
+		return
+	var mesh := proxy_instance.mesh as ArrayMesh
+	var hide := {}
+	for i in indices:
+		hide[int(i)] = true
+	# Snapshot every surface (arrays/blends/fmt/name/material), collapsing the hidden ones.
+	var snap := []
+	for s in mesh.get_surface_count():
+		var arrays := mesh.surface_get_arrays(s)
+		if hide.has(s):
+			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			for vi in verts.size():
+				verts[vi] = MASK_COLLAPSE_POINT
+			arrays[Mesh.ARRAY_VERTEX] = verts
+		snap.append({
+			"prim": mesh.surface_get_primitive_type(s),
+			"arrays": arrays,
+			"blends": mesh.surface_get_blend_shape_arrays(s),
+			"fmt": mesh.surface_get_format(s),
+			"name": mesh.surface_get_name(s),
+			"mat": proxy_instance.get_surface_override_material(s),
+		})
+	mesh.clear_surfaces()
+	for o in snap:
+		mesh.add_surface_from_arrays(o["prim"], o["arrays"], o["blends"], {}, o["fmt"])
+	for s in mesh.get_surface_count():
+		mesh.surface_set_name(s, snap[s]["name"])
+		if snap[s]["mat"] != null:
+			proxy_instance.set_surface_override_material(s, snap[s]["mat"])
 
 
 ## A sensible material per proxy kind. Eyes get a PROCEDURAL shader material (iris/pupil/
@@ -864,6 +1103,41 @@ func _proxy_material(kind: String, visible: bool) -> Material:
 	return mat
 
 
+## A skin material for a RE-SKINNED core-body part (head / leg), derived from the body's own
+## skin material so the swapped part matches the body — not the GLB's plain default. A
+## duplicate of _skin_material (so per-part tweaks don't mutate the shared body material) with
+## two-sided culling for the thin re-skin shells. Falls back to a fresh skin material if the
+## body material isn't built yet.
+func _reskin_skin_material() -> StandardMaterial3D:
+	var mat: StandardMaterial3D
+	if _skin_material != null:
+		mat = _skin_material.duplicate() as StandardMaterial3D
+	else:
+		mat = StandardMaterial3D.new()
+		mat.albedo_color = SKIN_ALBEDO
+		mat.roughness = SKIN_ROUGHNESS
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return mat
+
+
+## A hair material for an attached BDCC2 hairstyle GLB — matte dark keratin, same family as the
+## CC0 cap's hair material (root/tip tint via a slight rim, two-sided so the thin hair cards
+## read from any angle, rough + no specular so it reads as a hair mass not plastic). Replaces
+## the GLB's plain default material so mined hair doesn't render as a light untextured blob.
+## Pure data — tunable like the proxy materials.
+func _hair_part_material() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.10, 0.07, 0.05)
+	mat.roughness = 0.92
+	mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# A subtle warm rim so the tips read lighter than the roots (keratin sheen, not flat black).
+	mat.rim_enabled = true
+	mat.rim = 0.3
+	mat.rim_tint = 0.5
+	return mat
+
+
 ## Build the procedural eye ShaderMaterial from the current _eye_params. Every visual
 ## knob is a shader uniform, so an arbitrary effective resolution comes for free (the
 ## iris fibres / limbal ring / pupil are analytic, not sampled from a texture).
@@ -885,18 +1159,29 @@ func set_eye_params(params: Dictionary) -> void:
 		proxy_instance.set_surface_override_material(_proxy_surface["eyes"], _build_eye_material())
 
 
-## Show/hide a proxy piece at runtime (e.g. toggling genitals). Re-applies the material.
+## Show/hide a proxy piece at runtime (e.g. toggling genitals). Sets the override material AND
+## collapses/restores the surface geometry (the real hide — see _collapse_proxy_surfaces). For
+## genitals this flips show_genitals so a later re-bake keeps the choice; for other pieces an
+## explicit force-hide is tracked in _proxy_force_hidden so a re-bake honours it too.
 func set_proxy_visible(piece: String, visible: bool) -> void:
 	if proxy_instance == null or not _proxy_surface.has(piece):
 		return
 	if piece == "genitals":
 		show_genitals = visible   # so a later morph re-bake keeps the chosen visibility
-	var si: int = _proxy_surface[piece]
-	var kind := "default"
-	for s in ProxyMorph.surfaces():
-		if String(s["name"]) == piece:
-			kind = String(s["material"]); break
-	proxy_instance.set_surface_override_material(si, _proxy_material(kind, visible))
+	elif visible:
+		_proxy_force_hidden.erase(piece)
+	else:
+		_proxy_force_hidden[piece] = true
+	if visible:
+		# Showing a piece must RESTORE its (possibly-collapsed) geometry: re-bake the proxy morph
+		# (rewrites every surface's positions from neutral) before re-applying materials/collapses,
+		# so a previously-hidden surface's verts come back. _apply_proxy_materials (called inside
+		# ProxyMorph-follow via apply_body_state? no — call it explicitly) re-collapses the rest.
+		if proxy_instance.mesh != null:
+			ProxyMorph.apply(body_state, proxy_instance)
+	# Re-apply ALL proxy materials + collapses from authoritative state (honours the change
+	# AND keeps every other piece's hide/show correct after this single rebuild).
+	_apply_proxy_materials()
 
 
 func _load_rig_json() -> Dictionary:

@@ -93,6 +93,20 @@ func _ready() -> void:
 		_assert("re-skin head has NO own skeleton (it rides aeriea's, not its own)",
 			rig._part_skeletons("head").is_empty(), "own_skels=%d" % rig._part_skeletons("head").size())
 
+	# --- 3b. BASE-MESH MASKING: the human skull region is hidden under the animal head ----
+	# The base mesh has a head region (verts dominantly weighted to the head/face subtree);
+	# applying a re-skin head collapses those verts so the human skull doesn't co-render.
+	_assert("base mesh has a non-empty HEAD region (face/skull verts identified)",
+		rig.region_vert_count("head") > 0, "head region verts=%d" % rig.region_vert_count("head"))
+	_assert("applying the canine head MASKS the base-mesh skull region",
+		rig.is_region_masked("head"), "masked=%s" % rig.is_region_masked("head"))
+	# The masked verts are collapsed to the sentinel point (far below the feet) in the baked mesh.
+	_assert("masked head verts are collapsed off the body (below feet)",
+		_max_masked_y(rig, "head") < -100.0, "max masked y=%.1f" % _max_masked_y(rig, "head"))
+	# Non-head verts (e.g. a foot vert) stay put — only the head region is collapsed.
+	_assert("non-head base verts are UNTOUCHED by the head mask",
+		_body_min_y(rig) > -1.0, "body min y=%.3f" % _body_min_y(rig))
+
 	# --- 4. DEFORMS with the skeleton: posing the head bone moves the head verts ----
 	var head_bi := rig.skeleton.find_bone("head")
 	_assert("aeriea head bone exists", head_bi >= 0, "idx=%d" % head_bi)
@@ -145,6 +159,24 @@ func _ready() -> void:
 	_assert("explicit swap to human tears down the overlay",
 		rig.current_part("head") == "human" and _reskin_mesh(rig) == null,
 		"head=%s reskin_mi=%s" % [rig.current_part("head"), _reskin_mesh(rig) != null])
+	# Falling back to human RESTORES the base-mesh skull region (un-masked, verts back in place).
+	_assert("swapping back to human UN-MASKS the base-mesh skull region",
+		not rig.is_region_masked("head"), "masked=%s" % rig.is_region_masked("head"))
+	_assert("restored head verts are back at head height (skull region present again)",
+		_max_masked_y(rig, "head") > 1.0, "max head-region y=%.3f" % _max_masked_y(rig, "head"))
+
+	# --- 6b. MASK SURVIVES A MORPH RE-BAKE ----------------------------------------
+	# A morph re-bake rewrites ARRAY_VERTEX from neutral; the mask must be re-asserted, so a
+	# masked head stays masked across an apply_body_state call (e.g. a slider move).
+	rig.apply_part("head", "canine")
+	var bs := BodyState.new()
+	bs.muscle = 80.0
+	rig.apply_body_state(bs)
+	_assert("base-mesh head mask SURVIVES a morph re-bake (slider move keeps skull hidden)",
+		rig.is_region_masked("head") and _max_masked_y(rig, "head") < -100.0,
+		"masked=%s max masked y=%.1f" % [rig.is_region_masked("head"), _max_masked_y(rig, "head")])
+	rig.apply_part("head", "human")
+	rig.apply_body_state(BodyState.new())
 
 	# --- 7. determinism ------------------------------------------------------------
 	var m1 = load(CANINE_RES)
@@ -193,6 +225,37 @@ func _probe_vertex_world(rig: BodyRig, mi: MeshInstance3D, head_bi: int) -> Vect
 			top = i
 	var bone_pose := rig.skeleton.global_transform * rig.skeleton.get_bone_global_pose(head_bi)
 	return bone_pose * mi.skin.get_bind_pose(0) * verts[top]
+
+
+## Max Y over a region's base-mesh verts in the CURRENT baked surface. When the region is
+## masked the verts are collapsed below the feet (so this is very negative); when restored
+## they sit at their real height. A direct read of whether the region is hidden.
+func _max_masked_y(rig: BodyRig, slot: String) -> float:
+	var mi := rig.mesh_instance
+	if mi == null or mi.mesh == null:
+		return 0.0
+	var verts: PackedVector3Array = (mi.mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	# Re-derive the region's vert indices the same way the rig does is internal; instead use
+	# the rig's count + scan for the collapsed sentinel cluster vs the region's natural range.
+	var mx := -INF
+	for vi in rig.region_vert_indices(slot):
+		mx = maxf(mx, verts[vi].y)
+	return mx if mx > -INF else 0.0
+
+
+## Min Y over the WHOLE baked body surface — used to confirm non-masked verts (feet) are not
+## collapsed (the body's feet sit near y=0, well above the sentinel point).
+func _body_min_y(rig: BodyRig) -> float:
+	var mi := rig.mesh_instance
+	if mi == null or mi.mesh == null:
+		return 0.0
+	var verts: PackedVector3Array = (mi.mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	# Exclude the collapsed masked cluster (sentinel y ~ -1000) so we read the REAL body floor.
+	var mn := INF
+	for v in verts:
+		if v.y > -100.0:
+			mn = minf(mn, v.y)
+	return mn if mn < INF else 0.0
 
 
 func _assert(name: String, cond: bool, evidence: String) -> void:

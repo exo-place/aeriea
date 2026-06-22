@@ -91,6 +91,17 @@ func _ready() -> void:
 		_assert("re-skin legs have NO own skeleton (they ride aeriea's, not their own)",
 			rig._part_skeletons("legs").is_empty(), "own_skels=%d" % rig._part_skeletons("legs").size())
 
+	# --- 3b. BASE-MESH MASKING: the human leg region is hidden under the digi legs ----
+	_assert("base mesh has a non-empty LEGS region (thigh/shin/foot/toe verts identified)",
+		rig.region_vert_count("legs") > 0, "legs region verts=%d" % rig.region_vert_count("legs"))
+	_assert("applying the digitigrade legs MASKS the base-mesh leg region",
+		rig.is_region_masked("legs"), "masked=%s" % rig.is_region_masked("legs"))
+	_assert("masked leg verts are collapsed off the body (below feet)",
+		_region_max_y(rig, "legs") < -100.0, "max masked y=%.1f" % _region_max_y(rig, "legs"))
+	# The head/torso region of the base mesh is untouched (only the legs collapsed).
+	_assert("base-mesh torso/head verts are UNTOUCHED by the leg mask",
+		_body_max_y(rig) > 1.0, "body max y=%.3f" % _body_max_y(rig))
+
 	# --- 4. MULTI-BONE deformation -----------------------------------------------
 	# Pick a thigh-region vertex (highest y) and a foot-region vertex (lowest y) on surface 0,
 	# along with the aeriea bone each rides.
@@ -169,6 +180,21 @@ func _ready() -> void:
 	_assert("explicit swap to human tears down the overlay",
 		rig.current_part("legs") == "human" and _reskin_mesh(rig) == null,
 		"legs=%s reskin_mi=%s" % [rig.current_part("legs"), _reskin_mesh(rig) != null])
+	# Falling back to human RESTORES the base-mesh leg region (un-masked, verts back in place).
+	_assert("swapping back to human UN-MASKS the base-mesh leg region",
+		not rig.is_region_masked("legs"), "masked=%s" % rig.is_region_masked("legs"))
+	_assert("restored leg verts are back at leg height (region present again)",
+		_region_max_y(rig, "legs") > 0.0, "max leg-region y=%.3f" % _region_max_y(rig, "legs"))
+	# MASK SURVIVES A MORPH RE-BAKE (a slider move keeps the human legs hidden).
+	rig.apply_part("legs", "digitigrade")
+	var bs := BodyState.new()
+	bs.muscle = 80.0
+	rig.apply_body_state(bs)
+	_assert("base-mesh leg mask SURVIVES a morph re-bake (slider move keeps human legs hidden)",
+		rig.is_region_masked("legs") and _region_max_y(rig, "legs") < -100.0,
+		"masked=%s max masked y=%.1f" % [rig.is_region_masked("legs"), _region_max_y(rig, "legs")])
+	rig.apply_part("legs", "human")
+	rig.apply_body_state(BodyState.new())
 
 	# --- 7. determinism ----------------------------------------------------------
 	var m2 = load(PLANTI_RES)
@@ -211,6 +237,32 @@ func _lbs_world(skel: Skeleton3D, skin: Skin, verts: PackedVector3Array,
 		var bidx: int = bones[vi * 4 + k]
 		p += w * (skel.get_bone_global_pose(bidx) * skin.get_bind_pose(bidx) * verts[vi])
 	return p
+
+
+## Max Y over a region's base-mesh verts in the CURRENT baked surface (very negative when the
+## region is masked/collapsed below the feet; ~leg height when restored).
+func _region_max_y(rig: BodyRig, slot: String) -> float:
+	var mi := rig.mesh_instance
+	if mi == null or mi.mesh == null:
+		return 0.0
+	var verts: PackedVector3Array = (mi.mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	var mx := -INF
+	for vi in rig.region_vert_indices(slot):
+		mx = maxf(mx, verts[vi].y)
+	return mx if mx > -INF else 0.0
+
+
+## Max Y over the whole baked body surface (excluding the collapsed cluster) — the head/torso
+## top, used to confirm the leg mask leaves the upper body untouched.
+func _body_max_y(rig: BodyRig) -> float:
+	var mi := rig.mesh_instance
+	if mi == null or mi.mesh == null:
+		return 0.0
+	var verts: PackedVector3Array = (mi.mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	var mx := -INF
+	for v in verts:
+		mx = maxf(mx, v.y)
+	return mx if mx > -INF else 0.0
 
 
 func _assert(name: String, cond: bool, evidence: String) -> void:

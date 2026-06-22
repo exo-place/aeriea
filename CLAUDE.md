@@ -84,6 +84,7 @@ A defect is reported from observation, never guessed: run it and look, do not in
 - **No new feature without a design pass first.** A feature is not started until a design pass exists for it — a recorded artifact (a `docs/decisions/` doc or section) that decides what it is, its shape, defaults, naming, interactions, and a concrete quality bar, *before* any code. "Implement X" is not a license to build X; it is a prompt to design X first. The gate is recognizing that an implementation task contains an undecided design.
 - **`docs/FEATURES.md` is the source of truth for status.** Every feature sits under **Green** (the user has personally verified it is good) or **Not green** (everything else — built-but-unverified, in progress, broken, or design-only). New work lands in Not green.
 - **Green is granted only by the user, never self-promoted.** A feature moves to Green only with the user's express permission. Claude does not promote features, does not call its own work "done" or "green", and does not relay an agent's success-report, passing tests, or a playtest verdict as a promotion. Only the user's explicit say-so is green.
+- **The green gate is enforced by `.githooks/pre-commit`.** Any commit that adds a new bullet under the `## Green` section of `docs/FEATURES.md` is blocked unless `AERIEA_GREEN_APPROVED=1` is set. That override is the USER's alone: Claude must never set it — not in the main session and not via a subagent or any spawned process — and must never use `--no-verify`. When the hook blocks, stop and get the user's express approval; the user (not Claude) sets the env var. One-time setup for a clone: `git config core.hooksPath .githooks`.
 
 ## Architecture principles
 
@@ -106,4 +107,4 @@ VitePress in `docs/`. Run `bun install` in `docs/` before first build (requires 
 
 ## Pre-commit hook
 
-No Rust pre-commit hook (this is a Godot project). `.githooks/` is present for future hooks. To wire up hooks: `git config core.hooksPath .githooks`.
+No Rust pre-commit hook (this is a Godot project). `.githooks/pre-commit` enforces the green-promotion gate on `docs/FEATURES.md` (see Feature gating). To wire up hooks in a clone: `git config core.hooksPath .githooks`. Additional checks should COMPOSE into the existing `pre-commit` rather than clobber it.

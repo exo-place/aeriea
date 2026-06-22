@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# --- green-promotion gate -----------------------------------------------------
+# A feature moves to the Green tier of docs/FEATURES.md ONLY with the USER's
+# express approval. This hook blocks any commit that adds a new bullet under the
+# "## Green" section unless AERIEA_GREEN_APPROVED=1 is set (user-only override).
+# Claude must never set the override and must never use --no-verify.
+LEDGER="docs/FEATURES.md"
+
+# Only relevant when the ledger itself is staged.
+if git diff --cached --name-only | grep -qx "$LEDGER"; then
+  green_entries() { awk '/^## /{ing=($0 ~ /^## Green/)?1:0; next} ing && /^- /{print}'; }
+  head_green="$(git show "HEAD:$LEDGER" 2>/dev/null | green_entries || true)"
+  staged_green="$(git show ":$LEDGER" | green_entries || true)"
+  new_green="$(comm -13 \
+    <(printf '%s\n' "$head_green" | grep -v '^$' | sort) \
+    <(printf '%s\n' "$staged_green" | grep -v '^$' | sort) || true)"
+  if [ -n "$(printf '%s' "$new_green" | tr -d '[:space:]')" ]; then
+    if [ "${AERIEA_GREEN_APPROVED:-}" = "1" ]; then
+      exit 0
+    fi
+    echo "BLOCKED: commit promotes feature(s) to the Green tier in $LEDGER:" >&2
+    printf '%s\n' "$new_green" | grep -v '^$' | sed 's/^/    /' >&2
+    echo "Green promotion requires the USER's express approval. Claude must not bypass this." >&2
+    echo "User approval: re-commit with AERIEA_GREEN_APPROVED=1 set. Do NOT use --no-verify." >&2
+    exit 1
+  fi
+fi
+
+exit 0

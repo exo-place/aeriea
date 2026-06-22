@@ -31,6 +31,7 @@ Reach for the blackboard when it earns its keep, not for every subagent. When a 
 - No assuming a tool is missing without checking `nix develop`.
 - Commit completed work in the same turn it finishes. Uncommitted work is lost work.
 - No surface is "done" on green tests alone — user-facing work must be playtested (run and observed, see Playtesting) before it counts as complete.
+- No new feature without a design pass first, and no feature is "green" without the user's express permission — never self-promoted (see Feature gating).
 
 ## Meta
 
@@ -77,6 +78,12 @@ So every change to a user-facing surface (UI, rendered body, movement, text flow
 - **Orchestrator playtest of the composed whole.** The orchestrator never relays a subagent's success report as truth. Before accepting work it playtests the composed result — itself or via a dedicated playtest subagent whose only job is to run the app as a user and report defects. Cross-seam defects (a duplicated header from two slices, a head doubled across two meshes) live in no single implementer's slice; only a whole-app playtest catches them.
 
 A defect is reported from observation, never guessed: run it and look, do not infer a plausible cause. Playtesting is not optional, not "when time permits," and never satisfied by the test suite alone.
+
+## Feature gating
+
+- **No new feature without a design pass first.** A feature is not started until a design pass exists for it — a recorded artifact (a `docs/decisions/` doc or section) that decides what it is, its shape, defaults, naming, interactions, and a concrete quality bar, *before* any code. "Implement X" is not a license to build X; it is a prompt to design X first. The gate is recognizing that an implementation task contains an undecided design.
+- **`docs/FEATURES.md` is the source of truth for status.** Every feature sits under **Green** (the user has personally verified it is good) or **Not green** (everything else — built-but-unverified, in progress, broken, or design-only). New work lands in Not green.
+- **Green is granted only by the user, never self-promoted.** A feature moves to Green only with the user's express permission. Claude does not promote features, does not call its own work "done" or "green", and does not relay an agent's success-report, passing tests, or a playtest verdict as a promotion. Only the user's explicit say-so is green.
 
 ## Architecture principles
 

@@ -4,7 +4,8 @@
 ## Asserts the four Slice-3 properties:
 ##   1. SKIN: base_body.res carries per-vertex LBS data (ARRAY_BONES/ARRAY_WEIGHTS,
 ##      4 influences/vertex, weights ~normalized) and BodyRig builds a Skeleton3D
-##      with the expected bone count (163, the MakeHuman default rig).
+##      with the expected bone count (169 = the 163-bone MakeHuman default rig PLUS
+##      the 6 injected secondary-motion bones: belly + glute.L/R + hair01/02/03).
 ##   2. SKIN DEFORMS: posing a bone moves the skinned mesh — proven by computing
 ##      the linear-blend-skinned position of a vertex weighted to that bone (via
 ##      the bone/weight arrays + skeleton global poses + Skin bind poses) before
@@ -22,7 +23,9 @@
 ##   xvfb-run -a godot4 --path . res://tests/body_locomotion_test.tscn --quit-after 6000
 extends Node3D
 
-const EXPECTED_BONES := 163
+# 163 CC0 MakeHuman default-rig bones + 6 injected secondary-motion bones
+# (belly, glute.L, glute.R, hair01, hair02, hair03 — see tools/body_converter.gd).
+const EXPECTED_BONES := 169
 
 var _pass := 0
 var _fail := 0

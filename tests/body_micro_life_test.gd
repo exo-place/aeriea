@@ -2,9 +2,10 @@
 ##
 ## Asserts the procedural embodiment-juice layer (breathing / eye-saccades / idle
 ## sway / hair / jiggle) actually animates, is TUNABLE, and stays OFF the sim path:
-##   1. SPRING REGISTRY: jiggle springs register on the present soft-region bones
-##      (breast.L/R) and the hair registry is EMPTY on the CC0 default rig (the
-##      documented hair-bone GAP — reported, not silently passed).
+##   1. SPRING REGISTRY: jiggle springs register on ALL soft-region bones — breast.L/R
+##      PLUS the now-added belly + glute.L/glute.R bones — and the hair registry is
+##      NON-EMPTY (the helper-hair cap rigged onto the hair01/02/03 chain). Previously
+##      belly/glute/hair were a documented GAP (empty registries); they now register.
 ##   2. JIGGLE MOVES: shaking the body (changing its global transform between frames)
 ##      produces a nonzero deflection on a soft-region bone vs. a still body.
 ##   3. JIGGLE TUNABLE: a higher jiggle_gain produces a larger deflection.
@@ -38,11 +39,20 @@ func _ready() -> void:
 	rig._setup_micro_life(0)
 
 	# --- 1. spring registry --------------------------------------------------
+	# The pipeline now ADDS belly + glute.L/R + a hair01/02/03 chain to the rig, so the
+	# previously-empty registries are NON-EMPTY: all 5 soft-region bones register, and
+	# the hair chain registers >=1 spring. (Was: only breast.L/R; hair was a GAP at 0.)
 	var st := rig.micro_life_state()
-	_assert("jiggle springs registered on present soft-region bones (breast.L/R)",
-		st["jiggle_springs"] >= 2, "registered=%d" % st["jiggle_springs"])
-	_assert("HAIR-BONE GAP: no hair bones in the CC0 default rig (hair springs == 0)",
-		st["hair_springs"] == 0, "hair springs=%d" % st["hair_springs"])
+	_assert("jiggle springs registered on ALL soft-region bones (breast.L/R + belly + glute.L/R)",
+		st["jiggle_springs"] >= 5, "registered=%d (expected >=5)" % st["jiggle_springs"])
+	for sb in ["breast.L", "breast.R", "belly", "glute.L", "glute.R"]:
+		_assert("soft-region bone present in rig: %s" % sb,
+			rig.skeleton.find_bone(sb) >= 0, "idx=%d" % rig.skeleton.find_bone(sb))
+	_assert("HAIR registry NON-EMPTY: hair-bone chain registered (was the documented GAP)",
+		st["hair_springs"] >= 1, "hair springs=%d (expected >=1)" % st["hair_springs"])
+	for hb in ["hair01", "hair02", "hair03"]:
+		_assert("hair bone present in rig: %s" % hb,
+			rig.skeleton.find_bone(hb) >= 0, "idx=%d" % rig.skeleton.find_bone(hb))
 
 	# --- 2. jiggle moves under body motion -----------------------------------
 	var breast := rig.skeleton.find_bone("breast.L")
@@ -62,6 +72,15 @@ func _ready() -> void:
 		max_shake_dev = maxf(max_shake_dev, still_q.angle_to(shaken))
 	_assert("jiggle: soft-region bone deflects under body motion (>0.5mrad)",
 		max_shake_dev > 5e-4, "max deflection=%.5f rad" % max_shake_dev)
+
+	# --- 2b. the NEWLY-ADDED springs all produce nonzero deflection ----------
+	# belly + glute jiggle (soft-region) and the hair chain (hair physics) must now move
+	# under body motion — the whole point of adding the bones + skin. Each is measured on
+	# a fresh rig (shake the global transform, take max deflection from the settled pose).
+	for bn in ["belly", "glute.L", "glute.R", "hair01", "hair02", "hair03"]:
+		var dev := _bone_shake_deflection(bn)
+		_assert("NEW spring deflects under body motion: %s (>0.2mrad)" % bn,
+			dev > 2e-4, "max deflection=%.5f rad" % dev)
 
 	# --- 3. jiggle tunable ---------------------------------------------------
 	var dev_lo := _shake_deflection(0.2)
@@ -119,6 +138,33 @@ func _ready() -> void:
 		"grounded %s->%s speed %.3f->%.3f" % [g_before, rig.grounded, s_before, rig.horizontal_speed])
 
 	_finish()
+
+
+## Settle a fresh rig still, then shake its global transform; return the max deflection
+## (rad) of the NAMED bone's pose rotation from its settled pose. Works for any spring-
+## driven bone (soft-region jiggle OR hair chain). A fresh rig per call so the springs
+## start from rest (reproducible).
+func _bone_shake_deflection(bone_name: String) -> float:
+	var rig := BodyRig.new(); add_child(rig); rig.build()
+	rig.use_motion_matching = false; rig.foot_ik_enabled = false
+	rig._setup_micro_life(0)
+	var bi := rig.skeleton.find_bone(bone_name)
+	if bi < 0:
+		rig.queue_free()
+		return 0.0
+	rig.set_movement_state(true, 0.0)
+	rig.global_position = Vector3.ZERO
+	for i in 30:
+		rig.apply_pose(1.0 / 60.0)
+	var settled := rig.skeleton.get_bone_pose_rotation(bi)
+	var dev := 0.0
+	for i in 40:
+		# Shake both vertically and horizontally so chains hanging in any axis are thrown.
+		rig.global_position = Vector3(0.05 * sin(i * 1.7), 0.07 * sin(i * 1.4), 0.04 * cos(i * 1.9))
+		rig.apply_pose(1.0 / 60.0)
+		dev = maxf(dev, settled.angle_to(rig.skeleton.get_bone_pose_rotation(bi)))
+	rig.queue_free()
+	return dev
 
 
 ## Settle a fresh rig still, then shake it with the given jiggle_gain; return the max

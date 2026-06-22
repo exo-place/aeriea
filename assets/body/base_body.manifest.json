@@ -140,7 +140,7 @@
 	"mh_to_meters": 0.1,
 	"render_vertex_count": 14517,
 	"rig": {
-		"bone_count": 163,
+		"bone_count": 169,
 		"max_influences": 4,
 		"rigged_scene": "res://assets/body/base_body_rig.json",
 		"skeleton": "rigs/default.mhskel",

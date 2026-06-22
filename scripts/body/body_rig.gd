@@ -86,14 +86,17 @@ const ROOT_BONE := "root"
 const SpringBone := preload("res://scripts/body/spring_bone.gd")
 const MicroLifeParams := preload("res://scripts/body/micro_life_params.gd")
 
-## Soft-region bones the jiggle layer drives (spring-bones). breast.L/R exist in the
-## CC0 MakeHuman default rig; belly/glute have NO dedicated bones in this rig (a GAP —
-## see apply_micro_life), so they are listed for when the rig is extended but resolve
-## to nothing today (graceful: the registry simply skips absent bones).
+## Soft-region bones the jiggle layer drives (spring-bones). breast.L/R come straight
+## from the CC0 MakeHuman default rig; belly + glute.L/R are INJECTED by the body
+## pipeline (tools/body_converter.gd) — deterministic bones placed from the existing
+## joint cubes, with belly/glute-region body-mesh verts re-weighted onto them — so the
+## jiggle springs actually deform geometry. All five resolve to real bones today.
 const SOFT_REGION_BONES := ["breast.L", "breast.R", "belly", "glute.L", "glute.R"]
-## Name fragments that mark a HAIR bone for the hair spring-bone chain. The CC0 default
-## rig has NO hair bones (the base is bald-rigged) — so this matches nothing today and
-## hair secondary motion is a documented GAP until a hair-bone chain is added to the rig.
+## Name fragments that mark a HAIR bone for the hair spring-bone chain. The base mesh is
+## bald-RIGGED (no hair bones in the stock CC0 rig), so the pipeline injects a hair01/02/
+## 03 chain off the head and re-skins the CC0 helper-hair scalp cap (rendered as the
+## "hair" proxy surface) onto it — so this fragment now resolves to a real chain and the
+## hair spring physics animates the cap. (See tools/body_converter + body_proxy_build.)
 const HAIR_BONE_FRAGMENTS := ["hair"]
 
 ## Tuning (render-side only).
@@ -302,15 +305,17 @@ func _setup_micro_life(p_seed: int = 0) -> void:
 	_jiggle_springs.clear()
 	if skeleton == null:
 		return
-	# Hair: register any bone whose name marks it as hair. The CC0 default rig has none
-	# (bald-rigged) -> this stays empty and hair motion is a documented gap.
+	# Hair: register any bone whose name marks it as hair. The pipeline injects a
+	# hair01/02/03 chain (the helper-hair cap is skinned to it), so this resolves to real
+	# bones and the hair spring physics runs.
 	for i in skeleton.get_bone_count():
 		var bn := skeleton.get_bone_name(i)
 		for frag in HAIR_BONE_FRAGMENTS:
 			if bn.to_lower().contains(frag):
 				_hair_springs[bn] = _make_spring(i)
 				break
-	# Soft-region jiggle: breast.L/R exist; belly/glute are absent in this rig (gap).
+	# Soft-region jiggle: breast.L/R (stock rig) + belly/glute.L/R (pipeline-injected,
+	# skinned to the abdomen/buttock body verts) all resolve to real bones now.
 	for bn in SOFT_REGION_BONES:
 		if _bone_index.has(bn):
 			_jiggle_springs[bn] = _make_spring(_bone_index[bn])
@@ -470,6 +475,14 @@ func _proxy_material(kind: String, visible: bool) -> Material:
 		mat.no_depth_test = false
 		return mat
 	match kind:
+		"hair":
+			# Matte dark keratin for the CC0 helper-hair cap (same family as brows/lashes).
+			# Two-sided so the thin scalp cap reads from any angle; rough + no specular so
+			# it reads as a hair mass, not plastic.
+			mat.albedo_color = Color(0.10, 0.07, 0.05)
+			mat.roughness = 0.92
+			mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+			mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		"lashes", "brows":
 			# A dark keratin tone for the PROJECT-AUTHORED brow/lash hair strips. These are
 			# thin 2-sided cards, so cull is disabled (visible from either face); rough +
@@ -790,7 +803,7 @@ func apply_micro_life(delta: float) -> void:
 	# Eye micro-saccades (advances the offset the face rig layers under its gaze).
 	if micro.saccade_enabled:
 		_step_saccade(delta)
-	# Hair spring-bones (gap on the CC0 default rig — empty registry, no-op there).
+	# Hair spring-bones (the injected hair chain — sways the helper-hair cap).
 	if micro.hair_enabled:
 		for bn in _hair_springs:
 			var sb: SpringBone = _hair_springs[bn]
@@ -799,7 +812,7 @@ func apply_micro_life(delta: float) -> void:
 			if q != Quaternion.IDENTITY:
 				var i: int = sb.bone_idx
 				skeleton.set_bone_pose_rotation(i, (skeleton.get_bone_pose_rotation(i) * q).normalized())
-	# Soft-region jiggle (breast.L/R present; conservative gain by default).
+	# Soft-region jiggle (breast.L/R + injected belly/glute; conservative gain by default).
 	if micro.jiggle_enabled:
 		for bn in _jiggle_springs:
 			var sb2: SpringBone = _jiggle_springs[bn]

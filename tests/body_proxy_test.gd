@@ -61,10 +61,16 @@ func _test_import() -> void:
 			"verts": (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(),
 			"tris": (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3,
 		}
-	_assert("six pieces present (eyes/eyebrows/eyelashes/teeth/tongue/genitals)",
+	_assert("seven pieces present (eyes/eyebrows/eyelashes/teeth/tongue/genitals/hair)",
 		names.has("eyes") and names.has("eyebrows") and names.has("eyelashes")
-			and names.has("teeth") and names.has("tongue") and names.has("genitals"),
+			and names.has("teeth") and names.has("tongue") and names.has("genitals")
+			and names.has("hair"),
 		str(names))
+	# hair = the CC0 helper-hair scalp cap, re-skinned onto the hair01/02/03 bone chain
+	# (secondary-motion spring target). 428 verts, 198 source quads -> 396 tris.
+	if by_name.has("hair"):
+		_assert("hair surface has 396 tris (helper-hair, 198 quads × 2)",
+			by_name["hair"]["tris"] == 396, "tris=%d" % by_name["hair"]["tris"])
 	# eye low-poly proxy: 96 verts (no UV seams in the low-poly eyes obj), 86 quads/tris
 	# corner-expanded. The source low-poly.obj has 96 `v` and 86 `f` (all quads => 172 tris).
 	if by_name.has("eyes"):
@@ -86,7 +92,7 @@ func _test_import() -> void:
 
 	# surface index table parsed by ProxyMorph
 	var surfs := ProxyMorphS.surfaces()
-	_assert("ProxyMorph surface table has 6 entries", surfs.size() == 6, "n=%d" % surfs.size())
+	_assert("ProxyMorph surface table has 7 entries", surfs.size() == 7, "n=%d" % surfs.size())
 
 
 # (2) mhclo binding: barycentric combo == proxy rest position ------------------

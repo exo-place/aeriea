@@ -56,6 +56,11 @@ const OUT_RIGGED := "res://assets/body/base_body_rig.json"
 ## are 4-wide). MakeHuman ships more per vertex; we keep the top-4 and renormalize.
 const MAX_INFLUENCES := 4
 
+## The parsed .mhskel `joints` map (joint name -> base-vertex-index list), stashed by
+## _parse_skeleton so the soft-region reweight can recompute joint centroids in RAW MH
+## space (the body verts' space) for deterministic region selection.
+var _skel_joints := {}
+
 ## The macro axis anchors imported as blendshapes for Slice 1. Each entry is a
 ## clean CC0 anchor `.target` (relative to <src>/makehuman/data/targets/) whose
 ## sparse deltas displace the base mesh along ONE macro axis. AGE is mandatory
@@ -232,6 +237,16 @@ func _run() -> int:
 	var base_bones_arr: PackedInt32Array = skin_arrays["bones"]      # 4 per BASE vert
 	var base_weights_arr: PackedFloat32Array = skin_arrays["weights"]
 	print("body_converter: skin weights for %d base verts (%d unweighted -> root)" % [n, skin_arrays["unweighted"]])
+
+	# --- skin the BELLY + GLUTE soft-region bones onto the body mesh ------------
+	# The injected belly/glute bones (above) have no entry in default_weights.mhw, so
+	# the body mesh would never deform with them. Here we redirect a fraction of each
+	# belly-/glute-region body vertex's weight onto the matching new bone, so the jiggle
+	# spring actually moves geometry. Pure geometric selection on the pinned base mesh =>
+	# deterministic. (Hair is skinned separately, on the hair proxy surface.)
+	var reweighted := _reweight_soft_regions(base_verts, min_y, rig["name_to_index"],
+		base_bones_arr, base_weights_arr, body_vert_count)
+	print("body_converter: soft-region reweight: belly=%d glute=%d body verts" % [reweighted["belly"], reweighted["glute"]])
 
 	# --- expand skin weights onto render verts via render_to_base -------------
 	# ARRAY_BONES/ARRAY_WEIGHTS are keyed PER RENDER VERTEX; the parsed weights are
@@ -510,6 +525,7 @@ func _parse_skeleton(path: String, base_verts: PackedVector3Array, min_y: float)
 		return {}
 	var bones: Dictionary = data["bones"]
 	var joints: Dictionary = data["joints"]
+	_skel_joints = joints   # stashed for raw-space region selection in the reweight
 
 	# Resolve a joint name -> world (scaled+lifted) position via vertex centroid.
 	var joint_pos := func(jname: String) -> Vector3:
@@ -523,6 +539,19 @@ func _parse_skeleton(path: String, base_verts: PackedVector3Array, min_y: float)
 		acc /= float(idxs.size())
 		# same transform as the render mesh: scale + lift feet to y=0
 		return Vector3(acc.x * MH_TO_METERS, (acc.y - min_y) * MH_TO_METERS, acc.z * MH_TO_METERS)
+
+	# --- inject SECONDARY-MOTION bones (belly / glutes / hair chain) -----------
+	# The CC0 default rig has NO belly, glute or hair bones, so the spring-bone layer
+	# (scripts/body/spring_bone.gd, resolved BY NAME in body_rig.gd) finds nothing for
+	# those regions. We add them HERE — deterministically, from existing joint-cube
+	# centroids — so the jiggle/hair springs have bones to drive. Their head/tail are
+	# pure functions of the pinned base mesh's joints, so the rig stays byte-stable.
+	# Skin weights for these bones are assigned separately (belly/glute onto the body
+	# mesh in _reweight_soft_regions; hair onto the hair proxy surface in the proxy
+	# builder), since default_weights.mhw knows nothing about them.
+	var synth := _synth_soft_bones(joint_pos)
+	for sname in synth:
+		bones[sname] = synth[sname]
 
 	# Deterministic topological order: parents before children, name-sorted ties.
 	var all_names := bones.keys()
@@ -558,8 +587,16 @@ func _parse_skeleton(path: String, base_verts: PackedVector3Array, min_y: float)
 	for i in ordered.size():
 		var bname := ordered[i]
 		var bdef: Dictionary = bones[bname]
-		var head: Vector3 = joint_pos.call(bdef.get("head", ""))
-		var tail: Vector3 = joint_pos.call(bdef.get("tail", ""))
+		# Synthetic secondary-motion bones carry explicit head_pos/tail_pos (already in
+		# scaled+lifted render space); the CC0 bones resolve their head/tail by joint name.
+		var head: Vector3
+		var tail: Vector3
+		if bdef.has("head_pos"):
+			head = bdef["head_pos"]
+			tail = bdef["tail_pos"]
+		else:
+			head = joint_pos.call(bdef.get("head", ""))
+			tail = joint_pos.call(bdef.get("tail", ""))
 		global_rest.append(Transform3D(Basis.IDENTITY, head))
 		tails.append(tail)
 		var parent = bdef.get("parent", null)
@@ -572,6 +609,201 @@ func _parse_skeleton(path: String, base_verts: PackedVector3Array, min_y: float)
 		"parent_index": parent_index,
 		"tails": tails,
 	}
+
+
+## Reweight the body mesh's BELLY + GLUTE region vertices onto the injected belly /
+## glute.L / glute.R bones so those soft-region jiggle springs actually deform geometry.
+##
+## DETERMINISTIC + CONSERVATIVE. For each BODY base vertex we compute a smooth 0..1
+## membership in the belly region (a forward, midline abdomen band) and each glute
+## region (a back, per-side buttock blob), both as falloffs of position within the
+## pinned base mesh — a pure function of the geometry. We then move up to MAX_SOFT_W
+## of that vertex's weight from its dominant existing bone onto the soft bone, scaled
+## by membership, and renormalize the 4-wide influence set. Keeping the transfer a
+## FRACTION (not a full reassignment) means the region still rides the torso/hip and
+## the spring adds only the soft lag on top — no skin tearing, no over-jiggle.
+##
+## Mutates base_bones_arr / base_weights_arr in place. Returns moved-vertex counts.
+func _reweight_soft_regions(base_verts: PackedVector3Array, min_y: float,
+		name_to_index: Dictionary, base_bones_arr: PackedInt32Array,
+		base_weights_arr: PackedFloat32Array, body_vert_count: int) -> Dictionary:
+	# Max fraction of a vertex's weight transferred to a soft bone at full membership.
+	# Conservative so the region keeps most of its rigid skinning (subtle settle).
+	const MAX_SOFT_W := 0.6
+	var belly_bi: int = name_to_index.get("belly", -1)
+	var glute_l_bi: int = name_to_index.get("glute.L", -1)
+	var glute_r_bi: int = name_to_index.get("glute.R", -1)
+	if belly_bi < 0 or glute_l_bi < 0 or glute_r_bi < 0:
+		return {"belly": 0, "glute": 0}
+
+	# Region anchors in RAW MH space (same space as base_verts), from spine/hip joints.
+	# Abdomen centre: midpoint of spine04/spine05 head, pushed to the FRONT skin (+Z).
+	var sp4 := _raw_joint(base_verts, "spine04____head")
+	var sp5 := _raw_joint(base_verts, "spine05____head")
+	var pl := _raw_joint(base_verts, "pelvis.L____head")
+	var ul := _raw_joint(base_verts, "upperleg01.L____head")
+	var pr := _raw_joint(base_verts, "pelvis.R____head")
+	var ur := _raw_joint(base_verts, "upperleg01.R____head")
+	# A characteristic torso radius (MH units) to scale the region falloffs.
+	var torso_r := maxf(absf(sp4.y - sp5.y) * 3.0, 1.0)
+	var belly_c := (sp4 + sp5) * 0.5            # abdomen midline centre
+	var glute_l_c := (pl + ul) * 0.5            # left hip/leg-root centre
+	var glute_r_c := (pr + ur) * 0.5
+
+	var belly_n := 0
+	var glute_n := 0
+	for v in body_vert_count:
+		var p := base_verts[v]
+		# BELLY membership: in the abdomen height band, near the midline, on the FRONT
+		# (+Z) half. Smooth radial falloff from belly_c plus a front-facing gate.
+		var belly_m := 0.0
+		var dB := (p - belly_c)
+		var radB := Vector3(dB.x, dB.y, 0.0).length()
+		if p.z > belly_c.z and radB < torso_r * 1.4:
+			belly_m = clampf(1.0 - radB / (torso_r * 1.4), 0.0, 1.0)
+			belly_m *= clampf((p.z - belly_c.z) / (torso_r * 0.8), 0.0, 1.0)  # front gate
+		# GLUTE membership (per side): in the hip height band, on the BACK (-Z) half,
+		# on the correct side. Smooth radial falloff from that side's glute centre.
+		var gm_l := 0.0
+		var gm_r := 0.0
+		if p.z < glute_l_c.z:   # back half
+			var dl := (p - glute_l_c)
+			if p.x > 0.0:
+				var rl := dl.length()
+				gm_l = clampf(1.0 - rl / (torso_r * 1.3), 0.0, 1.0)
+			else:
+				var dr := (p - glute_r_c)
+				var rr := dr.length()
+				gm_r = clampf(1.0 - rr / (torso_r * 1.3), 0.0, 1.0)
+		if belly_m > 0.01:
+			_blend_soft_weight(base_bones_arr, base_weights_arr, v, belly_bi, belly_m * MAX_SOFT_W)
+			belly_n += 1
+		if gm_l > 0.01:
+			_blend_soft_weight(base_bones_arr, base_weights_arr, v, glute_l_bi, gm_l * MAX_SOFT_W)
+			glute_n += 1
+		if gm_r > 0.01:
+			_blend_soft_weight(base_bones_arr, base_weights_arr, v, glute_r_bi, gm_r * MAX_SOFT_W)
+			glute_n += 1
+	return {"belly": belly_n, "glute": glute_n}
+
+
+## Raw-MH-space joint centroid (no scale/lift) — for region selection in base space.
+func _raw_joint(base_verts: PackedVector3Array, jname: String) -> Vector3:
+	var idxs = _skel_joints.get(jname, null)
+	if idxs == null or (idxs is Array and idxs.is_empty()):
+		return Vector3.ZERO
+	var acc := Vector3.ZERO
+	for vi in idxs:
+		acc += base_verts[int(vi)]
+	return acc / float(idxs.size())
+
+
+## Move `amt` (0..1) of vertex v's weight onto soft bone `soft_bi`, taken proportionally
+## from the existing influences, then renormalize the 4-wide set. If the soft bone is
+## already present its weight is increased; otherwise it replaces the SMALLEST existing
+## influence. Deterministic; keeps the influence count at 4. Mutates in place.
+func _blend_soft_weight(bones_arr: PackedInt32Array, weights_arr: PackedFloat32Array,
+		v: int, soft_bi: int, amt: float) -> void:
+	var o := v * MAX_INFLUENCES
+	amt = clampf(amt, 0.0, 0.95)
+	# Scale down existing influences by (1-amt); the freed mass goes to the soft bone.
+	for k in MAX_INFLUENCES:
+		weights_arr[o + k] *= (1.0 - amt)
+	# If soft bone already in the set, add to it; else replace the smallest-weight slot.
+	var slot := -1
+	for k in MAX_INFLUENCES:
+		if bones_arr[o + k] == soft_bi:
+			slot = k
+			break
+	if slot < 0:
+		var min_k := 0
+		for k in range(1, MAX_INFLUENCES):
+			if weights_arr[o + k] < weights_arr[o + min_k]:
+				min_k = k
+		slot = min_k
+		bones_arr[o + slot] = soft_bi
+		weights_arr[o + slot] = 0.0
+	weights_arr[o + slot] += amt
+	# Renormalize to sum 1 (defensive; the math above already sums to 1).
+	var sum := 0.0
+	for k in MAX_INFLUENCES:
+		sum += weights_arr[o + k]
+	if sum > 1e-6:
+		for k in MAX_INFLUENCES:
+			weights_arr[o + k] /= sum
+
+
+## Synthetic SECONDARY-MOTION bones not present in the CC0 default rig: a belly bone
+## (abdomen soft-region jiggle), a glute bone per side (buttock jiggle), and a 3-link
+## hair chain hanging off the head (hair physics). Returns { name: bone_def } where
+## each def carries explicit head_pos/tail_pos in the SAME scaled+lifted render space
+## the joint_pos callable produces (so the rest transforms compose with the CC0 bones).
+##
+## Positions are PURE FUNCTIONS of the pinned base mesh's joint cubes — no magic
+## numbers beyond fixed anatomical offset fractions — so the emitted rig is byte-stable.
+## Names match what scripts/body/body_rig.gd resolves: SOFT_REGION_BONES (belly,
+## glute.L, glute.R) and HAIR_BONE_FRAGMENTS ("hair" -> hair01/02/03).
+func _synth_soft_bones(joint_pos: Callable) -> Dictionary:
+	var sp4: Vector3 = joint_pos.call("spine04____head")   # lower-mid spine
+	var sp5: Vector3 = joint_pos.call("spine05____head")   # lowest spine (~pelvis)
+	var pl: Vector3 = joint_pos.call("pelvis.L____head")
+	var pr: Vector3 = joint_pos.call("pelvis.R____head")
+	var ul: Vector3 = joint_pos.call("upperleg01.L____head")
+	var ur: Vector3 = joint_pos.call("upperleg01.R____head")
+	var head_h: Vector3 = joint_pos.call("head____head")   # base of skull
+	var head_t: Vector3 = joint_pos.call("head____tail")   # crown
+	# Body faces +Z (front); -Z is the back. A representative torso depth for the
+	# forward/back tail offsets, scaled from the spine span so it tracks the mesh size.
+	var torso_h := absf(sp4.y - sp5.y)                     # ~0.046 m
+	var depth := maxf(torso_h * 1.6, 0.05)                 # soft-region tail reach (m)
+
+	var out := {}
+	# BELLY — abdomen, midline, between spine04 and spine05; tail bulges FORWARD+down so
+	# the spring tip sits at the navel and swings with body motion. Parent spine04 so it
+	# inherits torso motion (the jiggle layer adds the lag on top).
+	var belly_head := (sp4 + sp5) * 0.5 + Vector3(0.0, 0.0, depth * 0.4)
+	out["belly"] = {
+		"parent": "spine04",
+		"head_pos": belly_head,
+		"tail_pos": belly_head + Vector3(0.0, -depth * 0.5, depth),
+	}
+	# GLUTES — one per side, anchored between the hip and the upper-leg root; tail points
+	# BACK (-Z) + down into the buttock so the spring tip sits on the glute mass. Parent
+	# pelvis.<side> so the buttock is carried by the hip.
+	var gl_head := (pl + ul) * 0.5
+	out["glute.L"] = {
+		"parent": "pelvis.L",
+		"head_pos": gl_head,
+		"tail_pos": gl_head + Vector3(0.0, -depth * 0.5, -depth),
+	}
+	var gr_head := (pr + ur) * 0.5
+	out["glute.R"] = {
+		"parent": "pelvis.R",
+		"head_pos": gr_head,
+		"tail_pos": gr_head + Vector3(0.0, -depth * 0.5, -depth),
+	}
+	# HAIR — a 3-link chain hanging down the BACK of the scalp from the head bone. The
+	# helper-hair cap drapes from the crown (~head tail) down to mid-back; the chain
+	# starts at the back of the skull and steps down so the lower links carry the hair
+	# tips (where the sway is most visible). Parent: head -> hair01 -> hair02 -> hair03.
+	var skull_back := Vector3(0.0, head_t.y, head_h.z - depth * 1.2)  # back of crown
+	var hair_span := maxf(head_t.y - head_h.y, 0.1) * 2.0             # reach down the back
+	out["hair01"] = {
+		"parent": "head",
+		"head_pos": skull_back,
+		"tail_pos": skull_back + Vector3(0.0, -hair_span * 0.33, -depth * 0.2),
+	}
+	out["hair02"] = {
+		"parent": "hair01",
+		"head_pos": skull_back + Vector3(0.0, -hair_span * 0.33, -depth * 0.2),
+		"tail_pos": skull_back + Vector3(0.0, -hair_span * 0.66, -depth * 0.35),
+	}
+	out["hair03"] = {
+		"parent": "hair02",
+		"head_pos": skull_back + Vector3(0.0, -hair_span * 0.66, -depth * 0.35),
+		"tail_pos": skull_back + Vector3(0.0, -hair_span, -depth * 0.5),
+	}
+	return out
 
 
 ## Parse default_weights.mhw (JSON: { weights: { bone_name: [[vidx, w], ...] } }).

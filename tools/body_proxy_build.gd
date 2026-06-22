@@ -96,6 +96,14 @@ const PIECES := [
 		# its rest pose). Tuned against the open-mouth render. MH units (×0.1 = metres).
 		"seat_up": 0.16, "seat_fwd": 0.18},
 	{"name": "genitals", "kind": "helper", "group": "helper-genital", "material": "genitals"},
+	# HAIR — the CC0 `helper-hair` group is a real scalp cap that drapes to mid-back. We
+	# render it as a hair surface and RE-SKIN it (after the normal helper bind) onto the
+	# injected hair-bone chain (hair01/02/03 + head) by vertical band, so the hair spring
+	# physics (scripts/body/spring_bone.gd, resolved by the "hair" name fragment) sways it.
+	# Binding (for morph-following) is the normal helper-vert bind; only the FINAL skin
+	# weights are overridden to the hair bones. material "hair" -> matte dark keratin.
+	{"name": "hair", "kind": "helper", "group": "helper-hair", "material": "hair",
+		"hair_chain": true},
 ]
 
 
@@ -202,6 +210,13 @@ func _run() -> int:
 						continue
 					acc[bone] = float(acc.get(bone, 0.0)) + w
 			_collapse_top4(acc, bones_arr, weights_arr, i * MAX_INFLUENCES)
+
+		# HAIR: override the bound skin weights with the hair-bone chain so the hair
+		# spring physics moves it. Each hair vert is assigned to head + hair01/02/03 by its
+		# vertical position within the hair piece's bbox (top -> head/hair01, tips ->
+		# hair03), blended across two adjacent chain bones for a smooth falloff. Deterministic.
+		if piece.get("hair_chain", false):
+			_skin_hair_chain(rpos, bones_arr, weights_arr, name_to_index)
 
 		var arrays := []
 		arrays.resize(Mesh.ARRAY_MAX)
@@ -783,6 +798,12 @@ func _parse_skeleton_order(path: String) -> Dictionary:
 	if typeof(data) != TYPE_DICTIONARY or not data.has("bones"):
 		return {}
 	var bones: Dictionary = data["bones"]
+	# Inject the SAME secondary-motion bones tools/body_converter.gd adds (belly / glute.L
+	# / glute.R / hair01-03), so this builder's topo-sorted bone ORDER is IDENTICAL to the
+	# body's — the proxies (and the hair piece) share that Skeleton3D, so their ARRAY_BONES
+	# indices must line up bone-for-bone. Names + parents must match the converter exactly.
+	for sb in _synth_soft_bone_parents():
+		bones[sb[0]] = {"parent": sb[1]}
 	var all_names := bones.keys()
 	all_names.sort()
 	var ordered := PackedStringArray()
@@ -803,6 +824,67 @@ func _parse_skeleton_order(path: String) -> Dictionary:
 	for i in ordered.size():
 		name_to_index[ordered[i]] = i
 	return {"name_to_index": name_to_index}
+
+
+## Re-skin the hair surface onto the head + hair01/02/03 chain by vertical band, so the
+## hair spring-bones drive it. The hair cap spans crown (high Y) to tips (low Y); we map
+## that span across 3 segments and assign each vert to TWO adjacent chain bones with a
+## linear blend (so the seam between links is smooth). Topmost verts stay anchored to
+## `head` (the scalp doesn't fly off); progressively lower verts ride hair01->hair02->
+## hair03, where the spring deflection — strongest at the chain tip — produces visible
+## sway. Pure function of vertex Y within the piece bbox => deterministic.
+func _skin_hair_chain(rpos: PackedVector3Array, bones_arr: PackedInt32Array,
+		weights_arr: PackedFloat32Array, name_to_index: Dictionary) -> void:
+	var chain := [
+		int(name_to_index.get("head", 0)),
+		int(name_to_index.get("hair01", 0)),
+		int(name_to_index.get("hair02", 0)),
+		int(name_to_index.get("hair03", 0)),
+	]
+	var n := rpos.size()
+	if n == 0:
+		return
+	var ymin := INF
+	var ymax := -INF
+	for p in rpos:
+		ymin = minf(ymin, p.y)
+		ymax = maxf(ymax, p.y)
+	var yr := maxf(ymax - ymin, 1e-6)
+	var nseg := chain.size() - 1   # 3 segments between 4 bones
+	for i in n:
+		# t: 0 at the crown (top), 1 at the tips (bottom).
+		var t := clampf((ymax - rpos[i].y) / yr, 0.0, 1.0)
+		var f := t * float(nseg)            # position along the chain in [0, nseg]
+		var seg := mini(int(floor(f)), nseg - 1)
+		var frac := f - float(seg)          # blend toward the next bone
+		var o := i * MAX_INFLUENCES
+		for k in MAX_INFLUENCES:
+			bones_arr[o + k] = 0
+			weights_arr[o + k] = 0.0
+		bones_arr[o] = chain[seg]
+		weights_arr[o] = 1.0 - frac
+		bones_arr[o + 1] = chain[seg + 1]
+		weights_arr[o + 1] = frac
+		# (defensive) if both collapsed to the same bone at a band edge, keep weight 1.
+		if bones_arr[o] == bones_arr[o + 1]:
+			weights_arr[o] = 1.0
+			weights_arr[o + 1] = 0.0
+
+
+## The secondary-motion bones injected by BOTH this builder and tools/body_converter.gd,
+## as [name, parent] pairs in any order (the topo sort orders them). MUST stay in lockstep
+## with body_converter.gd._synth_soft_bones (same names + parents) so the shared skeleton's
+## bone INDICES match across both artifacts. (Positions live only in the converter, which
+## writes the rig JSON; here we need only the order, so parent links suffice.)
+func _synth_soft_bone_parents() -> Array:
+	return [
+		["belly", "spine04"],
+		["glute.L", "pelvis.L"],
+		["glute.R", "pelvis.R"],
+		["hair01", "head"],
+		["hair02", "hair01"],
+		["hair03", "hair02"],
+	]
 
 
 ## Parse default_weights.mhw -> per-base-vert top-4 ARRAY_BONES/ARRAY_WEIGHTS, IDENTICAL

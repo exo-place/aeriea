@@ -212,7 +212,15 @@ func _run() -> int:
 		scaled_render[i] = Vector3(v.x * MH_TO_METERS, (v.y - min_y) * MH_TO_METERS, v.z * MH_TO_METERS)
 
 	# --- normals from the triangulated render mesh (smooth, deterministic) ----
-	var normals := _compute_normals(scaled_render, tris)
+	# render_to_base welds normals across UV-island seams (split corners share a base
+	# vertex) so seam edges do not show a one-sided-normal shading crease.
+	var normals := _compute_normals(scaled_render, tris, render_to_base)
+	# --- tangents (ARRAY_TANGENT) from UVs ------------------------------------
+	# Per-vertex tangent basis (xyz + handedness w), so a skin normal map could be
+	# applied later (none ships today — see body_rig material). Computed deterministically
+	# (Lengyel), NOT welded across UV seams: a tangent is parameterised by UV, and split
+	# corners have distinct UVs, so each side legitimately gets its own tangent.
+	var tangents := _compute_tangents(scaled_render, render_uv, tris, normals)
 
 	# --- rig: parse the vendored CC0 skeleton + per-vertex skin weights -------
 	# (Slice 3, §1.5 / §3.) The .mhskel gives the bone hierarchy + joint cubes
@@ -269,6 +277,7 @@ func _run() -> int:
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = scaled_render
 	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_TANGENT] = tangents
 	arrays[Mesh.ARRAY_TEX_UV] = render_uv
 	arrays[Mesh.ARRAY_INDEX] = tris
 	arrays[Mesh.ARRAY_BONES] = bones_arr
@@ -369,6 +378,10 @@ func _run() -> int:
 		ba.resize(Mesh.ARRAY_MAX)
 		ba[Mesh.ARRAY_VERTEX] = vert_delta
 		ba[Mesh.ARRAY_NORMAL] = norm_delta
+		# Surface now carries ARRAY_TANGENT, so every blendshape must too ("Blend shape
+		# format must match the main array format"). Tangent delta is ZERO for the same
+		# reason normals are (see octahedral note); the CPU normal re-bake handles shading.
+		ba[Mesh.ARRAY_TANGENT] = _zero_tangent_delta(rn)
 		mesh.add_blend_shape(axis_name)
 		blend_arrays.append(ba)
 		manifest_axes.append({
@@ -426,6 +439,7 @@ func _run() -> int:
 		eba.resize(Mesh.ARRAY_MAX)
 		eba[Mesh.ARRAY_VERTEX] = ev_delta
 		eba[Mesh.ARRAY_NORMAL] = en_delta
+		eba[Mesh.ARRAY_TANGENT] = _zero_tangent_delta(rn)  # match surface format (see macro loop)
 		mesh.add_blend_shape(bs_name)
 		blend_arrays.append(eba)
 		expr_axes.append({
@@ -440,6 +454,7 @@ func _run() -> int:
 	# (ARRAY_CUSTOM_RGBA8_UNORM) must be declared in the format flags or the custom
 	# array is ignored — Godot reads the per-custom-channel format from these bits.
 	var fmt_flags := Mesh.ARRAY_FORMAT_CUSTOM0 \
+		| Mesh.ARRAY_FORMAT_TANGENT \
 		| (Mesh.ARRAY_CUSTOM_RGBA8_UNORM << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, blend_arrays, {}, fmt_flags)
 	mesh.surface_set_name(0, "body")
@@ -1115,7 +1130,8 @@ func _parse_target(path: String) -> Dictionary:
 ## OUTWARD-pointing per-vertex normals for correct lighting, while ARRAY_INDEX (the
 ## winding the culler uses) is untouched. (Verified: stored-normal radial dot flips
 ## from negative/inward to positive/outward; signed volume is unchanged.)
-func _compute_normals(verts: PackedVector3Array, tris: PackedInt32Array) -> PackedVector3Array:
+func _compute_normals(verts: PackedVector3Array, tris: PackedInt32Array,
+		render_to_base: PackedInt32Array = PackedInt32Array()) -> PackedVector3Array:
 	var n := verts.size()
 	var normals := PackedVector3Array()
 	normals.resize(n)
@@ -1131,7 +1147,92 @@ func _compute_normals(verts: PackedVector3Array, tris: PackedInt32Array) -> Pack
 		normals[b] += fn
 		normals[c] += fn
 		t += 3
+	# --- weld normals across UV-island seams ---------------------------------
+	# A UV seam splits one BASE vertex into N coincident RENDER vertices; each split
+	# saw only the triangles on its own side above, so without welding the two sides
+	# get different normals and a hard shading crease shows along every island edge
+	# (back-of-head centre, head->neck, inner legs). Mirroring the skin-weight weld
+	# (render_to_base, see _run()), we SUM each base vertex's split-normal vectors
+	# and scatter the shared sum back to every split, so coincident verts end up with
+	# one continuous normal. Done on the unnormalized accumulators so it stays
+	# area-weighted; final normalize below. Deterministic (index-ordered).
+	if render_to_base.size() == n and n > 0:
+		var base_n := PackedVector3Array()
+		var base_max := 0
+		for b in render_to_base:
+			base_max = maxi(base_max, b)
+		base_n.resize(base_max + 1)
+		for i in n:
+			base_n[render_to_base[i]] += normals[i]
+		for i in n:
+			normals[i] = base_n[render_to_base[i]]
 	for i in n:
 		var ln := normals[i]
 		normals[i] = ln.normalized() if ln.length() > 1e-9 else Vector3.UP
 	return normals
+
+
+## A zero ARRAY_TANGENT delta for a blendshape: 4 floats (x,y,z,w) per render vertex,
+## all zero. RELATIVE blendshapes compose final = base + Σ wᵢ·Δ; a zero delta keeps the
+## base tangent. We don't morph tangents on the GPU for the same octahedral reason normals
+## are zeroed (see the macro-blendshape note); the CPU re-bake handles shading.
+func _zero_tangent_delta(rn: int) -> PackedFloat32Array:
+	var tg := PackedFloat32Array()
+	tg.resize(rn * 4)   # zero-initialised
+	return tg
+
+
+## Per-vertex tangents (ARRAY_TANGENT format: PackedFloat32Array, 4 floats/vertex =
+## tangent.xyz + handedness w). Lengyel's method: accumulate per-triangle tangent/bitangent
+## from UV gradients, then Gram-Schmidt-orthogonalize against the (already seam-welded)
+## normal and store the handedness sign so a normal map decodes correctly. Deterministic
+## (triangles iterated in index order). NOT seam-welded: tangents are UV-parameterised and
+## split corners carry distinct UVs, so each side's own tangent is the correct one.
+func _compute_tangents(verts: PackedVector3Array, uvs: PackedVector2Array,
+		tris: PackedInt32Array, normals: PackedVector3Array) -> PackedFloat32Array:
+	var n := verts.size()
+	var tan := PackedVector3Array()   # accumulated tangent
+	var bit := PackedVector3Array()   # accumulated bitangent
+	tan.resize(n)
+	bit.resize(n)
+	for i in n:
+		tan[i] = Vector3.ZERO
+		bit[i] = Vector3.ZERO
+	var t := 0
+	while t < tris.size():
+		var ia := tris[t]
+		var ib := tris[t + 1]
+		var ic := tris[t + 2]
+		var e1 := verts[ib] - verts[ia]
+		var e2 := verts[ic] - verts[ia]
+		var d1 := uvs[ib] - uvs[ia]
+		var d2 := uvs[ic] - uvs[ia]
+		var denom := d1.x * d2.y - d2.x * d1.y
+		if absf(denom) > 1e-12:
+			var r := 1.0 / denom
+			var sd := (e1 * d2.y - e2 * d1.y) * r   # tangent dir for this tri
+			var td := (e2 * d1.x - e1 * d2.x) * r   # bitangent dir for this tri
+			tan[ia] += sd; tan[ib] += sd; tan[ic] += sd
+			bit[ia] += td; bit[ib] += td; bit[ic] += td
+		t += 3
+	var out := PackedFloat32Array()
+	out.resize(n * 4)
+	for i in n:
+		var nrm := normals[i]
+		var tv := tan[i]
+		# Gram-Schmidt: project the tangent off the normal, then normalize.
+		tv = (tv - nrm * nrm.dot(tv))
+		if tv.length() <= 1e-9:
+			# Degenerate (no usable UV gradient) — pick any vector orthogonal to nrm.
+			tv = nrm.cross(Vector3.RIGHT)
+			if tv.length() <= 1e-9:
+				tv = nrm.cross(Vector3.UP)
+		tv = tv.normalized()
+		# Handedness: +1 if (n×t) agrees with the bitangent, else -1.
+		var w := -1.0 if nrm.cross(tv).dot(bit[i]) < 0.0 else 1.0
+		var o := i * 4
+		out[o] = tv.x
+		out[o + 1] = tv.y
+		out[o + 2] = tv.z
+		out[o + 3] = w
+	return out

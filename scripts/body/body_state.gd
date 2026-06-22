@@ -601,6 +601,40 @@ func apply_to(mesh_instance: MeshInstance3D) -> void:
 ## the full current morph from neutral, so repeated calls are stable and not cumulative
 ## only if the stored base is neutral — apply_morph_cpu keeps that invariant by always
 ## baking from a preserved neutral copy held on the MeshInstance via metadata).
+# Cache of seam-weld groups keyed by render-vertex count. The grouping is a pure function
+# of the NEUTRAL base topology (identical across every BodyState), so it is computed once
+# and shared. Each entry: Array[PackedInt32Array] of render-vert index groups with >1 member
+# (singletons are skipped — they need no welding).
+static var _seam_weld_cache: Dictionary = {}
+
+## Render-vertex groups that share a neutral position (i.e. UV-seam splits of one base vert),
+## so their normals can be welded. Built once per vertex count and memoized. Coincidence is
+## tested on the neutral base positions quantized to 1e-5 m (sub-micron) — far below any real
+## inter-vertex gap, so only true seam splits collide.
+static func _seam_weld_groups(base_pos: PackedVector3Array) -> Array:
+	var n := base_pos.size()
+	# Key on count + a content hash so two different meshes with equal vertex counts can't
+	# share a (wrong) grouping. base_pos is the immutable neutral base, so the hash is stable.
+	var cache_key := "%d:%d" % [n, hash(base_pos)]
+	if _seam_weld_cache.has(cache_key):
+		return _seam_weld_cache[cache_key]
+	var buckets := {}   # quantized-position key -> Array[int] render indices
+	for i in n:
+		var p := base_pos[i]
+		var key := "%d,%d,%d" % [roundi(p.x * 100000.0), roundi(p.y * 100000.0), roundi(p.z * 100000.0)]
+		if buckets.has(key):
+			buckets[key].append(i)
+		else:
+			buckets[key] = [i]
+	var groups := []
+	for key in buckets:
+		var g: Array = buckets[key]
+		if g.size() > 1:
+			groups.append(PackedInt32Array(g))
+	_seam_weld_cache[cache_key] = groups
+	return groups
+
+
 func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array,
 		weights_override: Dictionary = {}, base_index: PackedInt32Array = PackedInt32Array()) -> void:
 	if mesh == null or mesh.get_surface_count() == 0:
@@ -660,6 +694,21 @@ func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array,
 		var fn := (morphed[c] - morphed[a]).cross(morphed[b] - morphed[a])
 		normals[a] += fn; normals[b] += fn; normals[c] += fn
 		t += 3
+	# Weld normals across UV-island seams BEFORE normalizing. The converter splits each
+	# UV-seam corner into coincident render verts (distinct UVs, same `v`); without welding
+	# the two sides keep one-sided normals and a hard shading crease shows along every island
+	# edge (back-of-head centre, head->neck, inner legs). The converter welds via its
+	# render_to_base map (tools/body_converter.gd:_compute_normals); at runtime we have no
+	# such map, so we derive the SAME equivalence by NEUTRAL-position coincidence (seam splits
+	# share a neutral position) — memoized per surface so it costs once, not per morph. Sum
+	# each group's split-normals and scatter the shared sum back, exactly as the converter.
+	var groups := _seam_weld_groups(base_pos)
+	for grp in groups:
+		var acc := Vector3.ZERO
+		for i in grp:
+			acc += normals[i]
+		for i in grp:
+			normals[i] = acc
 	for i in n:
 		var ln := normals[i]
 		normals[i] = ln.normalized() if ln.length() > 1e-9 else Vector3.UP

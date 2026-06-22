@@ -212,8 +212,9 @@ func _run() -> int:
 		scaled_render[i] = Vector3(v.x * MH_TO_METERS, (v.y - min_y) * MH_TO_METERS, v.z * MH_TO_METERS)
 
 	# --- normals from the triangulated render mesh (smooth, deterministic) ----
-	# render_to_base welds normals across UV-island seams (split corners share a base
-	# vertex) so seam edges do not show a one-sided-normal shading crease.
+	# CORRECT BY CONSTRUCTION: normals are accumulated on the UN-SPLIT base topology
+	# (via render_to_base) and scattered to the UV-split duplicates, so seam splits
+	# share one continuous normal with no reweld step (see _compute_normals).
 	var normals := _compute_normals(scaled_render, tris, render_to_base)
 	# --- tangents (ARRAY_TANGENT) from UVs ------------------------------------
 	# Per-vertex tangent basis (xyz + handedness w), so a skin normal map could be
@@ -307,6 +308,29 @@ func _run() -> int:
 		custom0[o + 2] = (i >> 16) & 0xFF
 		custom0[o + 3] = 255
 	arrays[Mesh.ARRAY_CUSTOM0] = custom0
+
+	# --- ARRAY_CUSTOM1: the render-vertex -> BASE-vertex map, baked into the asset --
+	# The normal computation is correct-by-construction by accumulating onto BASE
+	# vertices (un-split topology) and scattering to the UV-split render duplicates
+	# (see _compute_normals). The runtime CPU re-bake (BodyState.bake_morphed_normals)
+	# must use the IDENTICAL mechanism, so it needs render_to_base too — but the runtime
+	# only sees base_body.res (an ArrayMesh), not the converter's transient parse. We
+	# therefore persist render_to_base IN THE MESH as a second custom channel, same
+	# RGBA8_UNORM 24-bit encoding as CUSTOM0: per render vertex, bytes [low, mid, high,
+	# 255] of its base index. Base count (~14.5k) is far under 24 bits. This travels
+	# with the asset and survives per-instance mesh duplicate + clear_surfaces() re-bake
+	# (re-supplied with the same format flags), so converter and runtime agree by
+	# construction with NO position-quantization heuristic.
+	var custom1 := PackedByteArray()
+	custom1.resize(rn * 4)
+	for i in rn:
+		var bidx := render_to_base[i]
+		var o := i * 4
+		custom1[o] = bidx & 0xFF
+		custom1[o + 1] = (bidx >> 8) & 0xFF
+		custom1[o + 2] = (bidx >> 16) & 0xFF
+		custom1[o + 3] = 255
+	arrays[Mesh.ARRAY_CUSTOM1] = custom1
 
 	# --- blendshapes: one per selected macro anchor ---------------------------
 	var mesh := ArrayMesh.new()
@@ -454,8 +478,10 @@ func _run() -> int:
 	# (ARRAY_CUSTOM_RGBA8_UNORM) must be declared in the format flags or the custom
 	# array is ignored — Godot reads the per-custom-channel format from these bits.
 	var fmt_flags := Mesh.ARRAY_FORMAT_CUSTOM0 \
+		| Mesh.ARRAY_FORMAT_CUSTOM1 \
 		| Mesh.ARRAY_FORMAT_TANGENT \
-		| (Mesh.ARRAY_CUSTOM_RGBA8_UNORM << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
+		| (Mesh.ARRAY_CUSTOM_RGBA8_UNORM << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT) \
+		| (Mesh.ARRAY_CUSTOM_RGBA8_UNORM << Mesh.ARRAY_FORMAT_CUSTOM1_SHIFT)
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, blend_arrays, {}, fmt_flags)
 	mesh.surface_set_name(0, "body")
 
@@ -1131,44 +1157,49 @@ func _parse_target(path: String) -> Dictionary:
 ## winding the culler uses) is untouched. (Verified: stored-normal radial dot flips
 ## from negative/inward to positive/outward; signed volume is unchanged.)
 func _compute_normals(verts: PackedVector3Array, tris: PackedInt32Array,
-		render_to_base: PackedInt32Array = PackedInt32Array()) -> PackedVector3Array:
-	var n := verts.size()
-	var normals := PackedVector3Array()
-	normals.resize(n)
-	for i in n:
-		normals[i] = Vector3.ZERO
+		render_to_base: PackedInt32Array) -> PackedVector3Array:
+	# CORRECT BY CONSTRUCTION (replaces split-then-reweld, b12bcd7). Normals are
+	# accumulated onto the UN-SPLIT BASE topology, not per render vertex: a UV seam
+	# splits one base vertex into N coincident render verts (distinct UVs, same `v`),
+	# and a per-render-vertex accumulation would let each split see only its island's
+	# faces — yielding different normals and a hard shading crease along every island
+	# edge (back-of-head centre, head->neck, inner legs). Instead each triangle's
+	# (area-weighted, un-normalized cross-product) face normal is added to the
+	# accumulator of each corner's BASE vertex (render-corner -> base via render_to_base).
+	# After all faces, normalize per base vertex ONCE, then assign each render vertex the
+	# normal of ITS base vertex. The duplicates therefore inherit the same welded-topology
+	# normal by construction — no reweld step, no positional assumption.
+	var rn := verts.size()
+	assert(render_to_base.size() == rn and rn > 0,
+		"_compute_normals: render_to_base must be one entry per render vertex")
+	# size the base accumulator from the max base index referenced.
+	var base_count := 0
+	for b in render_to_base:
+		base_count = maxi(base_count, b + 1)
+	var base_n := PackedVector3Array()
+	base_n.resize(base_count)   # zero-initialised
 	var t := 0
 	while t < tris.size():
 		var a := tris[t]
-		var b := tris[t + 1]
+		var b2 := tris[t + 1]
 		var c := tris[t + 2]
-		var fn := (verts[c] - verts[a]).cross(verts[b] - verts[a])
-		normals[a] += fn
-		normals[b] += fn
-		normals[c] += fn
+		# OUTWARD face normal over the reversed (i0,i2,i1) winding from _parse_obj:
+		# operands SWAPPED (c-a)×(b-a) so normals point outward for correct lighting,
+		# while ARRAY_INDEX (the cull winding) is untouched. (See header note above.)
+		var fn := (verts[c] - verts[a]).cross(verts[b2] - verts[a])
+		base_n[render_to_base[a]] += fn
+		base_n[render_to_base[b2]] += fn
+		base_n[render_to_base[c]] += fn
 		t += 3
-	# --- weld normals across UV-island seams ---------------------------------
-	# A UV seam splits one BASE vertex into N coincident RENDER vertices; each split
-	# saw only the triangles on its own side above, so without welding the two sides
-	# get different normals and a hard shading crease shows along every island edge
-	# (back-of-head centre, head->neck, inner legs). Mirroring the skin-weight weld
-	# (render_to_base, see _run()), we SUM each base vertex's split-normal vectors
-	# and scatter the shared sum back to every split, so coincident verts end up with
-	# one continuous normal. Done on the unnormalized accumulators so it stays
-	# area-weighted; final normalize below. Deterministic (index-ordered).
-	if render_to_base.size() == n and n > 0:
-		var base_n := PackedVector3Array()
-		var base_max := 0
-		for b in render_to_base:
-			base_max = maxi(base_max, b)
-		base_n.resize(base_max + 1)
-		for i in n:
-			base_n[render_to_base[i]] += normals[i]
-		for i in n:
-			normals[i] = base_n[render_to_base[i]]
-	for i in n:
-		var ln := normals[i]
-		normals[i] = ln.normalized() if ln.length() > 1e-9 else Vector3.UP
+	# normalize per BASE vertex once.
+	for i in base_count:
+		var ln := base_n[i]
+		base_n[i] = ln.normalized() if ln.length() > 1e-9 else Vector3.UP
+	# scatter the base-vertex normal to every render vertex that came from it.
+	var normals := PackedVector3Array()
+	normals.resize(rn)
+	for i in rn:
+		normals[i] = base_n[render_to_base[i]]
 	return normals
 
 

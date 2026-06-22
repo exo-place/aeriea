@@ -64,6 +64,7 @@ SUITES=(
   body_arm_ik_test
   body_micro_life_test
   body_head_reskin_test
+  body_leg_reskin_test
   interpreter_slice1_test
   legend_projection_test
   creator_history_test

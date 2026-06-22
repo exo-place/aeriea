@@ -557,11 +557,20 @@ func _set_default_head_visible(vis: bool) -> void:
 				proxy_instance.set_surface_override_material(_proxy_surface[piece], _proxy_material(kind, vis))
 
 
-## Build a MeshInstance3D for a RE-SKINNED core-body part (e.g. an animal head): a committed
-## ArrayMesh whose verts are bound to a SINGLE aeriea bone (the part's attach_bone). We give it
-## a one-bind Skin on that bone and parent it under aeriea's OWN skeleton, so aeriea's LBS skins
-## it and it DEFORMS with the body — riding the mapped bone when the skeleton animates. Returns
-## true on success. RENDER-SIDE: the re-skin asset is deterministic geometry.
+## Build a MeshInstance3D for a RE-SKINNED core-body part — a committed ArrayMesh whose verts
+## are rebound onto aeriea's OWN skeleton — and parent it under that skeleton so aeriea's LBS
+## skins it and it DEFORMS with the body. TWO re-skin kinds, branched on the part's `multibone`
+## flag:
+##   - SINGLE-BONE (heads, tools/bdcc2_head_reskin.gd): ARRAY_BONES is all index 0 + a ONE-bind
+##     Skin on the part's attach_bone (bind = that bone's global-rest inverse). The whole part
+##     rides one bone (a rigid head following the head bone).
+##   - MULTI-BONE (legs/limbs, tools/bdcc2_body_reskin.gd): ARRAY_BONES carries REAL aeriea
+##     bone indices spanning many bones (thigh/shin/foot/...). We build a FULL identity Skin
+##     (bind i -> aeriea bone i, bind = bone_global_rest inverse — exactly how the body Skin is
+##     built), so each influence rides its own mapped bone and the limb deforms joint-by-joint
+##     (bend the knee, the shin follows; bend the hip, the whole leg swings). This is the true
+##     multi-bone weight transfer, not a rigid attach.
+## Returns true on success. RENDER-SIDE: the re-skin asset is deterministic geometry.
 func _attach_reskin_part(slot: String, id: String) -> bool:
 	var path := PartLibrary.reskin_path(slot, id)
 	if path == "" or not ResourceLoader.exists(path):
@@ -569,20 +578,27 @@ func _attach_reskin_part(slot: String, id: String) -> bool:
 	var mesh := load(path)
 	if not (mesh is ArrayMesh):
 		return false
-	var bone := String(PartLibrary.get_part(slot, id).get("attach_bone", PartLibrary.SLOT_ATTACH_BONE.get(slot, "head")))
-	var bi := skeleton.find_bone(bone)
-	if bi < 0:
-		return false
-	# Single-bind skin: bind 0 -> the chosen aeriea bone (bind pose = inverse of its GLOBAL
-	# rest, matching how the body Skin is built — so the re-skinned verts, baked into that
-	# bone's rest-local frame, reseat into world correctly and then follow the bone's pose).
 	var skin := Skin.new()
-	skin.add_bind(0, skeleton.get_bone_global_rest(bi).affine_inverse())
-	skin.set_bind_name(0, bone)
+	if PartLibrary.is_multibone(slot, id):
+		# FULL skin: bind i -> aeriea bone i (matches the body Skin), so the mesh's baked aeriea
+		# bone indices resolve directly under LBS and each rides its own bone.
+		for i in skeleton.get_bone_count():
+			skin.add_bind(i, skeleton.get_bone_global_rest(i).affine_inverse())
+			skin.set_bind_name(i, skeleton.get_bone_name(i))
+	else:
+		# Single-bind skin: bind 0 -> the chosen aeriea bone (bind = inverse of its GLOBAL rest,
+		# matching the body Skin — the verts, baked into that bone's frame, reseat correctly and
+		# follow the bone's pose).
+		var bone := String(PartLibrary.get_part(slot, id).get("attach_bone", PartLibrary.SLOT_ATTACH_BONE.get(slot, "head")))
+		var bi := skeleton.find_bone(bone)
+		if bi < 0:
+			return false
+		skin.add_bind(0, skeleton.get_bone_global_rest(bi).affine_inverse())
+		skin.set_bind_name(0, bone)
 	var mi := MeshInstance3D.new()
 	mi.name = "%sReskin" % slot.capitalize()
 	mi.mesh = (mesh as ArrayMesh)
-	# A plain skin material so the re-skinned head reads as flesh/fur (texture work is future).
+	# A plain skin material so the re-skinned part reads as flesh/fur (texture work is future).
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = SKIN_ALBEDO
 	mat.roughness = SKIN_ROUGHNESS

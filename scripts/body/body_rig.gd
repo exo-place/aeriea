@@ -134,9 +134,16 @@ const PartLibrary := preload("res://scripts/body/part_library.gd")
 ## Slot -> the bone names whose SUBTREE roots the region. The head region is the head bone's
 ## subtree (skull + all face bones); the legs region is the two upperleg subtrees (thigh down
 ## through foot/toe). Pelvis/glute/belly stay BODY (they are the hip/torso, not the leg part).
+## The legs region masks the LOWER leg (knee-down) subtrees, NOT the upper thigh: the BDCC2
+## digi/planti leg meshes do not include the upper-thigh/pelvis connector geometry (they start
+## mid-thigh), so masking aeriea's upper thigh would leave a HOLE at the hip with nothing to fill
+## it. Keeping aeriea's own upper thigh bridges the body to the swapped lower leg (both share the
+## skin material, so the brief overlap at the thigh is invisible — far better than a black gap).
+## The dramatic re-style (digitigrade backward shin + paw / plantigrade calf + foot) is all
+## knee-down, which IS masked, so the human shin/foot never co-renders under the swap.
 const REGION_ROOT_BONES := {
 	PartLibrary.SLOT_HEAD: ["head"],
-	PartLibrary.SLOT_LEGS: ["upperleg01.L", "upperleg01.R"],
+	PartLibrary.SLOT_LEGS: ["lowerleg01.L", "lowerleg01.R"],
 }
 ## A sentinel collapse point well below the feet; all masked verts of a region collapse to ONE
 ## shared point so every triangle touching a masked vert is zero-area (renders no fragments)
@@ -556,33 +563,35 @@ func apply_part(slot: String, id: String) -> bool:
 	# The hair slot also drives the CC0 cap proxy surface: it shows ONLY when the cap is on.
 	if slot == PartLibrary.SLOT_HAIR and _proxy_surface.has("hair"):
 		_set_hair_cap_visible(not is_bdcc2)
-	# CORE-BODY head: hide aeriea's default face proxy surfaces when an animal head overlays,
-	# AND mask the base-mesh skull region so the human skull doesn't co-render under it.
+	# CORE-BODY head: hide aeriea's default face proxy surfaces when an animal head overlays.
+	# (The base-mesh skull region is masked AFTER attach, using the part's coverage AABB.)
 	if slot == PartLibrary.SLOT_HEAD:
-		var reskinning_head := PartLibrary.is_reskin(slot, id)
-		_set_default_head_visible(not reskinning_head)
-		_set_region_masked(PartLibrary.SLOT_HEAD, reskinning_head)
-	# CORE-BODY legs: mask the base-mesh leg region so the human legs don't co-render under the
-	# swapped digi/planti legs.
-	if slot == PartLibrary.SLOT_LEGS:
-		_set_region_masked(PartLibrary.SLOT_LEGS, PartLibrary.is_reskin(slot, id))
+		_set_default_head_visible(not PartLibrary.is_reskin(slot, id))
+	# Restore any prior region mask first; we re-mask below with the NEW part's coverage AABB
+	# (or leave restored if the new id is the human default / a load fails).
+	if REGION_ROOT_BONES.has(slot) and is_region_masked(slot):
+		_set_region_masked(slot, false)
 	if is_bdcc2:
 		# A RE-SKINNED core-body part (head) binds onto aeriea's OWN skeleton; an accessory
 		# part attaches its own GLB skeleton under a bone. Branch on which.
 		var attached := _attach_reskin_part(slot, id) if PartLibrary.is_reskin(slot, id) \
 			else _attach_part_glbs(slot, id)
 		if not attached:
-			# Load failed — fall back to the slot default so the slot is never broken, and
-			# restore the base-mesh region (no orphaned mask with no part over it).
+			# Load failed — fall back to the slot default so the slot is never broken; the region
+			# stays restored (handled above), and re-show aeriea's own head/hair.
 			_current_part[slot] = PartLibrary.default_id(slot)
 			if slot == PartLibrary.SLOT_HAIR and _proxy_surface.has("hair"):
 				_set_hair_cap_visible(true)
 			if slot == PartLibrary.SLOT_HEAD:
 				_set_default_head_visible(true)
-			if REGION_ROOT_BONES.has(slot):
-				_set_region_masked(slot, false)
 			_register_part_springs()
 			return false
+		# CORE-BODY re-skin (head / legs): now that the part is attached, mask ONLY the base-mesh
+		# region that the part actually COVERS (its AABB) so the human geometry under it is hidden
+		# while uncovered area — e.g. the upper thigh BDCC2 leg meshes don't include — keeps
+		# aeriea's own surface to bridge the part to the body (no hole at the hip).
+		if REGION_ROOT_BONES.has(slot) and PartLibrary.is_reskin(slot, id):
+			_set_region_masked(slot, true, _reskin_coverage_aabb(slot))
 	_register_part_springs()
 	return true
 
@@ -660,14 +669,18 @@ func _region_bone_set(roots: Array) -> Dictionary:
 	return out
 
 
-## Mask (true) or restore (false) a region's base-mesh geometry. Masking collapses the
-## region's base verts to MASK_COLLAPSE_POINT (degenerate triangles -> no fragments);
-## restoring re-bakes the morph (which rewrites positions from neutral) and re-asserts any
-## OTHER region still masked. Tracks the live set in _masked_regions so the collapse is
-## re-applied after every morph re-bake. RENDER-SIDE only.
-func _set_region_masked(slot: String, masked: bool) -> void:
+## Mask (true) or restore (false) a region's base-mesh geometry. Masking DROPS the region's
+## base triangles that the re-skin part actually COVERS (see _collapse_region_verts); restoring
+## re-bakes the morph (which rewrites the full surface from neutral) and re-asserts any OTHER
+## region still masked. _masked_regions[slot] holds the part's COVERAGE AABB (in the body's local
+## frame, grown by a margin): only base-mesh region verts INSIDE that box are dropped, so where
+## the part doesn't reach (e.g. the upper thigh / hip socket — BDCC2 leg meshes start mid-thigh)
+## aeriea's own geometry stays and BRIDGES the part to the body (no hole at the hip). An EMPTY
+## AABB means "mask the whole region" (the fallback when no part AABB is available). Re-applied
+## after every morph re-bake. RENDER-SIDE only.
+func _set_region_masked(slot: String, masked: bool, coverage: AABB = AABB()) -> void:
 	if masked:
-		_masked_regions[slot] = true
+		_masked_regions[slot] = coverage
 		_collapse_region_verts(slot)
 	else:
 		_masked_regions.erase(slot)
@@ -675,9 +688,28 @@ func _set_region_masked(slot: String, masked: bool) -> void:
 		apply_body_state(body_state)
 
 
-## Collapse one region's base-mesh verts to the sentinel point IN PLACE on the current baked
-## surface (called after masking and re-asserted after every morph bake). Rebuilds surface 0
-## with the same arrays/blends/format so the skin binding is unchanged.
+## The COVERAGE AABB (body-local) of the re-skin part currently attached for `slot`, grown by a
+## small margin so the base mesh is hidden a touch beyond the part's silhouette (avoids a thin
+## human sliver peeking at the seam). Returns an empty AABB if no re-skin mesh is attached (then
+## the whole region is masked). The re-skin verts are stored in the skeleton/body-local rest
+## frame (same frame as the base mesh), so the AABBs are directly comparable.
+const REGION_MASK_MARGIN := 0.04
+func _reskin_coverage_aabb(slot: String) -> AABB:
+	for att in _part_attachments.get(slot, []):
+		if att is MeshInstance3D and is_instance_valid(att) and (att as MeshInstance3D).mesh != null:
+			var ab: AABB = ((att as MeshInstance3D).mesh as ArrayMesh).get_aabb()
+			return ab.grow(REGION_MASK_MARGIN)
+	return AABB()
+
+
+## Mask one region's base-mesh geometry by DROPPING every triangle that references a masked
+## vertex from the surface's INDEX buffer (called after masking + re-asserted after every morph
+## bake). Earlier this COLLAPSED masked verts to a far sentinel point, but a triangle straddling
+## the region boundary (some verts masked, some not) then stretched into a long thin SPIKE toward
+## the sentinel (the "thin pillars" under a swapped leg). Dropping the triangles removes the
+## region's surface cleanly with no boundary spikes; the verts stay put so the skin binding /
+## blend-shape arrays are untouched (we rebuild only the index buffer). The collapsed-vert
+## fallback is kept for the (degenerate) case of a surface with no index buffer.
 func _collapse_region_verts(slot: String) -> void:
 	if mesh_instance == null or mesh_instance.mesh == null:
 		return
@@ -688,10 +720,38 @@ func _collapse_region_verts(slot: String) -> void:
 	if mesh.get_surface_count() == 0:
 		return
 	var arrays := mesh.surface_get_arrays(0)
-	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	for vi in (idx as PackedInt32Array):
-		verts[vi] = MASK_COLLAPSE_POINT
-	arrays[Mesh.ARRAY_VERTEX] = verts
+	var verts0: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	# Union of ALL currently-masked regions' verts (a fast lookup): the surface is rebuilt from
+	# the full neutral on each morph bake, so EVERY active mask must be re-applied here together.
+	# A region with a non-empty COVERAGE AABB masks only its verts INSIDE that box (so the part's
+	# uncovered area — e.g. the upper thigh — keeps aeriea's own geometry to bridge to the body).
+	var masked := {}
+	for s in _masked_regions:
+		var ridx = _region_verts.get(s, null)
+		if ridx == null:
+			continue
+		var cov: AABB = _masked_regions[s]
+		var cover_all := cov.size == Vector3.ZERO
+		for vi in (ridx as PackedInt32Array):
+			if cover_all or cov.has_point(verts0[vi]):
+				masked[vi] = true
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	if indices != null and not indices.is_empty():
+		# Drop every triangle with any masked corner; keep the rest.
+		var kept := PackedInt32Array()
+		var tri := indices.size() / 3
+		for t in tri:
+			var a := indices[t * 3]; var b := indices[t * 3 + 1]; var c := indices[t * 3 + 2]
+			if masked.has(a) or masked.has(b) or masked.has(c):
+				continue
+			kept.append(a); kept.append(b); kept.append(c)
+		arrays[Mesh.ARRAY_INDEX] = kept
+	else:
+		# Fallback (no index buffer): collapse masked verts to the sentinel (legacy behaviour).
+		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		for vi in masked:
+			verts[vi] = MASK_COLLAPSE_POINT
+		arrays[Mesh.ARRAY_VERTEX] = verts
 	var blends := mesh.surface_get_blend_shape_arrays(0)
 	var fmt := mesh.surface_get_format(0)
 	mesh.clear_surfaces()
@@ -713,6 +773,33 @@ func region_vert_count(slot: String) -> int:
 ## The base-mesh vertex indices of a region (for tests / debug). Empty if none.
 func region_vert_indices(slot: String) -> PackedInt32Array:
 	return _region_verts.get(slot, PackedInt32Array())
+
+
+## How many of a region's base-mesh verts are still REFERENCED by the rendered surface's index
+## buffer (for tests / debug). Masking now DROPS the region's covered triangles rather than
+## collapsing verts to a sentinel, so a fully-masked region drops to ~0 referenced verts while
+## the verts themselves stay in place. Returns the region vert count if the surface has no index
+## buffer (the legacy collapse path). 0 unmasked-region verts can never happen (they're rendered).
+func region_rendered_vert_count(slot: String) -> int:
+	if mesh_instance == null or mesh_instance.mesh == null:
+		return 0
+	var idx = _region_verts.get(slot, null)
+	if idx == null:
+		return 0
+	var mesh := mesh_instance.mesh as ArrayMesh
+	if mesh.get_surface_count() == 0:
+		return 0
+	var indices: PackedInt32Array = mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+	if indices == null or indices.is_empty():
+		return (idx as PackedInt32Array).size()
+	var referenced := {}
+	for i in indices:
+		referenced[i] = true
+	var n := 0
+	for vi in (idx as PackedInt32Array):
+		if referenced.has(vi):
+			n += 1
+	return n
 
 
 ## Build a MeshInstance3D for a RE-SKINNED core-body part — a committed ArrayMesh whose verts
@@ -831,7 +918,18 @@ func _attach_one_glb(row: Dictionary, slot: String) -> BoneAttachment3D:
 	# attachment auto-applies the bone's global transform; we set the part_root's LOCAL
 	# transform relative to that.
 	var sc := float(row.get("scale", 1.0))
-	var off: Vector3 = row.get("offset", Vector3.ZERO)
+	# RE-CENTER (uses the attach bone's REST BASIS). The offset is no longer a raw AABB-center
+	# approximation in WORLD axes; we compute the bone-local offset that lands the part's geometric
+	# center on the slot's anatomical TARGET (ear: head side; horn: head top), expressing the target
+	# in the bone's REST BASIS so a non-identity bone frame is honoured:
+	#   offset = bone_rest_basis^-1 * (target_global - bone_global_rest_origin) - scale*part_center
+	# Then BoneAttachment (bone global pose) * (scale*v + offset) lands the center on the target.
+	# A row may still pin an explicit `offset` (manual override) to bypass the derive.
+	var off: Vector3
+	if row.has("offset"):
+		off = row["offset"]
+	else:
+		off = _accessory_seat_offset(slot, bone, glb_path, part_root, sc)
 	part_root.transform = Transform3D(Basis.IDENTITY.scaled(Vector3(sc, sc, sc)), off)
 	# Replace the GLB's plain default material so the mined part doesn't render as a light
 	# untextured blob. Hair gets the matte-keratin hair material; ears/tail/horns get a
@@ -839,6 +937,60 @@ func _attach_one_glb(row: Dictionary, slot: String) -> BoneAttachment3D:
 	var part_mat: Material = _hair_part_material() if slot == PartLibrary.SLOT_HAIR else _reskin_skin_material()
 	_apply_material_recursive(part_root, part_mat)
 	return att
+
+
+## Per-slot anatomical seat TARGET for an accessory, in the attach bone's REST frame (metres,
+## relative to the bone origin, +x = character's left, +y up, +z forward). The L/R variants place
+## the part on the correct side (derived from the GLB filename). These are DATA (the anatomical
+## landmark the part's geometric center should sit on), distinct from the part's own geometry —
+## the re-center math (below) maps the part center onto this target via the bone rest basis.
+## Ears: head sides at ear height, slightly back. Horns: head top, forward. Head global rest is
+## (0, 1.514, 0.016); head-region center (0, 1.549, 0.064), half-width ~0.088, top ~y1.666.
+const ACCESSORY_SEAT_TARGET := {
+	PartLibrary.SLOT_EARS: {"L": Vector3(0.085, 0.10, 0.00), "R": Vector3(-0.085, 0.10, 0.00)},
+	PartLibrary.SLOT_HORNS: {"L": Vector3(0.05, 0.16, 0.05), "R": Vector3(-0.05, 0.16, 0.05)},
+}
+
+
+## Bone-local offset that lands the loaded part's geometric CENTER on the slot's anatomical seat
+## target, computed in the attach bone's REST BASIS (so a non-identity bone frame is honoured):
+##   offset = bone_rest_basis^-1 * target_bone_local - scale * part_center
+## where target_bone_local is the per-slot target already expressed relative to the bone origin.
+## L vs R is read from the GLB filename (…L.glb / …R.glb). Returns ZERO if the slot has no target.
+func _accessory_seat_offset(slot: String, bone: String, glb_path: String, part_root: Node, scale: float) -> Vector3:
+	if not ACCESSORY_SEAT_TARGET.has(slot):
+		return Vector3.ZERO
+	var side := "R" if glb_path.get_file().get_basename().ends_with("R") else "L"
+	var target_local: Vector3 = ACCESSORY_SEAT_TARGET[slot][side]
+	var bi := skeleton.find_bone(bone)
+	if bi < 0:
+		return Vector3.ZERO
+	var rest_basis := skeleton.get_bone_global_rest(bi).basis
+	var center := _node_geometry_center(part_root)
+	return rest_basis.inverse() * target_local - scale * center
+
+
+## Geometric center (AABB midpoint) of all MeshInstance3D geometry under `node`, in `node`'s local
+## space (composing each descendant's transform). Used to re-center an attached accessory.
+func _node_geometry_center(node: Node) -> Vector3:
+	var acc := {"ab": AABB(), "first": true}
+	_accumulate_geometry(node, Transform3D.IDENTITY, acc)
+	return (acc["ab"] as AABB).get_center() if not acc["first"] else Vector3.ZERO
+
+
+func _accumulate_geometry(node: Node, xf: Transform3D, acc: Dictionary) -> void:
+	var t := xf
+	if node is Node3D:
+		t = xf * (node as Node3D).transform
+	if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
+		for v in ((node as MeshInstance3D).mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+			var p: Vector3 = t * v
+			if acc["first"]:
+				acc["ab"] = AABB(p, Vector3.ZERO); acc["first"] = false
+			else:
+				acc["ab"] = (acc["ab"] as AABB).expand(p)
+	for c in node.get_children():
+		_accumulate_geometry(c, t, acc)
 
 
 ## Set material_override on every MeshInstance3D under `node` (depth-first). Used to give an
@@ -1003,7 +1155,10 @@ func _proxy_piece_visible(sname: String) -> bool:
 	var animal_head := PartLibrary.is_reskin(PartLibrary.SLOT_HEAD, current_part(PartLibrary.SLOT_HEAD))
 	if sname == "genitals":
 		return show_genitals
-	if sname in ["eyes", "eyebrows", "eyelashes"]:
+	# All of aeriea's human FACE proxy pieces hide under an animal head — not just the eyes but
+	# the TEETH + TONGUE too (else the human teeth/tongue float as a white+red bar in the animal
+	# snout). The swapped head supplies its own mouth geometry.
+	if sname in ["eyes", "eyebrows", "eyelashes", "teeth", "tongue"]:
 		return not animal_head
 	if sname == "hair":
 		if animal_head:

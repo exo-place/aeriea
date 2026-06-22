@@ -42,14 +42,36 @@ const OUT_DIR := "res://assets/body/parts/bdcc2/reskin/"
 ## GLBs use the DEF- deform names — DEF-Head — which we map here to the same aeriea bone).
 const AERIEA_HEAD_BONE := "head"
 
-## SEATING (head-local metres). BDCC2 authors DEF-Head at the rig origin sitting roughly at
-## the jaw/skull base; aeriea's `head` bone origin sits at the base of the skull too, so the
-## offset is small. Tuned so the snout/skull land on aeriea's neck-top. +y up, +z forward.
+## FIT — scale + seat the BDCC2 head onto aeriea's head REGION (not just its bone origin).
+##
+## DIAGNOSED (tools/bdcc2_fit_diagnose.gd):
+##   - aeriea head region (base-mesh verts dominantly weighted to the head subtree):
+##       size (0.176, 0.234, 0.207) m, CENTER (0.0, 1.549, 0.064).
+##   - BDCC2 CanineHead gross shell (yawed to +Z, head-local): size (0.248, 0.224, 0.292),
+##       CENTER (0.0, 0.098, -0.057). Its DEF-Head ORIGIN sits at the jaw/throat (y≈0), so the
+##       old "place DEF-Head origin on the head bone" seated the skull LOW and the snout FORWARD
+##       of aeriea's head — and at BDCC2's native size the head read small in aeriea's region.
+##
+## THE FIT. A per-part SCALE about the BDCC2 head-mesh CENTER, then a TRANSLATE landing that
+## center on aeriea's head-region CENTER. So the head fills the region and is centred on it
+## (no longer hanging off the jaw). UNIFORM scale (not per-axis): the BDCC2 head is an ANIMAL
+## head — wider + deeper (the snout) than a human skull — so per-axis scaling to the human
+## region's proportions would SQUASH the muzzle. Uniform preserves the animal silhouette while
+## filling the region. DESIGN-FORK (flagged for the owner): uniform-preserve-silhouette is the
+## default; the alternative is per-axis match-human-proportions (loses the muzzle projection).
+const HEAD_FIT_SCALE := 0.88
+## BDCC2 head-mesh center (RAW head-local, NO yaw — matches SEAT_YAW=0) — the scale pivot.
+## From the diagnostic raw AABB pos (0,-0.014,-0.089) + size (0.248,0.224,0.292): center z=+0.057.
+const BDCC2_HEAD_CENTER := Vector3(0.0, 0.098, 0.057)
+## aeriea head-region center (global rest) — where the scaled head's center lands.
+const AERIEA_HEAD_CENTER := Vector3(0.0, 1.549, 0.064)
+## Residual hand-tunable nudge (metres) on top of the center-to-center seat. 0 = pure fit.
 const SEAT := Vector3(0.0, 0.0, 0.0)
-## FACING. BDCC2 heads are authored facing -Z (nose at z=+0.188 in a -Z-forward rig); aeriea's
-## body faces +Z (locomotion uses +z forward). So the head is yawed 180° about Y to face the
-## body's forward. (Same -Z bind the clip ingest documents for BDCC2's body rig.)
-const SEAT_YAW := PI
+## FACING. The BDCC2 HEAD GLBs are authored facing +Z natively — DIAGNOSED (bdcc2_fit_diagnose.gd):
+## the snout/face mass is overwhelmingly at +z (1330 verts at z>0.05 vs 56 at z<-0.05). aeriea also
+## faces +Z, so NO yaw is needed. (The earlier PI yaw — copied from the BODY rig, which DOES face
+## -Z — flipped the snout to face BACKWARD, rendering a smooth faceless back-of-head to the front.)
+const SEAT_YAW := 0.0
 
 ## Core-body part meshes to re-skin. Each row: aeriea id, GLB path (under SRC), and the
 ## SURFACE node name(s) whose geometry forms the gross head shell to transfer. We transfer
@@ -179,16 +201,14 @@ func _transfer_surface(mi: MeshInstance3D, skel: Skeleton3D, bind_global: Array,
 	for vi in nv:
 		var v: Vector3 = yaw * (mesh_xf * verts[vi])
 		var nrm: Vector3 = (yaw * (mesh_xf.basis * norms[vi])).normalized() if vi < norms.size() else Vector3.UP
-		# Skin the vertex through the GLB BIND pose: in bind, pose == bind so each bone's
-		# (global * bind_inverse) == identity and the LBS sum is just v. We therefore take the
-		# bind position directly (v is already in the GLB skeleton/bind space). This is the
-		# correct bind-pose-relative position; the rebind moves it to aeriea's head frame.
-		var bind_pos := v
-		# Bake into aeriea's WORLD rest space at the head bone: place BDCC2's DEF-Head origin on
-		# aeriea's head-bone global rest position. The load-time Skin uses bind = head_global_rest
-		# inverse, so at rest the bind cancels the head_global and the vertex lands at
-		# head_global + bind_pos; under a head-bone pose it rides the bone (rotates about its base).
-		var world := head_global + bind_pos + SEAT
+		# v is the GLB bind-pose-relative position (at bind, LBS(v) == v — verified). Apply the
+		# FIT: uniformly SCALE about the BDCC2 head-mesh center (fills aeriea's head region without
+		# squashing the muzzle), then TRANSLATE so that center lands on aeriea's head-region center.
+		# The result lives in aeriea's WORLD rest space; the load-time single-bone Skin (bind =
+		# head_global_rest inverse) makes it ride the head bone, so a head pose rotates it about the
+		# head-bone base while the geometry sits centred on (and filling) the head region at rest.
+		var fitted := BDCC2_HEAD_CENTER + (v - BDCC2_HEAD_CENTER) * HEAD_FIT_SCALE
+		var world := AERIEA_HEAD_CENTER + (fitted - BDCC2_HEAD_CENTER) + SEAT
 		out_verts[vi] = world
 		out_norms[vi] = nrm
 		# Single influence on the aeriea head bone (index written as 0; the load-time Skin is

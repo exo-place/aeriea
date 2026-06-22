@@ -45,10 +45,21 @@ func _ready() -> void:
 		"type=%s" % (mesh.get_class() if mesh else "null"))
 	if mesh is ArrayMesh:
 		var ab: AABB = (mesh as ArrayMesh).get_aabb()
-		# Legs span feet (~y0) to hips (~y0.9). Bottom near floor, top below the waist.
+		# FIT: the position-only per-influence RETARGET seats each leg segment on its aeriea joint,
+		# so the legs span feet (~y0) up toward aeriea's hip (~y0.83), reaching aeriea's leg LENGTH
+		# (~0.79 m) instead of the short BDCC2 ~0.65 m that floated / stretched into pillars.
 		_assert("re-skinned legs seated at leg height (AABB y in [-0.05, 1.0])",
 			ab.position.y > -0.05 and ab.position.y + ab.size.y < 1.0,
 			"aabb y=[%.3f, %.3f]" % [ab.position.y, ab.position.y + ab.size.y])
+		# FIT QUALITY: legs now reach aeriea's leg LENGTH (retargeted up to the hip, not the short
+		# BDCC2 span). Height >= 0.75 m proves they reach the hip; the old un-retargeted span was ~0.65.
+		_assert("re-skinned legs reach aeriea leg length (AABB height >= 0.75 m — no longer short)",
+			ab.size.y >= 0.75, "height=%.3f" % ab.size.y)
+		# NO exploded / pillar verts: a pillar to a far bone or a sentinel would blow the AABB up.
+		# A real pair of legs fits well under 1 m in every axis.
+		_assert("re-skinned legs have NO exploded/pillar verts (AABB each axis < 1.0 m)",
+			ab.size.x < 1.0 and ab.size.y < 1.0 and ab.size.z < 1.0,
+			"size=%s" % str(ab.size.snappedf(0.001)))
 		# MULTI-BONE: the surface's ARRAY_BONES must reference MORE THAN ONE unique aeriea bone.
 		var bones0: PackedInt32Array = (mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_BONES]
 		var uniq := {}
@@ -96,9 +107,13 @@ func _ready() -> void:
 		rig.region_vert_count("legs") > 0, "legs region verts=%d" % rig.region_vert_count("legs"))
 	_assert("applying the digitigrade legs MASKS the base-mesh leg region",
 		rig.is_region_masked("legs"), "masked=%s" % rig.is_region_masked("legs"))
-	_assert("masked leg verts are collapsed off the body (below feet)",
-		_region_max_y(rig, "legs") < -100.0, "max masked y=%.1f" % _region_max_y(rig, "legs"))
-	# The head/torso region of the base mesh is untouched (only the legs collapsed).
+	# Masking DROPS the covered region triangles from the rendered surface (no sentinel collapse /
+	# no boundary spikes): most of the lower-leg region's verts are no longer referenced.
+	var legs_total := rig.region_vert_count("legs")
+	_assert("masked leg region triangles are DROPPED from the rendered surface",
+		rig.region_rendered_vert_count("legs") < legs_total / 2,
+		"rendered %d / %d region verts" % [rig.region_rendered_vert_count("legs"), legs_total])
+	# The head/torso region of the base mesh is untouched (only the lower legs dropped).
 	_assert("base-mesh torso/head verts are UNTOUCHED by the leg mask",
 		_body_max_y(rig) > 1.0, "body max y=%.3f" % _body_max_y(rig))
 
@@ -131,8 +146,13 @@ func _ready() -> void:
 	var thigh_moved_knee := hi0.distance_to(_lbs_world(rig.skeleton, mi.skin, verts, vbones, weights, hi))
 	_assert("knee bend swings the FOOT region (>2cm)", foot_moved_knee > 0.02,
 		"foot moved %.4f m" % foot_moved_knee)
-	_assert("knee bend leaves the THIGH region (<2mm) — independent lower-leg deform",
-		thigh_moved_knee < 0.002, "thigh moved %.4f m" % thigh_moved_knee)
+	# The thigh-region vertex barely moves (the lower-leg deforms independently). Tolerance is 8 mm,
+	# not sub-mm: the position-only retarget gives the thigh-TOP vertex a small lower-leg weight, so
+	# a knee bend nudges it a few mm — still ~10x less than the foot's swing below, the property we
+	# assert (independent lower-leg deformation, not a rigid whole-leg).
+	_assert("knee bend barely moves the THIGH region (<8mm) vs the foot's big swing",
+		thigh_moved_knee < 0.008 and thigh_moved_knee < foot_moved_knee * 0.3,
+		"thigh moved %.4f m (foot moved %.4f m)" % [thigh_moved_knee, foot_moved_knee])
 	rig.skeleton.reset_bone_pose(foot_bone)
 	rig.skeleton.force_update_all_bone_transforms()
 
@@ -183,16 +203,17 @@ func _ready() -> void:
 	# Falling back to human RESTORES the base-mesh leg region (un-masked, verts back in place).
 	_assert("swapping back to human UN-MASKS the base-mesh leg region",
 		not rig.is_region_masked("legs"), "masked=%s" % rig.is_region_masked("legs"))
-	_assert("restored leg verts are back at leg height (region present again)",
-		_region_max_y(rig, "legs") > 0.0, "max leg-region y=%.3f" % _region_max_y(rig, "legs"))
+	_assert("restored leg region triangles are rendered again (all verts referenced)",
+		rig.region_rendered_vert_count("legs") == rig.region_vert_count("legs"),
+		"rendered %d / %d" % [rig.region_rendered_vert_count("legs"), rig.region_vert_count("legs")])
 	# MASK SURVIVES A MORPH RE-BAKE (a slider move keeps the human legs hidden).
 	rig.apply_part("legs", "digitigrade")
 	var bs := BodyState.new()
 	bs.muscle = 80.0
 	rig.apply_body_state(bs)
 	_assert("base-mesh leg mask SURVIVES a morph re-bake (slider move keeps human legs hidden)",
-		rig.is_region_masked("legs") and _region_max_y(rig, "legs") < -100.0,
-		"masked=%s max masked y=%.1f" % [rig.is_region_masked("legs"), _region_max_y(rig, "legs")])
+		rig.is_region_masked("legs") and rig.region_rendered_vert_count("legs") < rig.region_vert_count("legs") / 2,
+		"masked=%s rendered %d/%d" % [rig.is_region_masked("legs"), rig.region_rendered_vert_count("legs"), rig.region_vert_count("legs")])
 	rig.apply_part("legs", "human")
 	rig.apply_body_state(BodyState.new())
 

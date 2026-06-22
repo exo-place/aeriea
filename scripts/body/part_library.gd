@@ -104,22 +104,24 @@ const PARTS := {
 		{"id": "ferri", "name": "Ferri Hair", "glbs": [{"glb": HAIR_DIR + "FerriHair.glb", "attach_bone": "head"}], "sway": true, "source": "bdcc2"},
 		{"id": "cool_bangs", "name": "Cool Bangs (Kidlat)", "glbs": [{"glb": HAIR_DIR + "CoolBangsHair.glb", "attach_bone": "head"}], "sway": true, "source": "bdcc2"},
 	],
-	# SEATING (offset). BDCC2 authored each accessory against ITS OWN skeleton's attach
-	# point, offset from the bone origin. aeriea attaches to the head/spine05 BONE ORIGIN,
-	# so each GLB carries a bone-local `offset` (metres) computed to land its anatomical
-	# center on aeriea's head-sides (ears), head-top (horns), or pelvis back (tails). These
-	# are TUNABLE cosmetic data (BodyRig._attach_one_glb applies them), not magic in code.
+	# SEATING. BDCC2 authored each accessory against ITS OWN skeleton's attach point, offset from
+	# the bone origin. aeriea attaches to the head/spine05 BONE ORIGIN. Ears + horns now have NO
+	# hand-tuned `offset`: BodyRig RE-CENTERS them from the part's geometric center onto a per-slot
+	# anatomical target expressed in the attach bone's REST BASIS (BodyRig.ACCESSORY_SEAT_TARGET +
+	# _accessory_seat_offset) — replacing the former AABB-center approximations that ignored the
+	# bone's basis (and mis-placed the ears off the head). Tails keep their tuned bone-local offset
+	# (they sit at the pelvis base, not driven by the head-rest-basis re-center).
 	SLOT_EARS: [
 		{"id": "none", "name": "None (human ears)", "glbs": [], "sway": false, "source": "aeriea-cc0"},
 		{"id": "feline", "name": "Feline Ears (fluffy)", "sway": true, "source": "bdcc2",
-			"glbs": [{"glb": PARTS_DIR + "ears/FelineEarL.glb", "attach_bone": "head", "offset": Vector3(-0.382, 0.111, -0.032)},
-					 {"glb": PARTS_DIR + "ears/FelineEarR.glb", "attach_bone": "head", "offset": Vector3(-0.361, 0.129, -0.032)}]},
+			"glbs": [{"glb": PARTS_DIR + "ears/FelineEarL.glb", "attach_bone": "head"},
+					 {"glb": PARTS_DIR + "ears/FelineEarR.glb", "attach_bone": "head"}]},
 		{"id": "round", "name": "Round Ears", "sway": true, "source": "bdcc2",
-			"glbs": [{"glb": PARTS_DIR + "ears/RoundEarL.glb", "attach_bone": "head", "offset": Vector3(-0.058, -0.230, -0.055)},
-					 {"glb": PARTS_DIR + "ears/RoundEarR.glb", "attach_bone": "head", "offset": Vector3(0.122, -0.230, -0.055)}]},
+			"glbs": [{"glb": PARTS_DIR + "ears/RoundEarL.glb", "attach_bone": "head"},
+					 {"glb": PARTS_DIR + "ears/RoundEarR.glb", "attach_bone": "head"}]},
 		{"id": "small", "name": "Small Ears", "sway": true, "source": "bdcc2",
-			"glbs": [{"glb": PARTS_DIR + "ears/SmallEarL.glb", "attach_bone": "head", "offset": Vector3(-0.047, -0.236, -0.024)},
-					 {"glb": PARTS_DIR + "ears/SmallEarR.glb", "attach_bone": "head", "offset": Vector3(0.047, -0.236, -0.024)}]},
+			"glbs": [{"glb": PARTS_DIR + "ears/SmallEarL.glb", "attach_bone": "head"},
+					 {"glb": PARTS_DIR + "ears/SmallEarR.glb", "attach_bone": "head"}]},
 	],
 	SLOT_TAIL: [
 		{"id": "none", "name": "None (no tail)", "glbs": [], "sway": false, "source": "aeriea-cc0"},
@@ -137,11 +139,11 @@ const PARTS := {
 	SLOT_HORNS: [
 		{"id": "none", "name": "None (no horns)", "glbs": [], "sway": false, "source": "aeriea-cc0"},
 		{"id": "horn1", "name": "Horns (curved)", "sway": false, "source": "bdcc2",
-			"glbs": [{"glb": PARTS_DIR + "horns/Horn1L.glb", "attach_bone": "head", "offset": Vector3(0.046, 0.078, 0.059)},
-					 {"glb": PARTS_DIR + "horns/Horn1R.glb", "attach_bone": "head", "offset": Vector3(-0.046, 0.078, 0.059)}]},
+			"glbs": [{"glb": PARTS_DIR + "horns/Horn1L.glb", "attach_bone": "head"},
+					 {"glb": PARTS_DIR + "horns/Horn1R.glb", "attach_bone": "head"}]},
 		{"id": "chaos", "name": "Chaos Horns", "sway": false, "source": "bdcc2",
-			"glbs": [{"glb": PARTS_DIR + "horns/HornChaosL.glb", "attach_bone": "head", "offset": Vector3(-0.013, -0.318, 0.057)},
-					 {"glb": PARTS_DIR + "horns/HornChaosR.glb", "attach_bone": "head", "offset": Vector3(0.027, -0.318, 0.057)}]},
+			"glbs": [{"glb": PARTS_DIR + "horns/HornChaosL.glb", "attach_bone": "head"},
+					 {"glb": PARTS_DIR + "horns/HornChaosR.glb", "attach_bone": "head"}]},
 	],
 	# CORE-BODY HEAD swap. The default keeps aeriea's OWN head (no overlay mesh). A BDCC2 id is a
 	# RE-SKINNED ArrayMesh (tools/bdcc2_head_reskin.gd): its verts are rebound onto aeriea's `head`

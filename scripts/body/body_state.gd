@@ -602,11 +602,15 @@ func apply_to(mesh_instance: MeshInstance3D) -> void:
 ## only if the stored base is neutral — apply_morph_cpu keeps that invariant by always
 ## baking from a preserved neutral copy held on the MeshInstance via metadata).
 func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array,
-		weights_override: Dictionary = {}) -> void:
+		weights_override: Dictionary = {}, base_index: PackedInt32Array = PackedInt32Array()) -> void:
 	if mesh == null or mesh.get_surface_count() == 0:
 		return
 	var arrays := mesh.surface_get_arrays(0)
-	var tris: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	# Use the NEUTRAL full index buffer when supplied (region masking may have dropped triangles
+	# from the live one; restoring the full list here, before the rig re-applies active masks, keeps
+	# the bake from perpetuating a partial index). Falls back to the live index for static callers.
+	var tris: PackedInt32Array = base_index if not base_index.is_empty() else arrays[Mesh.ARRAY_INDEX]
+	arrays[Mesh.ARRAY_INDEX] = tris
 	var n := base_pos.size()
 	# Reconstruct the morphed positions on the CPU from the NEUTRAL base + vertex deltas.
 	# Callers may supply an explicit { blendshape_name: weight } map (the demo's raw
@@ -686,7 +690,17 @@ func apply_morph_cpu(mesh_instance: MeshInstance3D, weights_override: Dictionary
 	else:
 		base_pos = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 		mesh_instance.set_meta("neutral_base_pos", base_pos)
-	bake_morphed_normals(mesh, base_pos, weights_override)
+	# Capture the neutral FULL index buffer once too. Region masking DROPS triangles from the live
+	# ARRAY_INDEX; without restoring the full index here, each bake would perpetuate the dropped
+	# triangles (a swap back to human could never re-show the masked region). The rig re-applies any
+	# still-active masks AFTER this bake, so restoring the full index is correct.
+	var base_index: PackedInt32Array
+	if mesh_instance.has_meta("neutral_base_index"):
+		base_index = mesh_instance.get_meta("neutral_base_index")
+	else:
+		base_index = mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+		mesh_instance.set_meta("neutral_base_index", base_index)
+	bake_morphed_normals(mesh, base_pos, weights_override, base_index)
 	# Zero every GPU blend weight: the morph is fully baked on the CPU now.
 	for i in mesh.get_blend_shape_count():
 		mesh_instance.set("blend_shapes/%s" % mesh.get_blend_shape_name(i), 0.0)

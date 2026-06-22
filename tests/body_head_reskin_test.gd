@@ -44,11 +44,31 @@ func _ready() -> void:
 		"type=%s" % (mesh.get_class() if mesh else "null"))
 	if mesh is ArrayMesh:
 		var ab: AABB = (mesh as ArrayMesh).get_aabb()
-		# The bake seats BDCC2's DEF-Head origin on aeriea's head bone (~y=1.51); the skull
-		# spans ~0.22m above that, so the head AABB sits in [1.4, 1.8] — NOT at the floor.
+		# The FIT scales + seats the head to FILL aeriea's head REGION (center ~y1.549), not just
+		# perch its origin on the head bone — so the AABB sits in [1.4, 1.7], NOT at the floor.
 		_assert("re-skinned head seated at aeriea head height (AABB y in [1.3,1.9])",
 			ab.position.y > 1.3 and ab.position.y + ab.size.y < 1.9,
 			"aabb y=[%.3f, %.3f]" % [ab.position.y, ab.position.y + ab.size.y])
+		# FIT QUALITY: the head's CENTER lands near aeriea's head-region center (0, 1.549, 0.064)
+		# and its size FILLS the region (~0.2 m each axis) — proving it no longer reads tiny/low.
+		var ctr := ab.get_center()
+		_assert("re-skinned head CENTER matches aeriea head-region center (within 5 cm)",
+			ctr.distance_to(Vector3(0.0, 1.549, 0.064)) < 0.05,
+			"center=%s" % str(ctr.snappedf(0.001)))
+		_assert("re-skinned head FILLS the head region (each axis 0.12–0.32 m — not tiny)",
+			ab.size.x > 0.12 and ab.size.x < 0.32 and ab.size.y > 0.12 and ab.size.y < 0.32,
+			"size=%s" % str(ab.size.snappedf(0.001)))
+		# Snout faces +Z (forward, toward aeriea's facing): more head mass at +z than -z.
+		var zf := 0; var zb := 0
+		for v in ((mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+			if v.z > ctr.z + 0.02: zf += 1
+			elif v.z < ctr.z - 0.02: zb += 1
+		_assert("re-skinned head faces FORWARD (+Z snout — more mass front than back)", zf > zb,
+			"verts z>ctr:%d z<ctr:%d" % [zf, zb])
+		# NO degenerate/exploded verts: the whole head fits in a sane box (no spike to a sentinel).
+		_assert("re-skinned head has NO exploded verts (AABB max extent < 0.5 m)",
+			ab.size.x < 0.5 and ab.size.y < 0.5 and ab.size.z < 0.5,
+			"size=%s" % str(ab.size.snappedf(0.001)))
 		_assert("re-skinned head carries skin weights (ARRAY_BONES/WEIGHTS present)",
 			(mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_BONES] is PackedInt32Array,
 			"bones=%s" % typeof((mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_BONES]))
@@ -100,9 +120,12 @@ func _ready() -> void:
 		rig.region_vert_count("head") > 0, "head region verts=%d" % rig.region_vert_count("head"))
 	_assert("applying the canine head MASKS the base-mesh skull region",
 		rig.is_region_masked("head"), "masked=%s" % rig.is_region_masked("head"))
-	# The masked verts are collapsed to the sentinel point (far below the feet) in the baked mesh.
-	_assert("masked head verts are collapsed off the body (below feet)",
-		_max_masked_y(rig, "head") < -100.0, "max masked y=%.1f" % _max_masked_y(rig, "head"))
+	# Masking DROPS the covered region triangles from the rendered surface (no sentinel collapse):
+	# most of the head region's verts are no longer referenced by the index buffer.
+	var head_total := rig.region_vert_count("head")
+	_assert("masked head region triangles are DROPPED from the rendered surface",
+		rig.region_rendered_vert_count("head") < head_total / 2,
+		"rendered %d / %d region verts" % [rig.region_rendered_vert_count("head"), head_total])
 	# Non-head verts (e.g. a foot vert) stay put — only the head region is collapsed.
 	_assert("non-head base verts are UNTOUCHED by the head mask",
 		_body_min_y(rig) > -1.0, "body min y=%.3f" % _body_min_y(rig))
@@ -162,8 +185,9 @@ func _ready() -> void:
 	# Falling back to human RESTORES the base-mesh skull region (un-masked, verts back in place).
 	_assert("swapping back to human UN-MASKS the base-mesh skull region",
 		not rig.is_region_masked("head"), "masked=%s" % rig.is_region_masked("head"))
-	_assert("restored head verts are back at head height (skull region present again)",
-		_max_masked_y(rig, "head") > 1.0, "max head-region y=%.3f" % _max_masked_y(rig, "head"))
+	_assert("restored head region triangles are rendered again (all verts referenced)",
+		rig.region_rendered_vert_count("head") == rig.region_vert_count("head"),
+		"rendered %d / %d" % [rig.region_rendered_vert_count("head"), rig.region_vert_count("head")])
 
 	# --- 6b. MASK SURVIVES A MORPH RE-BAKE ----------------------------------------
 	# A morph re-bake rewrites ARRAY_VERTEX from neutral; the mask must be re-asserted, so a
@@ -173,8 +197,8 @@ func _ready() -> void:
 	bs.muscle = 80.0
 	rig.apply_body_state(bs)
 	_assert("base-mesh head mask SURVIVES a morph re-bake (slider move keeps skull hidden)",
-		rig.is_region_masked("head") and _max_masked_y(rig, "head") < -100.0,
-		"masked=%s max masked y=%.1f" % [rig.is_region_masked("head"), _max_masked_y(rig, "head")])
+		rig.is_region_masked("head") and rig.region_rendered_vert_count("head") < rig.region_vert_count("head") / 2,
+		"masked=%s rendered %d/%d" % [rig.is_region_masked("head"), rig.region_rendered_vert_count("head"), rig.region_vert_count("head")])
 	rig.apply_part("head", "human")
 	rig.apply_body_state(BodyState.new())
 

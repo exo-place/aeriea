@@ -6,32 +6,39 @@
 ## skeleton so it DEFORMS limb-by-limb when aeriea animates — bend the knee and the shin
 ## follows, not a rigid attach.
 ##
-## WHY THIS IS THE HARD CASE (and how it resolves cleanly here):
+## WHY THIS IS THE HARD CASE (and how it resolves):
 ##   - BDCC2's body GLB skins to its OWN ~77-bone deform rig using CLEAN anim names
 ##     (hips, thigh.L, shin.L, foot.L, toe.L, ...). NOT Rigify DEF-* — that assumption
 ##     was for the accessory part GLBs (tails/ears). scripts/body/bdcc2_bone_map.gd maps
 ##     those exact anim names onto aeriea's MH bones, so EVERY gross leg bone maps 1:1
 ##     (thigh->upperleg01, shin->lowerleg01, foot->foot, toe->toe1-1).
-##   - The two skeletons sit at NEARLY IDENTICAL rest positions (both ~1.75m A-pose
-##     humanoids: hips ~y0.9, knee ~y0.5, foot ~y0.06). Verified by inspection. So the
-##     proportion divergence at the leg is sub-centimetre and NO retarget warp is needed —
-##     a vertex rebound to aeriea's upperleg01 lands on aeriea's thigh.
+##   - The skeletons do NOT share rest positions (the earlier "nearly identical" claim was
+##     WRONG, diagnosed via tools/bdcc2_fit_diagnose.gd): the BDCC2 leg MESH spans y[0,0.646]
+##     while aeriea's leg spans y[0.072,0.865] (starts ~0.22m HIGHER, ~0.15m LONGER), and the
+##     per-joint ratio differs (~15%). Keeping the raw vertex world position and binding to a
+##     higher/longer aeriea bone is what produced the THIN PILLARS + DETACHED lower-leg pieces:
+##     the verts sat below their bind bones, so any pose tore them vertically.
 ##   - Helper bones the mesh also weights (knee.L/R IK helpers, char_root) have NO aeriea
 ##     counterpart; we COLLAPSE each to its nearest MAPPED ancestor (knee->thigh's mapped
-##     bone via the BDCC2 parent chain; char_root->root). Faithful: those helpers sit at
-##     the same place as their gross parent in bind.
+##     bone via the BDCC2 parent chain; char_root->root).
 ##
-## THE TRANSFER (bind-relative, multi-bone). Both skeletons use the standard LBS bind
-## (Skin bind = bone_global_rest^-1), and at REST every bone's (pose * bind) == identity.
-## So a vertex's bind WORLD position is just its mesh-space position p (the GLB puts the
-## mesh under the skeleton at identity; at bind LBS(p) == p). aeriea's BodyRig builds its
-## body Skin the same way (bind = global_rest^-1). Therefore the rebound vertex keeps its
-## WORLD position p as its stored position, and we only need to REMAP each influence's bone
-## index to the aeriea bone index + RENORMALIZE the weights. Under aeriea's LBS at rest the
-## vertex reproduces p; under a pose each influence rides its mapped aeriea bone with its
-## original weight — a genuine multi-bone deformation. (We store an explicit Skin per
-## referenced aeriea bone at apply time; here we bake stable aeriea bone INDICES into
-## ARRAY_BONES against aeriea's known bone order, read from the rig JSON.)
+## THE TRANSFER (POSITION-ONLY per-influence RETARGET + multi-bone rebind). At BDCC2's bind,
+## LBS(p) == p (verified). aeriea's BodyRig builds its body Skin with bind = global_rest^-1,
+## also LBS(p) == p at rest. To seat each leg SEGMENT on its aeriea bone (matching aeriea's
+## longer/higher proportions joint-by-joint) we shift each vertex by the WEIGHTED delta between
+## its BDCC2 bind-bone ORIGIN and the mapped aeriea bone ORIGIN:
+##     p_aeriea = p + Σ wᵢ · (aeriea_rest_origin[i] - bdcc_rest_origin[i])
+## POSITION-ONLY (origins, not full transforms) on purpose: the BDCC2 leg bones carry large
+## non-identity bases (Blender bones point +Y up the bone; thigh ~180° roll, foot ~-73° pitch)
+## while aeriea's rest bases are identity, so a full aeriea_rest·bdcc_rest⁻¹ would ROTATE
+## geometry that is already correctly world-oriented — scrambling it. The origin-only delta is a
+## smooth per-vertex translation: it carries each joint to aeriea's joint position with NO basis
+## rotation and NO shear (the knee blend is a gentle interpolation of two translation deltas, not
+## a rotation blend). Then we REMAP each influence's bone index to the aeriea index + RENORMALIZE
+## weights. Under aeriea's LBS the vertex rides its mapped bones; at rest it reproduces the
+## RETARGETED position (legs now reach aeriea's hip + length, no pillars). DESIGN-FORK (flagged):
+## this WARPS the mesh to aeriea's rest proportions (aeriea owns the skeleton — the default);
+## alternatives are accept-BDCC2-proportions or warp-aeriea's-rig.
 ##
 ## DETERMINISM: fixed source order, fixed mesh/surface order, fixed float path, stable
 ## aeriea bone indices from the committed rig JSON -> byte-identical .res.
@@ -70,18 +77,22 @@ func _run() -> int:
 	print("bdcc2_body_reskin: src = %s" % src)
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT_DIR))
 
-	# aeriea bone NAME -> stable INDEX (the order BodyRig adds bones; same as the JSON order).
+	# aeriea bone NAME -> stable INDEX (the order BodyRig adds bones; same as the JSON order)
+	# and NAME -> global rest ORIGIN (the retarget target position per joint).
 	var rig := _load_json(RIG_PATH)
 	if rig.is_empty():
 		push_error("cannot load aeriea rig json"); return 1
 	var aeriea_index := {}
+	var aeriea_origin := {}
 	var bones: Array = rig["bones"]
 	for i in bones.size():
 		aeriea_index[String(bones[i]["name"])] = i
+		var h: Array = bones[i]["head"]
+		aeriea_origin[String(bones[i]["name"])] = Vector3(h[0], h[1], h[2])
 
 	var ok := 0
 	for part in PARTS:
-		if _reskin_one(src, part, aeriea_index):
+		if _reskin_one(src, part, aeriea_index, aeriea_origin):
 			ok += 1
 	print("bdcc2_body_reskin: %d/%d parts re-skinned" % [ok, PARTS.size()])
 	return 0 if ok == PARTS.size() else 1
@@ -102,7 +113,7 @@ func _map_bdcc2_bone(bdcc_name: String, bdcc_skel: Skeleton3D) -> String:
 	return ""
 
 
-func _reskin_one(src: String, part: Dictionary, aeriea_index: Dictionary) -> bool:
+func _reskin_one(src: String, part: Dictionary, aeriea_index: Dictionary, aeriea_origin: Dictionary) -> bool:
 	var id: String = part["id"]
 	var glb_path := src.path_join(part["glb"])
 	if not FileAccess.file_exists(glb_path):
@@ -126,21 +137,28 @@ func _reskin_one(src: String, part: Dictionary, aeriea_index: Dictionary) -> boo
 	if mi == null or mi.mesh == null:
 		print("  SKIP %s (mesh '%s' not found)" % [id, part["mesh"]]); return false
 
-	# Precompute per-BDCC2-bone -> aeriea bone INDEX (once per part).
+	# Precompute, per BDCC2 bone: (a) the aeriea bone INDEX it maps to, and (b) the RETARGET
+	# DELTA = aeriea_rest_origin - bdcc_rest_origin, both in the YAWED frame the verts live in
+	# (verts get yaw·mesh_xf·v in _transfer_surface; the BDCC2 bone origin must match that frame,
+	# so we yaw the bone's bind global origin too). A vertex is then shifted by the weighted sum of
+	# its influences' deltas — seating each leg segment on its aeriea joint at aeriea proportions.
+	var yaw := Basis(Vector3.UP, PI)
 	var bdcc_to_aeriea_idx := {}
+	var bdcc_retarget_delta := {}
 	for bi in skel.get_bone_count():
 		var bdcc_name := skel.get_bone_name(bi)
 		var mh := _map_bdcc2_bone(bdcc_name, skel)
-		if mh != "" and aeriea_index.has(mh):
-			bdcc_to_aeriea_idx[bi] = int(aeriea_index[mh])
-		else:
-			bdcc_to_aeriea_idx[bi] = int(aeriea_index.get("root", 0))
+		var aname := mh if (mh != "" and aeriea_index.has(mh)) else "root"
+		bdcc_to_aeriea_idx[bi] = int(aeriea_index.get(aname, 0))
+		var bdcc_origin: Vector3 = yaw * skel.get_bone_global_pose(bi).origin
+		var aeriea_o: Vector3 = aeriea_origin.get(aname, Vector3.ZERO)
+		bdcc_retarget_delta[bi] = aeriea_o - bdcc_origin
 
 	var out_mesh := ArrayMesh.new()
 	var total := 0
 	var aeriea_bones_used := {}
 	for s in mi.mesh.get_surface_count():
-		total += _transfer_surface(mi, s, bdcc_to_aeriea_idx, out_mesh, aeriea_bones_used)
+		total += _transfer_surface(mi, s, bdcc_to_aeriea_idx, bdcc_retarget_delta, out_mesh, aeriea_bones_used)
 
 	if out_mesh.get_surface_count() == 0:
 		print("  SKIP %s (no surfaces transferred)" % id); return false
@@ -161,7 +179,7 @@ func _reskin_one(src: String, part: Dictionary, aeriea_index: Dictionary) -> boo
 ## standard-LBS bind makes the bind world position == the mesh-space vertex; aeriea's body Skin
 ## uses the same bind, so the rebound vertex reseats correctly and rides its mapped bones).
 func _transfer_surface(mi: MeshInstance3D, s: int, bdcc_to_aeriea_idx: Dictionary,
-		out_mesh: ArrayMesh, aeriea_bones_used: Dictionary) -> int:
+		bdcc_retarget_delta: Dictionary, out_mesh: ArrayMesh, aeriea_bones_used: Dictionary) -> int:
 	var arr := mi.mesh.surface_get_arrays(s)
 	var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
 	var norms: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
@@ -188,7 +206,21 @@ func _transfer_surface(mi: MeshInstance3D, s: int, bdcc_to_aeriea_idx: Dictionar
 	for vi in nv:
 		var p: Vector3 = yaw * (mesh_xf * verts[vi])
 		var n: Vector3 = (yaw * (mesh_xf.basis * norms[vi])).normalized() if vi < norms.size() else Vector3.UP
-		out_verts[vi] = p
+		# RETARGET: shift the vertex by the WEIGHTED sum of its influences' (aeriea - bdcc) bone-
+		# origin deltas, seating each leg segment on its aeriea joint at aeriea proportions. Computed
+		# from the ORIGINAL BDCC2 influences/weights (before the aeriea collapse below), normalized
+		# by the total influence weight so the shift is a true weighted average of the joint deltas.
+		var shift := Vector3.ZERO
+		var wsum := 0.0
+		for k in ipv:
+			var ww: float = src_weights[vi * ipv + k]
+			if ww <= 0.0:
+				continue
+			shift += ww * (bdcc_retarget_delta.get(src_bones[vi * ipv + k], Vector3.ZERO) as Vector3)
+			wsum += ww
+		if wsum > 0.0:
+			shift /= wsum
+		out_verts[vi] = p + shift
 		out_norms[vi] = n
 		# Accumulate weight onto each MAPPED aeriea bone (several BDCC2 bones may collapse to
 		# the same aeriea bone, e.g. knee+thigh -> upperleg01 — sum their weights).

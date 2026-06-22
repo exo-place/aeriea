@@ -29,6 +29,12 @@ func _ready() -> void:
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-35, -40, 0)
 	add_child(light)
+	# A front fill light so head-FRONT shots (camera in front at +z) are lit, not in shadow — the
+	# key DirectionalLight comes from above-left/behind and left the front of the face dark.
+	var fill := DirectionalLight3D.new()
+	fill.rotation_degrees = Vector3(-10, 180, 0)
+	fill.light_energy = 0.7
+	add_child(fill)
 
 	_rig = BodyRig.new()
 	# add_child triggers BodyRig._ready -> build() ONCE. Do NOT call build() again: a second
@@ -50,9 +56,14 @@ func _ready() -> void:
 	_shots = [
 		{"name": "head_human", "head": "human",  "legs": "human", "hair": "cap", "hide_hair": true, "frame": "head"},
 		{"name": "head_canine", "head": "canine", "legs": "human", "hair": "cap", "hide_hair": true, "frame": "head"},
+		{"name": "head_canine_front", "head": "canine", "legs": "human", "hair": "cap", "hide_hair": true, "frame": "head_front"},
 		{"name": "legs_human", "head": "human",  "legs": "human", "hair": "cap", "hide_hair": true, "frame": "legs"},
-		{"name": "legs_digi", "head": "human",  "legs": "digitigrade", "hair": "cap", "hide_hair": true, "frame": "legs"},
+		{"name": "legs_digi", "head": "human",  "legs": "digitigrade", "hair": "cap", "hide_hair": true, "frame": "legs", "static": true},
+		{"name": "legs_digi_side", "head": "human",  "legs": "digitigrade", "hair": "cap", "hide_hair": true, "frame": "legs_side", "static": true},
+		{"name": "legs_planti", "head": "human",  "legs": "plantigrade", "hair": "cap", "hide_hair": true, "frame": "legs", "static": true},
 		{"name": "hair", "head": "human",  "legs": "human", "hair": "long", "hide_hair": false, "frame": "head"},
+		{"name": "ears_feline", "head": "human", "legs": "human", "hair": "cap", "hide_hair": false, "frame": "head_front", "ears": "feline", "static": true},
+		{"name": "horns_curved", "head": "human", "legs": "human", "hair": "cap", "hide_hair": false, "frame": "head_front", "horns": "horn1", "static": true},
 	]
 
 
@@ -63,9 +74,17 @@ var _settle := 0
 
 func _frame_camera(which: String) -> void:
 	if which == "legs":
-		_cam.position = Vector3(0.6, 0.5, 2.0)
+		_cam.position = Vector3(0.0, 0.5, 2.2)
 		_cam.look_at(Vector3(0, 0.45, 0), Vector3.UP)
 		_cam.fov = 45.0
+	elif which == "legs_side":
+		_cam.position = Vector3(2.0, 0.5, 0.2)
+		_cam.look_at(Vector3(0, 0.45, 0), Vector3.UP)
+		_cam.fov = 45.0
+	elif which == "head_front":
+		_cam.position = Vector3(0.0, 1.55, 0.9)
+		_cam.look_at(Vector3(0, 1.55, 0), Vector3.UP)
+		_cam.fov = 38.0
 	else:
 		_cam.position = Vector3(0.35, 1.62, 0.9)
 		_cam.look_at(Vector3(0, 1.55, 0), Vector3.UP)
@@ -76,9 +95,14 @@ func _apply_shot(s: Dictionary) -> void:
 	_rig.apply_part("head", s["head"])
 	_rig.apply_part("legs", s["legs"])
 	_rig.apply_part("hair", s["hair"])
+	_rig.apply_part("ears", s.get("ears", "none"))
+	_rig.apply_part("horns", s.get("horns", "none"))
 	_frame_camera(s["frame"])
-	for i in 12:
-		_rig.apply_pose(1.0 / 60.0)
+	# STATIC shots skip locomotion so the re-skin FIT is judged at rest (no idle leg swing
+	# splitting the two legs out of phase). Animated shots still run the procedural cycle.
+	if not s.get("static", false):
+		for i in 12:
+			_rig.apply_pose(1.0 / 60.0)
 	# Hide the CC0 hair cap LAST (after pose/any re-bake) so the head-mask comparison shows
 	# the head, not the cap. Done here at the end of shot setup so nothing re-shows it.
 	if s.get("hide_hair", false):

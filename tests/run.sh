@@ -60,6 +60,7 @@ SUITES=(
   body_locomotion_test
   body_motion_matching_test
   body_clip_layer_test
+  body_arm_ik_test
   body_micro_life_test
   body_head_reskin_test
   interpreter_slice1_test

@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://body_arm_ik_test_v1"]
+
+[ext_resource type="Script" path="res://tests/body_arm_ik_test.gd" id="1_bodyarmik"]
+
+[node name="BodyArmIKTest" type="Node3D"]
+script = ExtResource("1_bodyarmik")

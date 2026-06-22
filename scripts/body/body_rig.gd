@@ -102,6 +102,15 @@ const SHOULDER_L := "upperarm01.L"
 const SHOULDER_R := "upperarm01.R"
 const ROOT_BONE := "root"
 
+# Arm chain bone names (MakeHuman default rig). Analytic two-bone arm-IK uses
+# shoulder(upperarm)/elbow(lowerarm)/wrist — mirroring the leg's hip/knee/ankle.
+const UPPERARM_L := "upperarm01.L"
+const UPPERARM_R := "upperarm01.R"
+const LOWERARM_L := "lowerarm01.L"
+const LOWERARM_R := "lowerarm01.R"
+const WRIST_L := "wrist.L"
+const WRIST_R := "wrist.R"
+
 const SpringBone := preload("res://scripts/body/spring_bone.gd")
 const MicroLifeParams := preload("res://scripts/body/micro_life_params.gd")
 const PartLibrary := preload("res://scripts/body/part_library.gd")
@@ -247,6 +256,21 @@ const IDLE_FIDGET_CLIPS := ["idle_long", "idle_long_idle", "idle_sexy", "sigh", 
 ## The space state used for foot-IK raycasts; the host supplies its world.
 var _space: PhysicsDirectSpaceState3D
 var _ik_exclude: Array = []
+
+## --- arm IK/FK layer ----------------------------------------------------------
+## Per-arm reach state, keyed "L"/"R". When a side has an entry the analytic two-
+## bone arm-IK overrides that arm's shoulder→elbow→wrist toward a WORLD target,
+## blended by `weight` (0 = pure FK/anim base, 1 = full IK). Empty side => weight 0,
+## the arm follows the locomotion/clip/MM base pose unchanged. Fields per entry:
+##   target  : Vector3   world-space goal for the wrist
+##   pole    : Vector3   world-space elbow hint (the elbow is pushed toward this);
+##                       Vector3.INF => auto (a default down/out hint per side)
+##   weight  : float     0..1 IK/FK blend
+## Pure render-side: a function of (target, pole, current pose) — off the sim path,
+## same contract as foot-IK / clip / micro-life (excluded from the sim hash).
+var _arm_reach := {}
+## Master enable for the arm-IK layer (render-side cosmetic toggle, like clip/foot IK).
+@export var arm_ik_enabled: bool = true
 
 
 func _ready() -> void:
@@ -931,6 +955,7 @@ func apply_pose(delta: float) -> void:
 		# Slice-4 refinement (decision doc §3.2); until then MM ground contact comes
 		# from the captured clips themselves, so IK is skipped under MM.
 		_apply_clip_layer(delta)
+		_apply_arm_ik()
 		apply_micro_life(delta)
 		return
 
@@ -984,6 +1009,7 @@ func apply_pose(delta: float) -> void:
 		_apply_foot_ik()
 
 	_apply_clip_layer(delta)
+	_apply_arm_ik()
 	apply_micro_life(delta)
 
 
@@ -1300,6 +1326,195 @@ func _slot_spring_counts() -> Dictionary:
 	for slot in PartLibrary.slots():
 		out[slot] = _slot_spring_count(slot)
 	return out
+
+
+# --- analytic two-bone ARM-IK (reach / plant / brace) -----------------------
+# Mirrors the foot-IK pattern for the arms: an analytic two-bone solver bends the
+# shoulder→elbow→wrist chain so the wrist reaches a WORLD target, with a pole hint
+# keeping the elbow from inverting. Unlike the leg solver (a sagittal-plane ground
+# approximation), the arm solver is a FULL 3D reach: it orients the upper arm to aim
+# the chain plane at both the target and the pole, then law-of-cosines for the elbow.
+# It layers AFTER the locomotion/clip/MM base, overriding the arm chain toward the
+# target only by the per-arm blend weight, then micro-life (jiggle/secondary) rides
+# on top. RENDER-SIDE + DETERMINISTIC: a pure function of (target, pole, base pose).
+
+## Drive an arm to REACH a WORLD-space position. `side` is "L"/"R". `pole_hint` is a
+## world-space elbow hint (the elbow is pushed toward it); Vector3.INF picks a sane
+## default (down + out from the shoulder, so the elbow bends like a human arm).
+## `weight` is the IK/FK blend (0 = base anim, 1 = full IK). Call once or each frame;
+## the reach persists until clear_reach(side). Interactions/affordances drive this.
+func reach_for(side: String, world_pos: Vector3, pole_hint: Vector3 = Vector3.INF, weight: float = 1.0) -> void:
+	side = side.to_upper()
+	if side != "L" and side != "R":
+		return
+	_arm_reach[side] = {
+		"target": world_pos,
+		"pole": pole_hint,
+		"weight": clampf(weight, 0.0, 1.0),
+	}
+
+
+## Drop an arm's reach (weight -> 0; the arm follows the base anim again). `side`
+## "L"/"R", or "" / "ALL" to clear both arms.
+func clear_reach(side: String = "ALL") -> void:
+	side = side.to_upper()
+	if side == "" or side == "ALL":
+		_arm_reach.clear()
+		return
+	_arm_reach.erase(side)
+
+
+## Whether `side` ("L"/"R") currently has an active reach with weight > 0.
+func is_reaching(side: String) -> bool:
+	side = side.to_upper()
+	return _arm_reach.has(side) and float(_arm_reach[side].get("weight", 0.0)) > 0.0
+
+
+## Apply arm-IK for both arms, layering over the base pose by each arm's weight.
+## Called from apply_pose() AFTER the clip/locomotion/MM base and BEFORE micro-life,
+## so the spring/jiggle/secondary layers settle on top of the reached pose.
+func _apply_arm_ik() -> void:
+	if not arm_ik_enabled or _arm_reach.is_empty():
+		return
+	if _arm_reach.has("L"):
+		var e: Dictionary = _arm_reach["L"]
+		_solve_arm_ik(UPPERARM_L, LOWERARM_L, WRIST_L, e["target"], e["pole"], e["weight"], true)
+	if _arm_reach.has("R"):
+		var er: Dictionary = _arm_reach["R"]
+		_solve_arm_ik(UPPERARM_R, LOWERARM_R, WRIST_R, er["target"], er["pole"], er["weight"], false)
+
+
+## Analytic two-bone arm IK. Bends upperarm→lowerarm→wrist so the wrist reaches
+## `target_world`, with the elbow biased toward `pole_world` (Vector3.INF => a default
+## down/out hint). `weight` blends FROM the current (base) pose TO the IK pose. Pure,
+## closed-form (law of cosines for the elbow bend), no iteration. `left` flips the
+## default pole side. Operates on global orientations, written back as bone-local
+## pose rotations so it composes with the skeleton/scale unchanged.
+func _solve_arm_ik(upper: String, lower: String, wrist: String, target_world: Vector3,
+		pole_world: Vector3, weight: float, left: bool) -> void:
+	if weight <= 0.0:
+		return
+	if not (_bone_index.has(upper) and _bone_index.has(lower) and _bone_index.has(wrist)):
+		return
+	var ui: int = _bone_index[upper]
+	var li: int = _bone_index[lower]
+	var wi: int = _bone_index[wrist]
+
+	# Current global joint positions (post the base pose already on the skeleton).
+	var skel_xf := skeleton.global_transform
+	var shoulder_pos := (skel_xf * skeleton.get_bone_global_pose(ui)).origin
+	var elbow_pos := (skel_xf * skeleton.get_bone_global_pose(li)).origin
+	var wrist_pos := (skel_xf * skeleton.get_bone_global_pose(wi)).origin
+
+	var l_upper := shoulder_pos.distance_to(elbow_pos)
+	var l_lower := elbow_pos.distance_to(wrist_pos)
+	if l_upper < 1e-4 or l_lower < 1e-4:
+		return
+
+	# Reach vector, CLAMPED to the chain's reachable range (just under full extension
+	# so the elbow never has to fully straighten/invert, and above a small floor).
+	var to_target := target_world - shoulder_pos
+	var reach := to_target.length()
+	var max_reach := (l_upper + l_lower) - 1e-3
+	var min_reach := absf(l_upper - l_lower) + 1e-3
+	reach = clampf(reach, min_reach, max_reach)
+	if to_target.length() < 1e-5:
+		return
+	var dir := to_target.normalized()   # shoulder -> (clamped) target direction
+
+	# Pole / elbow hint. Default: down and slightly away from the body so the elbow
+	# bends like a human arm (outward for the matching side), never inverting inward.
+	var pole := pole_world
+	if pole == Vector3.INF:
+		var out_sign := -1.0 if left else 1.0
+		pole = shoulder_pos + (skel_xf.basis * Vector3(out_sign, -0.5, -0.2)).normalized() * (l_upper + l_lower)
+
+	# Build the chain's bend plane basis. x = reach dir; the bend axis is perpendicular
+	# to the reach dir in the plane spanned by (dir, shoulder->pole). The elbow lifts
+	# off the reach line toward the pole side.
+	var to_pole := pole - shoulder_pos
+	var bend_axis := dir.cross(to_pole)
+	if bend_axis.length() < 1e-5:
+		# Degenerate (pole colinear with reach): fall back to a stable world axis.
+		bend_axis = dir.cross(Vector3.UP)
+		if bend_axis.length() < 1e-5:
+			bend_axis = dir.cross(Vector3.RIGHT)
+	bend_axis = bend_axis.normalized()
+	# In-plane "up" toward the pole side, perpendicular to the reach dir.
+	var pole_dir := bend_axis.cross(dir).normalized()
+
+	# Law of cosines: angle at the shoulder between the reach dir and the upper arm.
+	var cos_sh := clampf((l_upper * l_upper + reach * reach - l_lower * l_lower) / (2.0 * l_upper * reach), -1.0, 1.0)
+	var sh_angle := acos(cos_sh)
+
+	# Desired global joint positions: elbow lifted off the reach line by sh_angle
+	# toward the pole side; wrist at the (clamped) reach point.
+	var upper_dir := (dir * cos(sh_angle) + pole_dir * sin(sh_angle)).normalized()
+	var new_elbow := shoulder_pos + upper_dir * l_upper
+	var target_clamped := shoulder_pos + dir * reach
+	var lower_dir := (target_clamped - new_elbow).normalized()
+
+	# Convert desired global bone DIRECTIONS into bone-local pose rotations. The MH arm
+	# bones do NOT point along a single fixed local axis (the upperarm's local child
+	# direction is ~(0.62,-0.78,-0.04), the lowerarm's ~(0.52,-0.46,0.72)), so we aim
+	# each bone's OWN local "bone axis" — the rest-frame direction from the joint to its
+	# child joint — at the desired world direction. This is rig-agnostic (works for the
+	# arms' skewed axes exactly as it would for the legs' near-vertical ones). Shortest-
+	# arc keeps the base twist; the weight blend makes weight=0 a no-op, weight=1 a full
+	# reach. Solve the upper arm first so the lower-arm aim reads the updated elbow frame.
+	_aim_bone_axis(ui, _bone_axis_local(ui), upper_dir, skel_xf, weight)
+	_aim_bone_axis(li, _bone_axis_local(li), lower_dir, skel_xf, weight)
+
+
+## The bone's local "bone axis": the unit direction, in the bone's LOCAL pose frame,
+## from this joint to its first child joint (the rest-frame child position direction).
+## This is the axis the IK aims, so the solver is correct for any rig regardless of
+## which local axis a given bone happens to point down. Falls back to +Y if childless.
+func _bone_axis_local(idx: int) -> Vector3:
+	for c in skeleton.get_bone_count():
+		if skeleton.get_bone_parent(c) == idx:
+			var d := skeleton.get_bone_rest(c).origin
+			if d.length() > 1e-5:
+				return d.normalized()
+	return Vector3.UP
+
+
+## Rotate bone `idx` so its LOCAL `axis` points along `world_dir`, via the shortest arc
+## from its CURRENT orientation, then slerp from the current (base) pose by `weight`.
+## Setting an absolute aim while preserving the base twist (shortest-arc); the weight
+## blend makes weight=0 a no-op (pure base pose) and weight=1 a full reach.
+func _aim_bone_axis(idx: int, axis: Vector3, world_dir: Vector3, skel_xf: Transform3D, weight: float) -> void:
+	var parent := skeleton.get_bone_parent(idx)
+	var parent_global_basis := skel_xf.basis
+	if parent >= 0:
+		parent_global_basis = (skel_xf * skeleton.get_bone_global_pose(parent)).basis
+	# The bone's current GLOBAL basis and where its LOCAL bone-axis currently points.
+	var cur_local := skeleton.get_bone_pose_rotation(idx)
+	var cur_global_basis := parent_global_basis * Basis(cur_local)
+	var cur_dir := (cur_global_basis * axis).normalized()
+	var tgt_dir := world_dir.normalized()
+	# Shortest-arc rotation taking cur_dir -> tgt_dir, applied in world, premultiplied.
+	var delta := _shortest_arc(cur_dir, tgt_dir)
+	var new_global_basis := Basis(delta) * cur_global_basis
+	# Back to bone-local: local = parent_global^-1 * new_global.
+	var new_local := (parent_global_basis.inverse() * new_global_basis).get_rotation_quaternion().normalized()
+	# Blend FROM the base local pose TO the IK local pose by weight.
+	skeleton.set_bone_pose_rotation(idx, cur_local.slerp(new_local, weight).normalized())
+
+
+## Shortest-arc quaternion rotating unit vector `a` onto unit vector `b`.
+func _shortest_arc(a: Vector3, b: Vector3) -> Quaternion:
+	var d := clampf(a.dot(b), -1.0, 1.0)
+	if d > 0.9999:
+		return Quaternion.IDENTITY
+	if d < -0.9999:
+		# Antiparallel: rotate 180° about any axis perpendicular to a.
+		var axis := a.cross(Vector3.RIGHT)
+		if axis.length() < 1e-5:
+			axis = a.cross(Vector3.UP)
+		return Quaternion(axis.normalized(), PI)
+	var axis2 := a.cross(b).normalized()
+	return Quaternion(axis2, acos(d))
 
 
 # --- analytic two-bone foot-IK ----------------------------------------------

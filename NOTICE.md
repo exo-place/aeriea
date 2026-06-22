@@ -135,6 +135,35 @@ See `assets/body/parts/bdcc2/NOTICE.md` for the per-asset list + the seating-off
 
 aeriea claims **no ownership** of these meshes; they remain © 2025 Rahi under MIT.
 
+## BDCC2 — animation CLIPS, retargeted onto the MakeHuman rig / ART (MIT)
+
+aeriea's mined animation library `assets/body/bdcc2_clips.res` (a `ClipDB`) holds the
+**actual animation clip data** mined from **BDCC2** by **alexofp / Rahi** (MIT,
+**Copyright (c) 2025 Rahi**; full license text above) and **retargeted** (not rebuilt)
+onto aeriea's CC0 MakeHuman 169-bone rig. Used as-is per BDCC2's README invitation to
+"use as a base for your own game." This is BDCC2 **art/data** (like the hair/part meshes
+above) — the owner accepts BDCC2's MIT art-license under attribution; a courtesy
+confirmation with Rahi about the clip reuse is an outstanding nicety, not a blocker.
+aeriea claims **no ownership** of these clips; they remain © 2025 Rahi under MIT.
+
+- Upstream: BDCC2 `Anims/Raw/{LocomotionAnims,GestureAnims,BasicAnims}.glb` (the per-bone
+  rotation TRACKS only). aeriea does **NOT** adopt BDCC2's animation ARCHITECTURE — its
+  `LayeredAnimPlayer` addon, AnimationTree graph, `GlobalRegistry`, `DollAnim*` defs, or
+  the Path-B layering. Only the clip DATA is mined; aeriea drives it with its OWN clip
+  layer (`BodyRig._apply_clip_layer` + `AnimationPlayer`-free pose stamp).
+- Retarget: BDCC2's anim rig uses clean Blender names (`hips`, `thigh.L`, `upper_arm.L`,
+  `forearm.L`, ...) — **not** Rigify `DEF-*` (those appear only in BDCC2's PART GLBs).
+  The map `scripts/body/bdcc2_bone_map.gd` (DATA) carries BDCC2→MakeHuman names; the
+  retarget (`tools/bdcc2_clip_ingest.gd`) transfers each bone's GLOBAL orientation
+  relative to its bind, de-yaws the root (facing is aeriea's sim-owned), and re-expresses
+  it MH-bone-local — so the two rigs' differing local axis frames cancel.
+- Mined SFW clips (15): idle variants `idle` / `idle_long` / `idle_long_idle` /
+  `idle_sexy`; gestures `wave` / `head_nod` / `head_shake` / `talking` / `talking_one` /
+  `shrug` / `sigh` / `look_away` / `happy_hands` / `thinking`; fidget `sit`. Idle variants
+  auto-play as standing fidgets; gestures are one-shot emotes (`emote` input → `wave`).
+  BDCC2's NSFW sex-scene / restraint clips are deliberately **not** mined into this
+  walk-around set — they belong to a separate intimacy context (available, not wired).
+
 ## MakeHuman — base mesh, rig, proxies, targets (CC0-1.0)
 
 aeriea's body/head mesh, skeleton, proxies, and morph targets derive from

@@ -72,6 +72,25 @@ const SKIN_ROUGHNESS := 0.7
 ## procedural cycle is the graceful-degradation floor (decision doc §3.2).
 const MOTION_DB_PATH := "res://assets/body/locomotion_mm.res"
 
+## Mined BDCC2 animation clips (alexofp/Rahi, MIT — see NOTICE.md), retargeted onto
+## this same MH rig (tools/bdcc2_clip_ingest.gd -> scripts/body/clip_db.gd). These
+## AUGMENT locomotion: idle variants/fidgets bound to the standing state, plus
+## gestures (wave/nod/talk/...) playable as one-shot emotes. Locomotion stays the
+## MM/procedural layer; the clip layer overlays the upper body on top via aeriea's
+## OWN pose stamp (NOT BDCC2's anim architecture). RENDER-SIDE + deterministic.
+const CLIP_DB_PATH := "res://assets/body/bdcc2_clips.res"
+const ClipDB := preload("res://scripts/body/clip_db.gd")
+
+## Upper-body bones the clip layer overlays (gestures/idles drive these). The legs/
+## root stay owned by the locomotion layer so a gesture never disturbs the gait or
+## body heading; an idle-fidget while STANDING also overlays only these (the still
+## stance's legs come from the MM idle frame underneath).
+const CLIP_UPPER_BONES := [
+	"spine04", "spine02", "spine01", "neck01", "head",
+	"clavicle.L", "upperarm01.L", "lowerarm01.L", "wrist.L",
+	"clavicle.R", "upperarm01.R", "lowerarm01.R", "wrist.R",
+]
+
 # Leg chain bone names (MakeHuman default rig). Two-bone IK uses hip/knee/ankle.
 const HIP_L := "upperleg01.L"
 const HIP_R := "upperleg01.R"
@@ -196,6 +215,35 @@ var motion_db: MotionDB
 var matcher: MotionMatcher
 var use_motion_matching: bool = true
 
+## --- BDCC2 clip layer ---------------------------------------------------------
+## Loaded in build() iff CLIP_DB_PATH loads. The upper-body overlay (idles/gestures).
+var clip_db: ClipDB
+## Master enable for the clip overlay (render-side cosmetic toggle).
+var clip_layer_enabled: bool = true
+## The currently-playing clip index (-1 = none), its clip-local time, and whether it
+## loops. Gestures play once (loop=false) then clear; idle fidgets loop.
+var _clip_idx: int = -1
+var _clip_time: float = 0.0
+var _clip_loop: bool = false
+## Overlay weight 0..1, eased in/out so a gesture blends onto the body rather than
+## snapping. A one-shot gesture eases back to 0 as it ends.
+var _clip_weight: float = 0.0
+## Idle-fidget scheduler: how long the body has been standing still (sim-time accum),
+## and the next scheduled fidget time. Deterministic (pure delta accumulator + the
+## cosmetic rng), so the same standing duration -> the same fidget — never wall-clock.
+var _stand_time: float = 0.0
+var _next_fidget_at: float = 0.0
+## Idle-variant clip ids picked for fidgets while standing (subset of the mined idles).
+const IDLE_FIDGET_CLIPS := ["idle_long", "idle_long_idle", "idle_sexy", "sigh", "look_away", "thinking"]
+## Seconds of continuous standing before the first idle fidget, and the spacing range.
+@export var fidget_first_delay: float = 4.0
+@export var fidget_min_gap: float = 6.0
+@export var fidget_max_gap: float = 14.0
+## Speed (m/s) under which the body counts as "standing" for fidget scheduling.
+@export var clip_stand_speed: float = 0.3
+## How fast the overlay weight eases in/out (per second).
+@export var clip_blend_speed: float = 4.0
+
 ## The space state used for foot-IK raycasts; the host supplies its world.
 var _space: PhysicsDirectSpaceState3D
 var _ik_exclude: Array = []
@@ -294,6 +342,14 @@ func build() -> bool:
 			motion_db = db
 			matcher = MotionMatcher.new()
 			matcher.setup(motion_db)
+
+	# BDCC2 clip layer — load the committed retargeted clip DB if present. Absent =>
+	# the body still locomotes (MM/procedural); only the idle-fidget / gesture overlay
+	# is skipped. RENDER-SIDE only.
+	if ResourceLoader.exists(CLIP_DB_PATH):
+		var cdb = load(CLIP_DB_PATH)
+		if cdb is ClipDB and cdb.frame_count > 0:
+			clip_db = cdb
 
 	# Bake the initial BodyState morph (default = neutral) with correct normals. This
 	# establishes the neutral-base capture on the MeshInstance metadata so later
@@ -805,6 +861,7 @@ func apply_pose(delta: float) -> void:
 		# ground-adaptation layer that respects the MM pose is the documented
 		# Slice-4 refinement (decision doc §3.2); until then MM ground contact comes
 		# from the captured clips themselves, so IK is skipped under MM.
+		_apply_clip_layer(delta)
 		apply_micro_life(delta)
 		return
 
@@ -857,7 +914,112 @@ func apply_pose(delta: float) -> void:
 	if grounded and foot_ik_enabled and _space != null:
 		_apply_foot_ik()
 
+	_apply_clip_layer(delta)
 	apply_micro_life(delta)
+
+
+# --- BDCC2 clip layer (mined idles + gestures, retargeted) -------------------
+# Overlays a retargeted BDCC2 clip's upper-body pose on top of the locomotion pose.
+# Locomotion (MM / procedural) owns legs + root + heading; the clip layer owns the
+# upper body (spine/arms/neck/head) so a gesture rides the gait and an idle-fidget
+# embellishes the still stand. RENDER-SIDE + DETERMINISTIC: clip time advances by
+# the render delta; the fidget scheduler is a pure delta accumulator + the cosmetic
+# rng (same standing duration -> same fidget), never wall-clock / Math.random; it
+# never touches the seeded sim (same contract as the MM / micro-life layers).
+
+## Play a mined BDCC2 clip by aeriea id (see ClipDB.clip_ids / bdcc2_clip_ingest
+## SOURCES: "wave", "head_nod", "talking", "sigh", "thinking", "idle_long", ...).
+## loop=false plays once then eases out; loop=true holds until stop_clip()/replaced.
+## Returns true if the clip exists. RENDER-SIDE cosmetic — safe to call any frame.
+func play_clip(id: String, loop: bool = false) -> bool:
+	if clip_db == null:
+		return false
+	var ci := clip_db.clip_index(id)
+	if ci < 0:
+		return false
+	_clip_idx = ci
+	_clip_time = 0.0
+	_clip_loop = loop
+	return true
+
+
+## Stop any active clip (eases the overlay back out).
+func stop_clip() -> void:
+	_clip_idx = -1
+	_clip_loop = false
+
+
+## Whether a clip overlay is currently active (playing or easing).
+func is_clip_playing() -> bool:
+	return _clip_idx >= 0 or _clip_weight > 0.001
+
+
+## The aeriea id of the active clip, or "" if none.
+func active_clip_id() -> String:
+	if clip_db == null or _clip_idx < 0:
+		return ""
+	return clip_db.clip_ids[_clip_idx]
+
+
+func _apply_clip_layer(delta: float) -> void:
+	if clip_db == null or not clip_layer_enabled:
+		return
+	# --- idle-fidget scheduler: while standing, periodically auto-play an idle variant.
+	# Bound to the controller's STATE via _smoothed_speed (a pure read of MovementState).
+	var standing := grounded and _smoothed_speed < clip_stand_speed
+	if standing:
+		var was := _stand_time
+		_stand_time += delta
+		# Schedule the first fidget once we've stood long enough; reschedule after each.
+		if was == 0.0 or _next_fidget_at <= 0.0:
+			_next_fidget_at = fidget_first_delay
+		if _clip_idx < 0 and _stand_time >= _next_fidget_at:
+			var pick: String = IDLE_FIDGET_CLIPS[_cosmetic_rng.randi() % IDLE_FIDGET_CLIPS.size()]
+			play_clip(pick, false)
+			var gap := fidget_min_gap + _cosmetic_rng.randf() * (fidget_max_gap - fidget_min_gap)
+			_next_fidget_at = _stand_time + gap
+	else:
+		# Moving: clear the standing accumulator. A one-shot fidget already playing eases
+		# out on its own; we don't yank it mid-gesture (it blends out below as it ends).
+		_stand_time = 0.0
+		_next_fidget_at = 0.0
+
+	# --- advance the active clip + ease the overlay weight --------------------
+	var target_w := 0.0
+	if _clip_idx >= 0:
+		_clip_time += delta
+		var fps: float = clip_db.clip_fps[_clip_idx]
+		var clen: int = clip_db.clip_len[_clip_idx]
+		var dur := float(clen) / maxf(fps, 1.0)
+		if not _clip_loop and _clip_time >= dur:
+			# One-shot finished: stop driving (weight eases to 0, then clears).
+			_clip_idx = -1
+		else:
+			target_w = 1.0
+	_clip_weight = move_toward(_clip_weight, target_w, clip_blend_speed * delta)
+	if _clip_weight <= 0.001 and _clip_idx < 0:
+		_clip_weight = 0.0
+		return
+	if _clip_idx < 0:
+		return   # easing out with no frame source — hold last (nearly-zero) weight
+
+	# --- stamp the clip's upper-body pose, blended by weight ------------------
+	var gf := clip_db.frame_at_time(_clip_idx, _clip_time)
+	if gf < 0:
+		return
+	for bname in CLIP_UPPER_BONES:
+		if not _bone_index.has(bname):
+			continue
+		var dbi := clip_db.bone_names.find(bname)
+		if dbi < 0:
+			continue
+		var rest: Transform3D = _rest_local.get(bname, Transform3D.IDENTITY)
+		var rest_q := rest.basis.get_rotation_quaternion()
+		var clip_q := (rest_q * clip_db.pose_quat(gf, dbi)).normalized()
+		var idx: int = _bone_index[bname]
+		# Blend FROM the locomotion pose already on the bone TO the clip pose by weight.
+		var cur := skeleton.get_bone_pose_rotation(idx)
+		skeleton.set_bone_pose_rotation(idx, cur.slerp(clip_q, _clip_weight).normalized())
 
 
 # --- Slice 4: Motion-Matching pose ------------------------------------------

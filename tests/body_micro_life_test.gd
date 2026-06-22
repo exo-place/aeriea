@@ -387,6 +387,9 @@ func _shake_deflection(gain: float) -> float:
 func _breath_excursion(amp: float) -> float:
 	var rig := BodyRig.new(); add_child(rig); rig.build()
 	rig.use_motion_matching = false; rig.foot_ik_enabled = false
+	# Isolate the breath channel: disable the BDCC2 idle-fidget clip layer too (it
+	# also overlays the upperarm while standing and would swamp the breath measurement).
+	rig.clip_layer_enabled = false
 	rig._setup_micro_life(0)
 	rig.micro.jiggle_enabled = false
 	rig.micro.sway_enabled = false
@@ -410,6 +413,7 @@ func _breath_excursion(amp: float) -> float:
 func _saccade_after(seed: int, frames: int) -> Vector2:
 	var rig := BodyRig.new(); add_child(rig); rig.build()
 	rig.use_motion_matching = false; rig.foot_ik_enabled = false
+	rig.clip_layer_enabled = false
 	rig._setup_micro_life(seed)
 	rig.set_movement_state(true, 0.0)
 	for i in frames:

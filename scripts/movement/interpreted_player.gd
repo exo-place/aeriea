@@ -314,6 +314,11 @@ func _physics_process(delta: float) -> void:
 			body_rig.setup_ik(get_world_3d().direct_space_state, [self])
 		var hv := Vector3(velocity.x, 0.0, velocity.z)
 		body_rig.set_movement_state(is_on_floor(), hv.length())
+		# Emote: play a mined BDCC2 gesture (wave) as a one-shot overlay. RENDER-SIDE
+		# cosmetic — the clip layer overlays the upper body over locomotion and never
+		# touches the sim. Idle fidgets auto-play from BodyRig's own scheduler.
+		if Input.is_action_just_pressed("emote") and not get_tree().paused:
+			body_rig.play_clip("wave", false)
 		body_rig.apply_pose(delta)
 
 func _input(event: InputEvent) -> void:

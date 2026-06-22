@@ -59,6 +59,10 @@ const _STATE_NAME_TO_ENUM := {
 @export var camera_height_stand: float = 0.85
 @export var camera_height_crouch: float = 0.55
 @export var fov_base: float = 90.0
+## Forward (player -Z) distance from the head centre to the eye plane; seats the FP
+## camera at the eyes so the player's own skull never fills the view. ~0.12 m matches
+## the CC0 rig's eye-bone z offset (rotated onto the player's -Z forward).
+@export var eye_forward_offset: float = 0.12
 
 # --- Collider / slope --------------------------------------------------------
 @export_group("Body")
@@ -183,12 +187,17 @@ func _ready() -> void:
 	# y=0; the capsule origin is at body-centre with feet ~stand_height below, so
 	# drop the rig by stand_height to plant its feet at the capsule's feet
 	# (units-and-scale.md body-origin-at-feet seam: noted; here we offset the render
-	# body, the sim capsule is unchanged). The body faces -Z (Godot forward), the
-	# same forward the camera/yaw uses, so it turns with the player automatically.
+	# body, the sim capsule is unchanged).
+	#
+	# CANONICAL FORWARD: the player/world forward is -Z (movement uses -basis.z at
+	# :407, look applies rotation.y=_yaw at :342). The MakeHuman rig's anatomical
+	# face points +Z (eye/toe bones at +z), so rotate the rig 180° about Y so its
+	# +Z face aligns with the player's -Z forward and it turns with the player.
 	if show_body:
 		body_rig = BodyRig.new()
 		body_rig.name = "BodyRig"
 		body_rig.position = Vector3(0.0, -stand_height, 0.0)
+		body_rig.rotation.y = PI
 		add_child(body_rig)
 
 	if kit_path.ends_with(".manifest.json"):
@@ -255,6 +264,12 @@ func _apply_body_eye_height() -> void:
 	camera_height_crouch = (eye_above_feet * (crouch_height / stand_height)) - crouch_height
 	if _camera_pivot:
 		_camera_pivot.position.y = camera_height_stand
+		# CANONICAL FORWARD: player forward is -Z. The body's eyes sit ~0.12 m in
+		# front of the head centre (rig eye bones at +z, rotated 180° so the face is
+		# on the player's -Z). Seat the camera AT the eye plane by nudging the pivot
+		# forward along -Z, so the near plane sits at the eyes looking FORWARD rather
+		# than buried inside the skull. (The docstring's promised nudge, now applied.)
+		_camera_pivot.position.z = -eye_forward_offset
 	if _camera:
 		# Tight near plane so the player's own face never renders into the view when
 		# looking down at the body.

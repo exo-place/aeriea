@@ -60,8 +60,13 @@ const EYE_PARAMS_DEFAULT := {
 }
 ## Pieces hidden by default. The face must look complete, so eyes/teeth/tongue/
 ## eyebrows/eyelashes are ON; genitals are an attachable piece whose default
-## visibility follows the NSFW flag.
-const PROXY_DEFAULT_HIDDEN := {"genitals": true}
+## visibility follows the NSFW flag. Hair is hidden by default: the only proxy "hair"
+## surface is the CC0 helper-hair guide mesh (a long mid-back/chest drape, NOT a scalp
+## cap — see docs/artifacts/diagnosis/hair-parts.md), which renders as black slabs over
+## the face. So the default body shows the FACE; a real BDCC2 hairstyle (a separate GLB
+## attachment) is opt-in. (Not the hair-system redesign — just stop defaulting to the
+## broken cap.)
+const PROXY_DEFAULT_HIDDEN := {"genitals": true, "hair": true}
 ## The single SKIN tone, shared by the body mesh AND the genital proxy so the genitals
 ## follow skin tone/masculinity (not a fixed paler colour) — fixing the pale-genital seam.
 const SKIN_ALBEDO := Color(0.86, 0.68, 0.58)
@@ -832,7 +837,12 @@ func _proxy_piece_visible(sname: String) -> bool:
 	if sname == "genitals":
 		return show_genitals
 	if sname == "hair":
-		# The CC0 cap shows ONLY when the cap style is active; a BDCC2 hairstyle replaces it.
+		# The proxy "hair" surface IS the CC0 helper-hair cap (BDCC2 styles attach as
+		# separate GLBs). It is hidden by default (PROXY_DEFAULT_HIDDEN) because the cap
+		# is a broken mid-back/chest drape that covers the face; selecting a BDCC2 style
+		# also keeps it hidden. So the proxy cap never auto-shows — the face stays visible.
+		if PROXY_DEFAULT_HIDDEN.get("hair", false):
+			return false
 		return not PartLibrary.is_bdcc2(PartLibrary.SLOT_HAIR, current_part(PartLibrary.SLOT_HAIR))
 	return true
 

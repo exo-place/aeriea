@@ -32,8 +32,10 @@ var _body_state: BodyState = BodyState.new()
 
 var _camera: Camera3D
 var _pivot: Vector3 = Vector3(0.0, 0.95, 0.0)   ## orbit target (torso height)
-var _yaw: float = PI           ## radians; PI = camera in front of the body (the
-                               ## MakeHuman base faces -Z, so the camera sits on -Z)
+var _yaw: float = 0.0          ## radians; CANONICAL FORWARD: the un-rotated rig's
+                               ## anatomical face points +Z. yaw=0 puts the camera on
+                               ## +Z (in front of the face), so the creator opens on the
+                               ## FACE, not the back. (Verified by render.)
 var _pitch: float = deg_to_rad(-8.0)             ## slightly above
 var _distance: float = 3.2     ## metres
 
@@ -273,8 +275,9 @@ func _build_camera() -> void:
 
 
 func _update_camera() -> void:
-	# Spherical orbit around the pivot. yaw=0,pitch=0 places the camera on +Z
-	# (in front of the body, which faces +Z), looking back toward -Z at the body.
+	# Spherical orbit around the pivot. yaw=0,pitch=0 places the camera on +Z, which
+	# is in FRONT of the un-rotated rig (its anatomical face points +Z), looking back
+	# toward -Z at the body. (Creator rig is NOT 180°-rotated; the parkour player is.)
 	var dir := Vector3(
 		sin(_yaw) * cos(_pitch),
 		sin(_pitch),

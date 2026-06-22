@@ -137,21 +137,21 @@ func _ready() -> void:
 		rig.grounded == g_before and is_equal_approx(rig.horizontal_speed, s_before),
 		"grounded %s->%s speed %.3f->%.3f" % [g_before, rig.grounded, s_before, rig.horizontal_speed])
 
-	# --- 8. BDCC2 SWAPPABLE HAIR ---------------------------------------------
-	# The first real "swappable part": a BDCC2-mined rigged hair GLB attaches under the
-	# head bone, registers spring bones on ITS OWN skeleton, deflects under body motion via
-	# aeriea's spring physics, and swaps cleanly with the CC0 cap. (Assets: alexofp/Rahi,
-	# BDCC2, MIT — see NOTICE.md.)
+	# --- 8. BDCC2 SWAPPABLE HAIR (under the generalized PartLibrary) ----------
+	# Hair still works as the SLOT_HAIR slot of the generalized swap system: a BDCC2-mined
+	# rigged hair GLB attaches under the head bone, registers spring bones on ITS OWN
+	# skeleton, deflects under body motion via aeriea's spring physics, and swaps cleanly
+	# with the CC0 cap. (Assets: alexofp/Rahi, BDCC2, MIT — see NOTICE.md.)
 	var rig3 := BodyRig.new(); add_child(rig3); rig3.build()
 	rig3.use_motion_matching = false; rig3.foot_ik_enabled = false
 	rig3._setup_micro_life(0)
-	# default style is the CC0 cap (hair on the body skeleton's hair01/02/03 chain).
-	_assert("default hairstyle is the CC0 cap", rig3.current_hairstyle == "cap",
-		"hairstyle=%s" % rig3.current_hairstyle)
-	# apply a BDCC2 ponytail: a separate hair skeleton attaches under the head bone.
+	# default hair part is the CC0 cap (hair on the body skeleton's hair01/02/03 chain).
+	_assert("default hair part is the CC0 cap", rig3.current_part("hair") == "cap",
+		"hair=%s" % rig3.current_part("hair"))
+	# apply a BDCC2 ponytail via the legacy shim (apply_hairstyle -> apply_part(hair,…)).
 	var ok_pt := rig3.apply_hairstyle("ponytail1")
-	_assert("BDCC2 ponytail1 applies", ok_pt, "ok=%s" % ok_pt)
-	var hskel := rig3._hair_skeleton()
+	_assert("BDCC2 ponytail1 applies (via apply_hairstyle shim)", ok_pt, "ok=%s" % ok_pt)
+	var hskel := _first_part_skel(rig3, "hair")
 	_assert("BDCC2 hair attaches its OWN skeleton under the head bone", hskel != null,
 		"hair_skel=%s" % (hskel != null))
 	if hskel != null:
@@ -166,45 +166,157 @@ func _ready() -> void:
 		rig3.micro_life_state()["hair_springs"] >= 1,
 		"hair_springs=%d" % rig3.micro_life_state()["hair_springs"])
 	# the BDCC2 hair bones must DEFLECT under body shake (aeriea's springs drive them).
-	var bdcc2_dev := _bdcc2_hair_deflection(rig3, hskel)
+	var bdcc2_dev := _part_deflection(rig3, hskel)
 	_assert("BDCC2 hair SWAYS via aeriea's spring physics (>1mrad)", bdcc2_dev > 1e-3,
 		"max deflection=%.5f rad" % bdcc2_dev)
 	# swap to a DIFFERENT BDCC2 style: a new skeleton/mesh replaces the old one.
-	rig3.apply_hairstyle("short")
-	var hskel2 := rig3._hair_skeleton()
+	rig3.apply_part("hair", "short")
+	var hskel2 := _first_part_skel(rig3, "hair")
 	_assert("swap to a different BDCC2 style replaces the hair skeleton",
 		hskel2 != null and hskel2 != hskel, "new_skel=%s changed=%s" % [hskel2 != null, hskel2 != hskel])
-	_assert("ShortHair registers its own (different) spring count",
+	_assert("ShortHair registers its own spring count",
 		rig3.micro_life_state()["hair_springs"] >= 1,
 		"hair_springs=%d" % rig3.micro_life_state()["hair_springs"])
 	# swap back to the CC0 cap: BDCC2 hair torn down, cap chain re-registered on the body.
-	rig3.apply_hairstyle("cap")
+	rig3.apply_part("hair", "cap")
 	_assert("swap back to CC0 cap tears down the BDCC2 hair skeleton",
-		rig3._hair_skeleton() == null, "hair_skel=%s" % (rig3._hair_skeleton() != null))
+		_first_part_skel(rig3, "hair") == null, "hair_skel=%s" % (_first_part_skel(rig3, "hair") != null))
 	_assert("CC0 cap re-registers the hair01/02/03 chain on the body skeleton",
 		rig3.micro_life_state()["hair_springs"] >= 1,
 		"hair_springs=%d" % rig3.micro_life_state()["hair_springs"])
-	# unknown id falls back to the cap (never a bald head). Apply a BDCC2 style first so
-	# the fallback has to actually CHANGE state (tear down BDCC2 hair, restore the cap).
-	rig3.apply_hairstyle("long")
-	rig3.apply_hairstyle("nonexistent_style")
-	_assert("unknown hairstyle id falls back to the CC0 cap",
-		rig3.current_hairstyle == "cap" and rig3._hair_skeleton() == null,
-		"hairstyle=%s hair_skel=%s" % [rig3.current_hairstyle, rig3._hair_skeleton() != null])
+	# unknown id falls back to the cap (never a bald head).
+	rig3.apply_part("hair", "long")
+	rig3.apply_part("hair", "nonexistent_style")
+	_assert("unknown hair id falls back to the CC0 cap",
+		rig3.current_part("hair") == "cap" and _first_part_skel(rig3, "hair") == null,
+		"hair=%s hair_skel=%s" % [rig3.current_part("hair"), _first_part_skel(rig3, "hair") != null])
+
+	# --- 9. BDCC2 SWAPPABLE EARS (head slot, swaying) ------------------------
+	# A BDCC2 ear SET is TWO GLBs (L + R), each with its own skeleton, attached under the
+	# head bone; the ear physics bones sway via aeriea's springs. >=2 ear styles swap.
+	var rig4 := BodyRig.new(); add_child(rig4); rig4.build()
+	rig4.use_motion_matching = false; rig4.foot_ik_enabled = false
+	rig4._setup_micro_life(0)
+	_assert("default ears part is 'none'", rig4.current_part("ears") == "none",
+		"ears=%s" % rig4.current_part("ears"))
+	var ok_ears := rig4.apply_part("ears", "feline")
+	_assert("BDCC2 feline ears apply", ok_ears, "ok=%s" % ok_ears)
+	var ear_skels := rig4._part_skeletons("ears")
+	_assert("feline ears attach TWO skeletons (L + R) under the head",
+		ear_skels.size() == 2, "ear_skels=%d" % ear_skels.size())
+	_assert("ears register spring bones (>=2)", rig4.micro_life_state()["slot_springs"]["ears"] >= 2,
+		"ear_springs=%d" % rig4.micro_life_state()["slot_springs"]["ears"])
+	var ear_dev := _part_deflection(rig4, ear_skels[0] if ear_skels.size() > 0 else null)
+	_assert("BDCC2 ears SWAY via aeriea's spring physics (>1mrad)", ear_dev > 1e-3,
+		"max deflection=%.5f rad" % ear_dev)
+	# swap to a SECOND ear style.
+	rig4.apply_part("ears", "round")
+	_assert("swap to round ears replaces the ear skeletons",
+		rig4._part_skeletons("ears").size() == 2 and rig4.current_part("ears") == "round",
+		"round ear_skels=%d" % rig4._part_skeletons("ears").size())
+	# swap to none: ears torn down, no ear springs.
+	rig4.apply_part("ears", "none")
+	_assert("swap ears to none tears down ear skeletons",
+		rig4._part_skeletons("ears").is_empty() and rig4.micro_life_state()["slot_springs"]["ears"] == 0,
+		"ear_skels=%d ear_springs=%d" % [rig4._part_skeletons("ears").size(), rig4.micro_life_state()["slot_springs"]["ears"]])
+
+	# --- 10. BDCC2 SWAPPABLE TAIL (spine05 slot, swaying chain) --------------
+	# A BDCC2 tail is ONE GLB with a DEF-Tail1..N chain, attached under spine05 (pelvis
+	# base); the chain sways via aeriea's springs. >=2 tail styles swap.
+	var rig5 := BodyRig.new(); add_child(rig5); rig5.build()
+	rig5.use_motion_matching = false; rig5.foot_ik_enabled = false
+	rig5._setup_micro_life(0)
+	var ok_tail := rig5.apply_part("tail", "fluffy")
+	_assert("BDCC2 fluffy tail applies", ok_tail, "ok=%s" % ok_tail)
+	var tail_skels := rig5._part_skeletons("tail")
+	_assert("tail attaches its skeleton under spine05", tail_skels.size() == 1,
+		"tail_skels=%d" % tail_skels.size())
+	if tail_skels.size() == 1:
+		_assert("tail skeleton has a multi-bone chain (DEF-Tail1..N)", tail_skels[0].get_bone_count() >= 4,
+			"tail bones=%d" % tail_skels[0].get_bone_count())
+	_assert("tail registers a spring chain (>=4)", rig5.micro_life_state()["slot_springs"]["tail"] >= 4,
+		"tail_springs=%d" % rig5.micro_life_state()["slot_springs"]["tail"])
+	var tail_dev := _part_deflection(rig5, tail_skels[0] if tail_skels.size() > 0 else null)
+	_assert("BDCC2 tail SWAYS via aeriea's spring physics (>1mrad)", tail_dev > 1e-3,
+		"max deflection=%.5f rad" % tail_dev)
+	rig5.apply_part("tail", "dragon")
+	_assert("swap to dragon tail replaces the tail skeleton",
+		rig5._part_skeletons("tail").size() == 1 and rig5.current_part("tail") == "dragon",
+		"dragon tail_skels=%d" % rig5._part_skeletons("tail").size())
+	rig5.apply_part("tail", "none")
+	_assert("swap tail to none tears down the tail skeleton + springs",
+		rig5._part_skeletons("tail").is_empty() and rig5.micro_life_state()["slot_springs"]["tail"] == 0,
+		"tail_skels=%d" % rig5._part_skeletons("tail").size())
+
+	# --- 11. BDCC2 RIGID HORNS (head slot, NO sway) --------------------------
+	# Horns are RIGID in BDCC2 (a bare MeshInstance3D, no skeleton) — they attach to the
+	# head and ride it, but register NO spring physics (correct: horn is bone). Two styles.
+	var rig6 := BodyRig.new(); add_child(rig6); rig6.build()
+	rig6.use_motion_matching = false; rig6.foot_ik_enabled = false
+	rig6._setup_micro_life(0)
+	var ok_horn := rig6.apply_part("horns", "horn1")
+	_assert("BDCC2 horns apply", ok_horn, "ok=%s" % ok_horn)
+	_assert("horns attach a mesh (L + R) under the head", _slot_mesh_count(rig6, "horns") >= 2,
+		"horn meshes=%d" % _slot_mesh_count(rig6, "horns"))
+	_assert("horns register NO spring physics (rigid)", rig6.micro_life_state()["slot_springs"]["horns"] == 0,
+		"horn_springs=%d" % rig6.micro_life_state()["slot_springs"]["horns"])
+	rig6.apply_part("horns", "chaos")
+	_assert("swap to chaos horns works", rig6.current_part("horns") == "chaos" and _slot_mesh_count(rig6, "horns") >= 2,
+		"chaos horn meshes=%d" % _slot_mesh_count(rig6, "horns"))
+	rig6.apply_part("horns", "none")
+	_assert("swap horns to none tears them down", _slot_mesh_count(rig6, "horns") == 0,
+		"horn meshes=%d" % _slot_mesh_count(rig6, "horns"))
+
+	# --- 12. SLOTS ARE INDEPENDENT (multi-slot stacking) ---------------------
+	# Applying ears + tail + a BDCC2 hairstyle TOGETHER: all coexist, each registers its
+	# own springs, and the registries are additive (the whole point of named slots).
+	var rig7 := BodyRig.new(); add_child(rig7); rig7.build()
+	rig7.use_motion_matching = false; rig7.foot_ik_enabled = false
+	rig7._setup_micro_life(0)
+	rig7.apply_part("hair", "long")
+	rig7.apply_part("ears", "feline")
+	rig7.apply_part("tail", "fluffy")
+	rig7.apply_part("horns", "horn1")
+	var ss: Dictionary = rig7.micro_life_state()["slot_springs"]
+	_assert("all four slots filled coexist (hair+ears+tail springs all >0, horns=0)",
+		ss["hair"] >= 1 and ss["ears"] >= 2 and ss["tail"] >= 4 and ss["horns"] == 0,
+		"slot_springs=%s" % str(ss))
+	rig7.apply_part("hair", "short")
+	var ss2: Dictionary = rig7.micro_life_state()["slot_springs"]
+	_assert("changing one slot (hair) does not disturb ears/tail springs",
+		ss2["ears"] >= 2 and ss2["tail"] >= 4, "after hair swap slot_springs=%s" % str(ss2))
 
 	_finish()
 
 
-## Settle the rig still with its current (BDCC2) hairstyle, then shake the body and
-## return the max deflection (rad) of the first physics bone on the attached hair
-## skeleton — i.e. confirm aeriea's spring physics actually sways the BDCC2 geometry.
-func _bdcc2_hair_deflection(rig: BodyRig, hskel: Skeleton3D) -> float:
+## The first attached part skeleton for `slot`, or null. Wraps _part_skeletons().
+func _first_part_skel(rig: BodyRig, slot: String) -> Skeleton3D:
+	var s := rig._part_skeletons(slot)
+	return s[0] if s.size() > 0 else null
+
+
+## Count MeshInstance3D nodes attached for `slot` (recursively under its attachments) —
+## used for RIGID parts (horns) that have no skeleton, just meshes.
+func _slot_mesh_count(rig: BodyRig, slot: String) -> int:
+	var n := 0
+	for att in rig._part_attachments.get(slot, []):
+		if is_instance_valid(att):
+			for m in att.find_children("*", "MeshInstance3D", true, false):
+				if (m as MeshInstance3D).mesh != null:
+					n += 1
+	return n
+
+
+## Settle the rig still with its current part(s), then shake the body and return the max
+## deflection (rad) of the first physics bone on the given attached part skeleton — i.e.
+## confirm aeriea's spring physics actually sways the BDCC2 geometry (hair / ears / tail).
+func _part_deflection(rig: BodyRig, hskel: Skeleton3D) -> float:
 	if hskel == null:
 		return 0.0
 	var bi := -1
 	for i in hskel.get_bone_count():
 		var n := hskel.get_bone_name(i).to_lower()
-		if n != "root" and n != "neutral_bone":
+		if n != "root" and not n.begins_with("def-root") and n != "neutral_bone":
 			bi = i; break
 	if bi < 0:
 		return 0.0

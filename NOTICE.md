@@ -109,6 +109,32 @@ hair-mesh authors, they should be added here.
 
 aeriea claims **no ownership** of these meshes; they remain © 2025 Rahi under MIT.
 
+## BDCC2 — rigged accessory part meshes / ART (MIT)
+
+aeriea's swappable accessory parts (ears, tails, horns) under `assets/body/parts/bdcc2/`
+are the **actual rigged meshes** mined from **BDCC2** by **alexofp / Rahi** (MIT,
+**Copyright (c) 2025 Rahi**; full license text above). Used as-is per BDCC2's README
+invitation to "use as a base for your own game." This is BDCC2 **art** (like the hairstyles
+above) — the owner accepts BDCC2's MIT art-license under attribution; a courtesy
+confirmation with Rahi about the art reuse is an outstanding nicety, not a blocker.
+
+- Upstream: BDCC2 `Mesh/Parts/{Ear,Tail,Horn}/*/<Name>.glb` (GLB geometry + per-GLB
+  skeleton only; BDCC2's wigglebone addon, `doll_attach_to.gd`, and shaders are NOT mined
+  — aeriea drives the swaying parts with its OWN spring-bone physics,
+  `scripts/body/spring_bone.gd`).
+- Mined parts: **ears** — FelineEar L/R, RoundEar L/R, SmallEar L/R; **tails** — Fluffy,
+  Dragon, Feline (LongTail), HugeFluffy, Paintbrush; **horns** — Horn1 L/R, HornChaos L/R.
+- Generalized swap surface: `PartLibrary` (`scripts/body/part_library.gd`) + the slot-based
+  `BodyRig.apply_part(slot, id)` — the generalization of the former hair-only swap. Tail/ear
+  GLBs ship their own `Skeleton3D` (DEF-Tail1..N / DEF-Ear.* etc.) which aeriea attaches
+  under the matching MakeHuman bone (`head` for ears/horns, `spine05` for tails) via a
+  `BoneAttachment3D` and sways with a `SpringBone` per non-Root physics bone. Horns are
+  rigid in BDCC2 (no skeleton) — attached but not swayed (correct: horn is bone).
+
+See `assets/body/parts/bdcc2/NOTICE.md` for the per-asset list + the seating-offset note.
+
+aeriea claims **no ownership** of these meshes; they remain © 2025 Rahi under MIT.
+
 ## MakeHuman — base mesh, rig, proxies, targets (CC0-1.0)
 
 aeriea's body/head mesh, skeleton, proxies, and morph targets derive from

@@ -85,7 +85,7 @@ const ROOT_BONE := "root"
 
 const SpringBone := preload("res://scripts/body/spring_bone.gd")
 const MicroLifeParams := preload("res://scripts/body/micro_life_params.gd")
-const HairLibrary := preload("res://scripts/body/hair_library.gd")
+const PartLibrary := preload("res://scripts/body/part_library.gd")
 
 ## Soft-region bones the jiggle layer drives (spring-bones). breast.L/R come straight
 ## from the CC0 MakeHuman default rig; belly + glute.L/R are INJECTED by the body
@@ -156,16 +156,20 @@ var _idle_time: float = 0.0
 var _cosmetic_rng := RandomNumberGenerator.new()
 ## Spring-bone instances for soft-region jiggle: name -> SpringBone (all on `skeleton`).
 var _jiggle_springs := {}
-## Hair spring entries. Each value is {"skel": Skeleton3D, "sb": SpringBone}. The hair
-## springs may live on `skeleton` itself (the CC0 cap's hair01/02/03 chain) OR on the
-## little Skeleton3D shipped INSIDE a BDCC2 hair GLB (Tail1/Back.L/… bones). step() takes
-## the skeleton as a parameter, so the SAME spring physics drives either source.
-var _hair_springs := {}
-## The currently applied hairstyle id (HairLibrary). Defaults to the CC0 cap.
-var current_hairstyle: String = HairLibrary.CAP
-## For a BDCC2 style: the BoneAttachment3D parenting the loaded hair under the `head`
-## bone (so the hair rides the head). Null when the CC0 cap is active. Freed on swap.
-var _hair_attachment: BoneAttachment3D = null
+## Part spring entries, keyed "slot:partid:bonename". Each value is {"skel": Skeleton3D,
+## "sb": SpringBone}. The springs may live on `skeleton` itself (the CC0 hair cap's
+## hair01/02/03 chain) OR on the little Skeleton3D shipped INSIDE a BDCC2 part GLB
+## (DEF-Tail1..N / DEF-Ear.* bones). step() takes the skeleton as a parameter, so the
+## SAME spring physics drives either source. This is the generalized replacement for the
+## former hair-only registry: hair, ears, and tails all register here.
+var _part_springs := {}
+## The currently applied part id PER SLOT (PartLibrary). Defaults to each slot's default
+## (hair -> CC0 cap; ears/tail/horns -> none).
+var _current_part := {}
+## Per slot: the BoneAttachment3D node(s) parenting the loaded part GLB(s) under the
+## slot's bone (so the part rides that bone). slot -> Array[BoneAttachment3D]. Empty for a
+## slot showing its empty/default. Freed + cleared on a swap.
+var _part_attachments := {}
 ## Micro-saccade state (render-side; advanced by delta + cosmetic rng).
 var _saccade_offset: Vector2 = Vector2.ZERO
 var _saccade_target: Vector2 = Vector2.ZERO
@@ -314,10 +318,16 @@ func _setup_micro_life(p_seed: int = 0) -> void:
 	_jiggle_springs.clear()
 	if skeleton == null:
 		return
-	# Hair: register springs for whatever hairstyle is active (CC0 cap chain on the body
-	# skeleton, OR a BDCC2 hair GLB's own skeleton bones). Re-registering here re-seats
-	# the springs after a rebuild; the swap API re-registers on a style change.
-	_register_hair_springs()
+	# Default each slot to its fallback id the first time (idempotent: keeps any already-
+	# applied part across a re-seat). Hair defaults to the CC0 cap; others to "none".
+	for slot in PartLibrary.slots():
+		if not _current_part.has(slot):
+			_current_part[slot] = PartLibrary.default_id(slot)
+	# Register springs for whatever parts are active across ALL slots (the CC0 hair cap
+	# chain on the body skeleton, OR each BDCC2 part GLB's own skeleton bones). Re-
+	# registering here re-seats the springs after a rebuild; the swap API re-registers on
+	# a part change.
+	_register_part_springs()
 	# Soft-region jiggle: breast.L/R (stock rig) + belly/glute.L/R (pipeline-injected,
 	# skinned to the abdomen/buttock body verts) all resolve to real bones now.
 	for bn in SOFT_REGION_BONES:
@@ -325,29 +335,38 @@ func _setup_micro_life(p_seed: int = 0) -> void:
 			_jiggle_springs[bn] = _make_spring(skeleton, _bone_index[bn])
 
 
-## (Re)build _hair_springs for the current hairstyle. For the CC0 cap: the hair01/02/03
-## chain on the BODY skeleton (matched by HAIR_BONE_FRAGMENTS). For a BDCC2 style: every
-## non-Root bone of the attached hair GLB's own skeleton (its Tail/Back/Front/Side/…
-## physics bones) — BDCC2's bone names don't carry "hair", so we drive ALL of them.
-func _register_hair_springs() -> void:
-	_hair_springs.clear()
-	if HairLibrary.is_bdcc2(current_hairstyle) and _hair_attachment != null:
-		var hskel := _hair_skeleton()
-		if hskel != null:
-			for i in hskel.get_bone_count():
-				var bn := hskel.get_bone_name(i)
-				if bn.to_lower() == "root" or bn.to_lower() == "neutral_bone":
+## (Re)build _part_springs across ALL slots for the currently-applied parts.
+##   - The CC0 hair cap registers the injected hair01/02/03 chain on the BODY skeleton
+##     (matched by HAIR_BONE_FRAGMENTS) — the legacy default, unchanged.
+##   - Every BDCC2 part marked `sway` registers a spring on every non-Root physics bone of
+##     each of its attached GLB skeletons (DEF-Tail1..N / DEF-Ear.* etc.). BDCC2's bone
+##     names don't carry "hair", so we drive ALL non-anchor bones. Rigid parts (horns:
+##     `sway=false`, no skeleton) register nothing — they attach and ride the bone only.
+func _register_part_springs() -> void:
+	_part_springs.clear()
+	for slot in PartLibrary.slots():
+		var id: String = _current_part.get(slot, PartLibrary.default_id(slot))
+		# The CC0 hair cap is the one part whose springs live on the BODY skeleton's
+		# injected hair chain rather than on an attached GLB skeleton.
+		if slot == PartLibrary.SLOT_HAIR and id == PartLibrary.HAIR_CAP:
+			for i in skeleton.get_bone_count():
+				var bn := skeleton.get_bone_name(i)
+				for frag in HAIR_BONE_FRAGMENTS:
+					if bn.to_lower().contains(frag):
+						_part_springs["hair:cap:%s" % bn] = {"skel": skeleton, "sb": _make_spring(skeleton, i)}
+						break
+			continue
+		if not PartLibrary.sways(slot, id):
+			continue
+		# A swaying BDCC2 part: register a spring on each attached GLB skeleton's physics bones.
+		for skel_node in _part_skeletons(slot):
+			for i in skel_node.get_bone_count():
+				var bnm: String = skel_node.get_bone_name(i)
+				var low: String = bnm.to_lower()
+				if low == "root" or low.begins_with("def-root") or low == "neutral_bone":
 					continue   # the anchor / blender export stub — not a physics bone
-				_hair_springs["%s:%s" % [current_hairstyle, bn]] = {
-					"skel": hskel, "sb": _make_spring(hskel, i)}
-		return
-	# CC0 cap: the injected hair01/02/03 chain on the body skeleton.
-	for i in skeleton.get_bone_count():
-		var bn := skeleton.get_bone_name(i)
-		for frag in HAIR_BONE_FRAGMENTS:
-			if bn.to_lower().contains(frag):
-				_hair_springs[bn] = {"skel": skeleton, "sb": _make_spring(skeleton, i)}
-				break
+				_part_springs["%s:%s:%s:%d" % [slot, id, bnm, skel_node.get_instance_id()]] = {
+					"skel": skel_node, "sb": _make_spring(skel_node, i)}
 
 
 ## Build a SpringBone for `idx`, tracking a tip one bone-length down the bone's local
@@ -367,80 +386,131 @@ func _make_spring(skel: Skeleton3D, idx: int) -> SpringBone:
 	return sb
 
 
-# --- swappable hairstyles (BDCC2 mined meshes + CC0 cap fallback) ---------------
-## The Skeleton3D of the currently attached BDCC2 hair GLB (its OWN little rig), or null
-## when the CC0 cap is active. Found under the BoneAttachment3D parenting the hair.
-func _hair_skeleton() -> Skeleton3D:
-	if _hair_attachment == null:
-		return null
-	return _hair_attachment.find_child("Skeleton3D", true, false) as Skeleton3D
+# --- swappable PARTS (BDCC2 mined meshes + CC0 / empty fallbacks) ----------------
+# The generalized swap system. A slot (hair / ears / tail / horns) holds one part at a
+# time; apply_part(slot, id) tears down the old attachment(s), attaches the new part's
+# GLB(s) under the slot's aeriea bone via BoneAttachment3D, and re-registers spring physics
+# on the parts that sway. Hair keeps its legacy behaviour as the SLOT_HAIR slot (the CC0
+# cap is its default; BDCC2 hairstyles are parts in that slot). apply_hairstyle() remains a
+# thin shim over apply_part(SLOT_HAIR, …) so existing callers/tests are unchanged.
+
+## The Skeleton3D(s) of the currently attached BDCC2 part GLB(s) for `slot` (each GLB ships
+## its OWN little rig), or [] when the slot shows its empty/default. Found under the slot's
+## BoneAttachment3D(s).
+func _part_skeletons(slot: String) -> Array:
+	var out := []
+	for att in _part_attachments.get(slot, []):
+		if is_instance_valid(att):
+			var sk := att.find_child("Skeleton3D", true, false) as Skeleton3D
+			if sk != null:
+				out.append(sk)
+	return out
 
 
-## Select + apply a hairstyle by id (see HairLibrary). The FIRST real "swappable part":
-##   - CC0 cap  -> tear down any BDCC2 hair, show the cap surface, re-register the
-##                 hair01/02/03 spring chain on the body skeleton (the prior default).
-##   - BDCC2 id -> load the mined GLB (runtime GLTFDocument, no editor .import dep),
-##                 attach its mesh+skeleton under the `head` bone via a BoneAttachment3D,
-##                 hide the cap surface, and re-register the spring physics on the GLB's
-##                 own Tail/Back/Front/… bones so aeriea's springs sway BDCC2's geometry.
-## Returns true on success. Unknown id -> falls back to the cap. RENDER-SIDE / cosmetic:
-## touches only attached nodes + the spring registry; never the deterministic sim.
-func apply_hairstyle(id: String) -> bool:
-	if skeleton == null:
+## Select + apply a part by (slot, id) — the generalized swap entry point. Slots: hair,
+## ears, tail, horns (PartLibrary). Behaviour:
+##   - default/empty id -> tear down any attached GLB(s); for hair show the CC0 cap surface
+##     + re-register the hair01/02/03 chain; for ears/tail/horns leave a clean human.
+##   - BDCC2 id -> load the mined GLB(s) (runtime GLTFDocument, no editor .import dep),
+##     attach each under its aeriea bone (head for hair/ears/horns, spine05 for tails) via
+##     a BoneAttachment3D, hide the hair cap if it's the hair slot, and (for swaying parts)
+##     register spring physics on each GLB skeleton's own physics bones so aeriea's springs
+##     sway BDCC2's geometry. Horns are rigid (no skeleton) -> attach only, no sway.
+## Returns true on success. Unknown slot -> false; unknown id -> falls back to the slot's
+## default. RENDER-SIDE / cosmetic: touches only attached nodes + the spring registry;
+## never the deterministic sim.
+func apply_part(slot: String, id: String) -> bool:
+	if skeleton == null or not PartLibrary.PARTS.has(slot):
 		return false
-	if HairLibrary.get_style(id).is_empty():
-		id = HairLibrary.CAP
-	# Tear down any previously attached BDCC2 hair.
-	if _hair_attachment != null:
-		_hair_attachment.queue_free()
-		_hair_attachment = null
-	current_hairstyle = id
-	var is_bdcc2 := HairLibrary.is_bdcc2(id)
-	# The CC0 cap surface (on the proxy mesh) shows ONLY when the cap style is active.
-	if _proxy_surface.has("hair"):
+	if PartLibrary.get_part(slot, id).is_empty():
+		id = PartLibrary.default_id(slot)
+	# Tear down any previously attached GLB(s) for this slot.
+	for att in _part_attachments.get(slot, []):
+		if is_instance_valid(att):
+			att.queue_free()
+	_part_attachments[slot] = []
+	_current_part[slot] = id
+	var is_bdcc2 := PartLibrary.is_bdcc2(slot, id)
+	# The hair slot also drives the CC0 cap proxy surface: it shows ONLY when the cap is on.
+	if slot == PartLibrary.SLOT_HAIR and _proxy_surface.has("hair"):
 		_set_hair_cap_visible(not is_bdcc2)
 	if is_bdcc2:
-		if not _attach_bdcc2_hair(HairLibrary.glb_path(id)):
-			# Load failed — fall back to the cap so the head is never bald-with-no-fallback.
-			current_hairstyle = HairLibrary.CAP
-			if _proxy_surface.has("hair"):
+		var attached := _attach_part_glbs(slot, id)
+		if not attached:
+			# Load failed — fall back to the slot default so the slot is never broken.
+			_current_part[slot] = PartLibrary.default_id(slot)
+			if slot == PartLibrary.SLOT_HAIR and _proxy_surface.has("hair"):
 				_set_hair_cap_visible(true)
-			_register_hair_springs()
+			_register_part_springs()
 			return false
-	_register_hair_springs()
+	_register_part_springs()
 	return true
 
 
-## Load a BDCC2 hair GLB and parent it under the `head` bone. Returns true on success.
-## Uses GLTFDocument at runtime (the GLB is standard glTF binary — version-independent —
-## so this avoids any dependency on the editor import of a BDCC2-4.7-authored .tscn).
-func _attach_bdcc2_hair(glb_path: String) -> bool:
+## Compatibility shim: the original hair entry point, now delegating to the generalized
+## slot system. Existing callers/tests keep working unchanged.
+func apply_hairstyle(id: String) -> bool:
+	return apply_part(PartLibrary.SLOT_HAIR, id)
+
+
+## The currently applied part id for a slot (PartLibrary), or the slot default if unset.
+func current_part(slot: String) -> String:
+	return _current_part.get(slot, PartLibrary.default_id(slot))
+
+
+## Load + attach every GLB of a BDCC2 part under its aeriea bone. Returns true iff at least
+## one GLB attached. Uses GLTFDocument at runtime (the GLB is standard glTF binary —
+## version-independent — avoiding any dependency on the editor import of a BDCC2 .tscn).
+func _attach_part_glbs(slot: String, id: String) -> bool:
+	var any := false
+	var atts: Array = []
+	for row in PartLibrary.glbs(slot, id):
+		var att := _attach_one_glb(row, slot)
+		if att != null:
+			atts.append(att)
+			any = true
+	_part_attachments[slot] = atts
+	return any
+
+
+## Load one GLB (a {glb, attach_bone, offset?, scale?} row) and parent it under its bone via
+## a bone-tracking BoneAttachment3D, applying the row's SEATING transform. Returns the
+## attachment node, or null on failure.
+##
+## SEATING. BDCC2 authored each accessory against ITS OWN skeleton's attach point (ear.L /
+## tail / horn.L) — points offset from the skull/pelvis origin to the actual ear/horn/tail
+## location. aeriea attaches to its `head`/`spine05` BONE ORIGIN, which sits elsewhere, so a
+## raw attach lands the part off-anatomy. The per-row `offset` (bone-local metres) + `scale`
+## re-seat the BDCC2 frame onto aeriea's anatomy. These are TUNABLE cosmetic data (in
+## PartLibrary), not magic numbers in code — same discipline as the micro-life dials.
+func _attach_one_glb(row: Dictionary, slot: String) -> BoneAttachment3D:
+	var glb_path := String(row.get("glb", ""))
+	var bone := String(row.get("attach_bone", PartLibrary.SLOT_ATTACH_BONE.get(slot, "head")))
 	if glb_path == "" or not FileAccess.file_exists(glb_path):
-		return false
-	var head_idx := skeleton.find_bone("head")
-	if head_idx < 0:
-		return false
+		return null
+	if skeleton.find_bone(bone) < 0:
+		return null
 	var doc := GLTFDocument.new()
 	var st := GLTFState.new()
 	if doc.append_from_file(glb_path, st) != OK:
-		return false
-	var hair_root := doc.generate_scene(st)
-	if hair_root == null:
-		return false
-	# Attach to the head bone so the whole hair rides head motion; the spring layer then
-	# adds the secondary sway on top of that rigid carry.
+		return null
+	var part_root := doc.generate_scene(st)
+	if part_root == null:
+		return null
 	# A BoneAttachment3D that is a DIRECT child of the Skeleton3D auto-tracks that
 	# skeleton's bone (no external-skeleton wiring needed); set bone_name AFTER add_child.
 	var att := BoneAttachment3D.new()
-	att.name = "HairAttachment"
+	att.name = "%sAttachment" % slot.capitalize()
 	skeleton.add_child(att)
-	att.bone_name = "head"
-	att.add_child(hair_root)
-	_hair_attachment = att
-	# Apply the hair shader material from the GLB's own scene tree (BDCC2 bakes the
-	# Kajiya-Kay hair material onto the surfaces in the .tscn, but the bare GLB carries a
-	# usable albedo/normal material — keep whatever the GLB import produced).
-	return true
+	att.bone_name = bone
+	att.add_child(part_root)
+	# Seat the part: scale to aeriea's anatomy, then offset into place (bone-local). The
+	# attachment auto-applies the bone's global transform; we set the part_root's LOCAL
+	# transform relative to that.
+	var sc := float(row.get("scale", 1.0))
+	var off: Vector3 = row.get("offset", Vector3.ZERO)
+	part_root.transform = Transform3D(Basis.IDENTITY.scaled(Vector3(sc, sc, sc)), off)
+	return att
 
 
 ## Show/hide the CC0 helper-hair cap surface on the proxy mesh. _proxy_material("hair",
@@ -573,7 +643,7 @@ func _apply_proxy_materials() -> void:
 		elif sname == "hair":
 			# The CC0 cap shows ONLY when the cap style is active; a BDCC2 hairstyle
 			# replaces it (its own mesh is attached under the head bone).
-			visible = not HairLibrary.is_bdcc2(current_hairstyle)
+			visible = not PartLibrary.is_bdcc2(PartLibrary.SLOT_HAIR, current_part(PartLibrary.SLOT_HAIR))
 		proxy_instance.set_surface_override_material(si, _proxy_material(mat_kind, visible))
 
 
@@ -921,13 +991,14 @@ func apply_micro_life(delta: float) -> void:
 	# Eye micro-saccades (advances the offset the face rig layers under its gaze).
 	if micro.saccade_enabled:
 		_step_saccade(delta)
-	# Hair spring-bones. Each entry carries its OWN skeleton (the body skeleton for the
-	# CC0 cap chain, or the BDCC2 hair GLB's own little skeleton). The same spring physics
-	# drives either — step() integrates against whatever skeleton it is handed, so a BDCC2
-	# Tail/Back/… bone sways exactly like the cap's hair01/02/03 chain.
+	# Part spring-bones (hair + ears + tail). Each entry carries its OWN skeleton (the body
+	# skeleton for the CC0 hair-cap chain, or a BDCC2 part GLB's own little skeleton). The
+	# same spring physics drives any of them — step() integrates against whatever skeleton it
+	# is handed, so a BDCC2 DEF-Tail/DEF-Ear bone sways exactly like the cap's hair01/02/03
+	# chain. Tuned with the hair_* dials (shared secondary-motion knobs).
 	if micro.hair_enabled:
-		for key in _hair_springs:
-			var e: Dictionary = _hair_springs[key]
+		for key in _part_springs:
+			var e: Dictionary = _part_springs[key]
 			var hskel: Skeleton3D = e["skel"]
 			var sb: SpringBone = e["sb"]
 			if hskel == null or not is_instance_valid(hskel):
@@ -969,14 +1040,35 @@ func saccade_offset() -> Vector2:
 	return _saccade_offset
 
 
-## Snapshot the micro-life layer (for tests / debug). Pure read.
+## Snapshot the micro-life layer (for tests / debug). Pure read. `hair_springs` is kept
+## as a name for the springs in the HAIR slot specifically (back-compat with the original
+## hair test); `part_springs` is the total across all slots; `slot_springs` breaks it down.
 func micro_life_state() -> Dictionary:
 	return {
 		"breath_phase": _breath_phase,
 		"saccade_offset": _saccade_offset,
-		"hair_springs": _hair_springs.size(),
+		"hair_springs": _slot_spring_count(PartLibrary.SLOT_HAIR),
+		"part_springs": _part_springs.size(),
+		"slot_springs": _slot_spring_counts(),
 		"jiggle_springs": _jiggle_springs.size(),
 	}
+
+
+## Number of registered spring bones whose key belongs to `slot` (keys are "slot:…").
+func _slot_spring_count(slot: String) -> int:
+	var n := 0
+	for key in _part_springs:
+		if String(key).begins_with(slot + ":"):
+			n += 1
+	return n
+
+
+## Per-slot spring counts, e.g. {"hair": 3, "ears": 4, "tail": 6, "horns": 0}.
+func _slot_spring_counts() -> Dictionary:
+	var out := {}
+	for slot in PartLibrary.slots():
+		out[slot] = _slot_spring_count(slot)
+	return out
 
 
 # --- analytic two-bone foot-IK ----------------------------------------------

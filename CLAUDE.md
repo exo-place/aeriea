@@ -30,6 +30,7 @@ Reach for the blackboard when it earns its keep, not for every subagent. When a 
 - No tracking cross-project issues in conversation — they go in TODO.md in the affected repo.
 - No assuming a tool is missing without checking `nix develop`.
 - Commit completed work in the same turn it finishes. Uncommitted work is lost work.
+- No surface is "done" on green tests alone — user-facing work must be playtested (run and observed, see Playtesting) before it counts as complete.
 
 ## Meta
 
@@ -65,6 +66,17 @@ This runs every suite under xvfb, parses each suite's `=== RESULTS: N passed, M 
 **Do not hand-roll `--quit-after` per suite** — short budgets cause the suite to be killed before it finishes and falsely report low pass counts. The canonical runner uses a generous budget (60000 frames) so the suite always completes via its own `get_tree().quit()` call. The budget is a safety ceiling only.
 
 To add a new suite: add the `.tscn` basename to `SUITES` in `tests/run.sh`, and ensure the test script calls `get_tree().quit(0 if _fail == 0 else 1)` before returning.
+
+## Playtesting (mandatory)
+
+Mechanical tests are not evidence that work is good. A suite that asserts nodes exist, signals fire, and values bind says nothing about whether a label reads correctly, a header renders once, buttons overlap the bar, a character faces the right way, or an interaction makes sense. Green tests over unreviewed output is exactly how polished slop ships: a capable executor satisfies the literal objective and leaves everything outside it broken. Capability is obedient to the objective — it does not fix, uninvited, what the objective never named.
+
+So every change to a user-facing surface (UI, rendered body, movement, text flow, the character creator, the sandboxes) MUST be playtested before it counts as done — actually run, the real output observed (rendered frames / transcript / live interaction), and judged against ordinary competence standards by an actor who SEES it. Two forms, both required where they apply:
+
+- **Implementer self-playtest.** The subagent that builds a surface runs it (xvfb render / drive the scene / capture the transcript), looks at the actual output, and fixes what is visibly wrong before returning. Coding a UI blind and reporting "tests pass" is not done. Reasoning about layout is not seeing it.
+- **Orchestrator playtest of the composed whole.** The orchestrator never relays a subagent's success report as truth. Before accepting work it playtests the composed result — itself or via a dedicated playtest subagent whose only job is to run the app as a user and report defects. Cross-seam defects (a duplicated header from two slices, a head doubled across two meshes) live in no single implementer's slice; only a whole-app playtest catches them.
+
+A defect is reported from observation, never guessed: run it and look, do not infer a plausible cause. Playtesting is not optional, not "when time permits," and never satisfied by the test suite alone.
 
 ## Architecture principles
 

@@ -1,7 +1,8 @@
 # Reference games — prior-art synthesis
 
 Status: **PRIOR-ART SYNTHESIS — read-only study of five cloned reference
-codebases + folded-in prior aeriea research (2026-06-22)**
+codebases + folded-in prior aeriea research (2026-06-22); deepened with four
+targeted code-depth dives (`prior-art/deep/*.md`, 2026-06-22)**
 
 Scope: one comparative read across the reference-game lineage aeriea draws
 on for **deep body/transformation, NSFW-first content, and procedural prose**.
@@ -45,10 +46,10 @@ Folded-in prior research:
 
 | Game | Engine / lang | Standout contribution | Biggest aeriea takeaway |
 |---|---|---|---|
-| **Corruption of Champions** | ActionScript 3 / Flash | Two-layer prose engine: a templating parser (`parseText`) over a library of state→fragment descriptors with per-type **synonym pools** | Adopt the two-layer prose pattern — AST templating over state→fragment descriptors with synonym pools — **but draw variants from the seeded timeline** so prose replays |
-| **Trials in Tainted Space** | ActionScript 3 / Flash | `race()` — species/identity **derived** from body-part scores every call, never stored | Compute identity (race, build, presentation) as a **classification over current parts+tags**, so transformation updates it for free |
+| **Corruption of Champions** | ActionScript 3 / Flash | Two-layer prose engine: a templating parser (`parseText`) over state→fragment descriptors with per-type **synonym pools**; the **`dogScore`/`foxScore` argmax discriminant** that derives identity from the trait bag (TiTS scaled it to ~40 scores) | Adopt the two-layer split with a **TYPED dispatch** seam; **draw variants from the seeded timeline** so prose replays; derive identity by **argmax over the trait bag**, same scores feeding prose AND the visual channel |
+| **Trials in Tainted Space** | ActionScript 3 / Flash | `race()` — species/identity **derived** from ~40 body-part feature-scores every call, never stored (and the authors documented the correct normalized-argmax selector but shipped a fragile ordered-`if` waterfall) | Compute identity (race, build, presented-gender vs anatomical-sex) as a **classification over current parts+tags**, so transformation updates it for free — but build the *intended* argmax selector, not the shipped hack |
 | **Nimin (Fetish Master)** | ActionScript 3 / Flash | Affinity/"blood" TF model: continuous 0–100 race scores → thresholded morphology, with **gain/lose symmetry** + a susceptibility stat | Keep affinity→threshold→morphology, but make it **data** (per-species config) on a structured part/tag system — new species = content, not code |
-| **Lilith's Throne** | Java / JavaFX WebView | Composable sex engine: act = typed tuple `(participant, performingArea, targetedArea)` × position × pace; **orifice deformation as Capacity/Elasticity/Plasticity** | Model the act space as a **typed tuple over a part-area interface**, as serializable data; adopt the 3-axis (current/resistance/permanence) deformation model |
+| **Lilith's Throne** | Java / JavaFX WebView | Composable sex engine: act = **value-typed tuple** `(participant, performingArea, targetedArea)` (equals/hashCode/reverse) × position × pace, validity from a **predicate cascade** not an allow-list; **deformation as Capacity/Elasticity/Plasticity** with a closed body-state→fit→arousal+prose+deformation loop | Adopt the value-typed act tuple as cache/replay/diff-able **data** over a thin part-area interface; make validity a **predicate** over presence/free/exposed/known so new parts compose; adopt the 3-axis (current/resistance/permanence) deformation model |
 | **CharacterViewer (DIC)** | ActionScript 3 / Flash | **Quantize-at-the-seam** (continuous body → finite art index, map as data) + **graceful-degradation defaulter** for sparse combinatorial art | Quantize continuous body → finite art index at the render seam (map as data); steal the per-type defaulter so a sparse art set never hard-fails |
 | **BDCC2** *(folded in)* | Godot 4.x / GDScript | Clean continuous-channel **facial expression rig** (`FaceAnimator`) + memory/relationship/mood NPC slice | Mine the expression rig + memory→relationship→mood slice **behind aeriea's own seams** (Path A), never as the architectural base |
 | **existence** *(folded in)* | ES-module JS | Working **deterministic realizer** (`realize(observations, hint, ntCtx, random)`) + seeded multi-stream PRNG + fixed-draw-count discipline | The realizer and determinism kit transfer wholesale; the realizer-side contract is identical whether state is a snapshot or aeriea's `G` |
@@ -124,10 +125,31 @@ teaches:
    `dominant`, LT's subspecies). The single most aeriea-relevant idea in the whole
    lineage: don't *store* "race"/"species"/"build" — *compute* it as a
    classification over current parts+tags so transformation re-derives it for
-   free. TiTS even has a commented-out design note proposing a softmax refinement.
-   This is a direct fit for aeriea's "simulation underneath, rendering on top"
+   free. This is a direct fit for aeriea's "simulation underneath, rendering on top"
    (identity is a render-time projection of the simulated body).
-   `prior-art/tits.md`.
+   `prior-art/tits.md`; **full mechanism in `prior-art/deep/tits-body-taxonomy.md`.**
+
+   **The depth pass nails down exactly how, and exactly where TiTS got it wrong.**
+   `race():String` (`Creature.as:9617-9701`) stores *nothing*; the only stored
+   identity is `originalRace`, used solely to narrate drift. Classification is two
+   stages: (1) per-race `*Score():int` functions (37 of them) tally signature
+   features as **weighted feature-voting** — with *negative* votes (`humanScore`:
+   `hasTail()` → `counter--`), *conditional gating* (`ausarScore`: a human face
+   counts only once `counter>0`), *threshold cascades* (`kaithritScore`:
+   `counter>1 / >2 / >3 / >5` stack), and *hard vetoes* (`leithan`: wrong eyes →
+   `counter--`). (2) Selection is **NOT max-score** — `race()` is a ~60-line ordered
+   `if (xScore()>=N) race="…"` waterfall where *the last assignment that fires wins*,
+   priority encoded in source line order, thresholds hand-tuned magic ints. **The
+   authors left a comment (`9624-9632`) describing the correct normalized-argmax-with-
+   natural-max-tiebreak design and shipped the ordered-`if` hack anyway** — so aeriea
+   should build the *commented* design, not the *shipped* one. Same projection
+   pattern carries `bodyType()` (build = pure fn of `thickness×tone` grid) and gender:
+   `mfn()` (weighted femininity → male/neuter/female, **presented gender**) cleanly
+   separated from `rawmfn()` (hard `hasCock`/`hasVagina`, **anatomical sex**) — both
+   projected, neither stored. The cautionary leak: `raceShort`/`stripRace` derives the
+   *coarse* family key by **string-parsing the prose label** (drop `-morph`/`-taur`
+   affixes, collapse synonyms), so renaming a label silently breaks classification —
+   derive coarse keys from features, never from text.
 
 **Lilith's Throne's standout gem — persistent deformation on three orthogonal
 axes.** `Capacity` (current cm diameter) vs `OrificeElasticity` (resists
@@ -135,7 +157,9 @@ stretching) vs `OrificePlasticity` (how permanently a stretch persists vs snaps
 back). Capacity changes during use; elasticity/plasticity govern whether the
 change is temporary or lasting. **The body accumulates real systemic history** —
 and the pattern (current value / resistance / permanence) generalizes far beyond
-NSFW to any wear/deformation system. `prior-art/liliths-throne.md`.
+NSFW to any wear/deformation system. The exact bands, the fit-predicate formula,
+and the full body-state→fit→arousal+prose+deformation→body-state loop are detailed
+in §3 below and in `prior-art/deep/lt-sex-engine.md §2`. `prior-art/liliths-throne.md`.
 
 **Nimin's standout — the affinity/"blood" TF mechanic.** Each race has a 0–100
 affinity; the highest is `dominant`; crossing per-tier thresholds drives
@@ -149,13 +173,30 @@ Threshold crossings use hysteresis-aware paired conditions —
 **The warning the whole lineage teaches:** every Fenoxo-lineage game encodes the
 tag/type vocabulary as **bare integers** — CoC's comment-legend ints (meaning
 lives in a comment, so a miswrite is silent), CoC/CharacterViewer's 4-untyped-slot
-perk bags, and CoC's magic-index `flags[]` grab-bag. TiTS is the best of them (a
-flat, serializable, append-only int enum with a `FLAG_NAMES` map) but it is still
-*stringly/int-typed*, and its prose parser resolves tags by **runtime reflection
-over a member path** (`"pc.cockBiggest"`), self-described in-source as tech debt.
-The aeriea correction is the same everywhere: **lift the tag vocabulary to a
-typed, validated, serializable schema** (cf. playmate's `frond`), and resolve
-prose tags through a *typed binding*, not reflection or magic ints.
+perk bags, and CoC's magic-index `flags[]` grab-bag. TiTS is the best of them but
+its schema, read in depth (`prior-art/deep/tits-body-taxonomy.md`), is a cautionary
+tale: a creature is a **flat bag of bespoke slot fields on one 17.7k-line god-class**,
+each major slot a `*Type:Number` enum-index + a `*Flags:Array` of small ints, with
+`has/add/remove/clearXFlag` **hand-duplicated per slot** (4 verbatim methods × N
+slots — slot identity lives in the *method name*, not data). The `TYPE_*` namespace
+is **one flat shared int enum across every slot** (73 constants, alias collisions
+like `TYPE_NAGA==TYPE_SNAKE`, a `TYPE_TANUKI` renumbered 18→24 with an apology
+comment). Flags (43 ints) **cram multiple dimensions into one list** — texture
+(`FLUFFY`/`SMOOTH`/`CHITINOUS`), shape (`TAPERED`/`FLARED`/`KNOTTED`), stance
+(`PLANTIGRADE`/`DIGITIGRADE`), behaviour (`LUBRICATED`) — with no slot-scoping and no
+mutual-exclusion, so invalid states (both/neither stance) are representable.
+`VALID_SKIN_FLAGS` is the *vestigial good instinct* — a 7-flag allow-list for skin
+that is never actually checked at the add site. The one clean corner is the
+sub-object parts (`CockClass`): raw+mod dimension pairs, its own `cType`/`cockFlags`,
+and **derived geometry** (`volume()` builds a cylinder+hemisphere and branches on
+`FLAG_FLARED`/`FLAG_TAPERED`/`FLAG_DOUBLE_HEADED`) — clean precisely because the scope
+is small and the dimensions are real numbers, not enum-soup. The aeriea correction:
+**lift the tag vocabulary to a typed, *dimensioned, slot-scoped* schema** (cf.
+playmate's `frond` — finish the `VALID_SKIN_FLAGS` idea TiTS abandoned) so "can this
+slot carry this tag" and "are these mutually exclusive" are answerable *from data*;
+give parts a uniform `has/add/remove tag` path (adding a slot = data, not 4
+copy-pasted methods); and resolve prose tags through a *typed binding*, not the
+runtime member-path reflection (`"pc.cockBiggest"`) TiTS self-describes as tech debt.
 
 ### 3. NSFW content engine — authored vs procedural/combinatorial
 
@@ -179,22 +220,72 @@ named NPC files, ~1400 story flags). `prior-art/coc.md`, `prior-art/tits.md`,
 `prior-art/nimin.md`.
 
 **The combinatorial game (Lilith's Throne) — the positive exemplar.** LT's sex
-engine is genuinely compositional: an act is a typed tuple
-`SexType = (participant, performingArea, targetedArea)`, where both penetrators
-(`SexAreaPenetration`) and orifices (`SexAreaOrifice`) implement one
-`SexAreaInterface`, so **the act space is the Cartesian product** of the interface,
-crossed with **position** and **pace** (SUB_RESISTING → DOM_ROUGH). Availability is
-gated declaratively (`REQUIRES_EXPOSED`, ongoing-lifecycle tags), and consent is
-modeled *through* the dom/sub pace state machine rather than as a yes/no gate. This
-is exactly the act×target×position×body-state structure
-`../decisions/reference-analysis.md` names as aeriea's target.
-`prior-art/liliths-throne.md`.
+engine is genuinely compositional, and the depth pass
+(`prior-art/deep/lt-sex-engine.md`) pins the exact mechanism. **The atom** is a
+*value-typed* tuple `SexType = (SexParticipantType asParticipant,
+SexAreaInterface performingArea, SexAreaInterface targetedArea)`, with
+`equals`/`hashCode` defined over those three fields (`SexType.java:44-62`) — so an
+act is a **cache/replay/diff-able value**, and `getReversedSexType()` gives the
+other participant's POV for free (swap performing↔targeted). Pace is **not** in the
+tuple; it's pulled from global state at render time (`getPerformanceDescription
+:113`), so the real selection key is the 5-tuple `(participant, perfArea, targetArea,
+performerPace, targetPace)` + position + body-state. **The entire part vocabulary is
+two enums behind one 51-line `SexAreaInterface`:** `SexAreaOrifice` (~13 constants —
+VAGINA/ANUS/MOUTH/NIPPLE/URETHRA_*/SPINNERET/…) and `SexAreaPenetration` (~7 —
+PENIS/CLIT/TONGUE/FINGER/FOOT/TAIL/TENTACLE). That's **~13×7≈91 base interactions
+before pace(6)×position×body-gating — the surface is the cross product, not an
+enumerated allow-list.** A player-facing `SexAction` wraps a
+`Map<SexAreaInterface,SexAreaInterface>` (perf-area→target-area), so one action is a
+*set* of simultaneous pairings (double penetration = two map entries), and arousal
+gains / corruption gate / the pairing map are all **plain data on the action, not
+code**.
+
+**Selection is two layers, both predicate-driven (no hand-authored valid-combo
+table).** (A) *Gating* — `SexActionInterface.toResponse()` (`:776`) is a predicate
+cascade: content prefs, `isFree`/`isOrificeTypeExposed` (part present + free +
+exposed), a *knowledge* gate (`:816` — you can't target a partner's parts you don't
+know about), action-type rules, and `position.isActionBlocked` (`:781`). **Validity
+*emerges* from predicates over (tuple, body-state, prefs, position)** — so new parts
+compose automatically. (B) *Prose* — each enum constant overrides `getSexDescription`
+with a nested `switch(targetArea)→tense→inanimate→switch(performerPace)→switch
+(targetPace)`, splicing part names via `UtilText` `[npc.pussy+]` tags. A parallel
+*pure* selection `getRelatedFetishes` (`SexType:190-387`) maps tuple+body-state → a
+typed fetish list **as data** — the right shape, kept off the prose path. And
+penetrations are **stateful "ongoing" entries** in an event-sourced occupancy map
+(`START_ONGOING`/`ONGOING`/`STOP_ONGOING`); `isFree(part)` == "not in any ongoing
+entry", so double-penetration / "free a hand" / "switch orifice" all fall out of one
+replayable map — exactly aeriea-shaped (deterministic, event-log-replay). This is the
+act×target×position×body-state structure `../decisions/reference-analysis.md` names
+as aeriea's target. `prior-art/liliths-throne.md`.
+
+**LT's standout body mechanism — the 3-axis deformation model, now with the loop.**
+Each orifice carries a mutable **Capacity** (current cm of comfortably-fitting
+diameter, 8 banded levels `Capacity.java:21-80`) plus two constant-per-body axes:
+**Elasticity** (resistance — `stretchModifier` = fraction of over-stretch applied per
+turn, `sizeTolerancePercentage` = slack before "too big") and **Plasticity**
+(permanence — `capacityIncreaseModifier` = fraction of stretch that sticks,
+`recoveryModifier` = cm/sec recovery toward base). The feedback loop
+(`GameCharacter.java:10040`): each turn, if inserted *diameter* exceeds
+`capacity*(1.01 + elasticity.sizeTolerance + lube)` (`Capacity.isPenetrationDiameter
+TooBig`), capacity is incremented by `max(5%·diameter, overstretch·elasticity)`,
+clamped to the diameter; permanent retention + per-tick recovery apply Plasticity.
+The same `tooBig`/`tooSmall` fit predicates feed **arousal deltas AND which prose
+branch fires** — a single `f(diameter, capacity, elasticity, lube)` join between
+body-state, what changed, and how it reads. Pure, seedable, replayable — directly
+portable and generalizes far beyond NSFW to any wear/deformation system.
+(Caveats from the read: `stretchCount=5` and friends are undocumented magic fudge
+constants buried in logic — aeriea should hoist tuning to named data-side params.)
 
 But LT pays for it in **code-as-content**: **1349** `public static final
-SexAction` Java objects + an 11203-line parser file. The combinatorics multiply
-authored fragments; they don't replace authoring. The aeriea correction:
-**keep the typed-tuple act space, but make acts serializable DATA (AST), not 1349
-static Java objects** — aligning with the data-over-code seam principle.
+SexAction` Java objects + an 11203-line parser, with the *prose itself hand-written
+as ~330 KB of nested Java `switch` statements inside each enum constant* (each part
+embeds the full pace×tense×reaction prose for every other part — adding a part is
+O(parts) edits and it does not cache/diff/transport). And `SexType` is **not
+self-describing**: realization reaches into `Main.sex`/`Main.game` singletons for
+pace/occupancy/prefs, so you can't render an act without the live world. The aeriea
+correction: **keep the value-typed act tuple and the predicate-driven gating, but
+make acts + prose serializable DATA, and make realization a pure function of (tuple,
+state, ctx)** — passing an explicit context object, not reaching into globals.
 
 **Two gaps the whole lineage leaves for aeriea to fill deliberately:**
 
@@ -227,17 +318,47 @@ from clean to cautionary. The architecture, stated once:
 
 How each game realizes it:
 
-- **CoC** — the canonical two-layer form. `parseText()` (`engineCore.as`) is a
-  real templating parser: `[cock]`, `[cockFit 8]`, `[if (a==b) "x" else "y"]`.
-  Under it, `descriptors.as` (3555 lines) holds per-type **synonym pools** rand-
-  selected per call (`cockNoun`: horse-cock → 8 variants, demon → 11), so one
-  `[cock]` tag renders varied prose keyed on the body discriminant.
-  `prior-art/coc.md`.
-- **TiTS** — same shape, but tags resolve by **reflection over the object graph**
-  (`getObjectFromString("pc.cockBiggest")` walks members, calls if it lands on a
-  function). They migrated *from* a hand-maintained tag→fn table *to* dynamic
-  introspection — and the source is littered with `// TODO: Get rid of this shit`.
-  Powerful, fragile, runtime-only failure. `prior-art/tits.md`.
+- **CoC** — the canonical two-layer form, mechanism pinned in
+  `prior-art/deep/coc-tits-prose.md §1-2`. **Layer 1** (`parseText`,
+  `engineCore.as:339-872`) is **iterated greedy-regex rewriting** — 5 regexes
+  applied most-complex-first (`branchTagElse → branchTag → paramTag → basicTag`),
+  each in a `while(exec)`/`String.replace` loop, dispatching through two hardcoded
+  switches (~80 + smaller). Conditions are a **strict left-fold** (`checkCondition`
+  `:97-336`): pull the first `(a op b)` triple, eval via a typed-variable whitelist
+  that branches on RHS-literal *type* into player stats/predicates, then consume a
+  leading `||`/`&&` with **no precedence/grouping** — and **ifs cannot nest** (greedy
+  regex; comment at `:359`). A nice trick worth stealing: continuous stats are
+  discretized into **named bands at the resolver** (`cumHigh`/`cumMedium`), so
+  authors test semantic bands, not magic numbers. **Layer 2** (`descriptors.as`,
+  3555 lines): `[cock]` → `cockDescript()` reads body state, dispatches on the part's
+  type enum to a per-type descriptor, ~50% prepends an adjective, then pulls a noun
+  from a **per-type synonym pool** (`cockNoun :2227` — string literals weighted by
+  which `rand` bucket maps to them). `prior-art/coc.md`.
+- **THE keystone discriminant — `dogScore` vs `foxScore` (argmax over the trait
+  bag).** An ambiguous "canine" cock resolves via `if (dogScore() >= foxScore())`
+  (`descriptors.as:2238`); both scores (`creature.as:2902,2943`) are **additive
+  feature-counters over the whole body** (face/ear/tail/lowerBody/genitals/breastRows,
+  with fur GATED behind `counter>0` so unrelated traits don't leak). **Identity is
+  DERIVED by argmax-over-scores, never stored** — this is what survives piecemeal
+  transformation, and the *same scores feed both prose word-choice and the
+  visual/paperdoll channel* (shared infra, not two impls). TiTS scaled this to ~40
+  `*Score()` counters — but regressed the *selector* into a fragile ordered-`if`
+  waterfall (see §2 above; full analysis in `coc-tits-prose.md §4`).
+- **TiTS — what the rewrite changed (the cheap lesson).** Layer 1 was rebuilt as
+  `ParseEngine.recursiveParser`/`recParser` (`ParseEngine.as:415-540`): **manual
+  bracket-DEPTH scanning instead of regex, so tags genuinely nest**, plus a `\[`
+  escape CoC lacked. Dispatch evolved CoC's switch → name→closure data tables
+  (`singleArgLookups`/`doubleArgLookups`) → those tables now **all commented out** →
+  `getObjectFromString` dotted-path **introspection over the object graph** +
+  per-object `getDescription(aspect,arg)`. Each step removes engine edits as the cost
+  of adding a tag — but the endpoint is **runtime reflection** (`"pc.cockBiggest"`),
+  self-described as tech debt, runtime-only failure. Also worth stealing: TiTS's
+  output-polish pass (smart-quotes, `--`→em-dash, repeated-space collapse `/  +/g`)
+  papers over the "optional clause didn't fire, leaving a gap" artifact any
+  optional-fragment realizer produces. *Caution the depth pass surfaced:* this clone
+  is mid-migration — the parser rewrite shipped **before** re-porting conditionals
+  CoC already had, leaving the new engine briefly a regression (the exact "finish
+  migrations before building on top" anti-pattern). `prior-art/tits.md`.
 - **Lilith's Throne** — the highest-leverage prose pattern: the **descriptor-suffix
   parser** `[npc.cock]` vs `[npc.cock+]`, where `+` injects adjectives derived from
   that part's *current state* (size/girth/material). Plus **auto-conjugated verbs**
@@ -269,8 +390,14 @@ existence's seeded-deterministic selection — with the corrections every refere
 demands: **store templates/synonym pools as data/AST (not regex-over-source-text,
 not 700-line if-ladders, not reflection), resolve tags through a typed binding,
 and draw every variant from the seeded timeline** so the same state yields
-deterministic prose. See `existence-prose-assessment.md` and
-`../decisions/prose-generation.md` for aeriea's own design built on exactly this.
+deterministic prose. Two sharper deltas the depth pass added: **make the Layer-1↔2
+seam a TYPED dispatch** (tag enum → descriptor), not a stringly-typed switch or
+runtime member-path reflection, eliminating the unknown-tag error class at compile
+time; and **derive identity by argmax over the trait bag, with the same scores
+feeding both the prose realizer AND the visual channel** (one discriminant, two
+projections). See `existence-prose-assessment.md`,
+`../decisions/prose-generation.md`, and the full mechanism in
+`prior-art/deep/coc-tits-prose.md`.
 
 ### 5. Animation / visual / paperdoll
 
@@ -285,23 +412,47 @@ keeps the decoupling: body truth in the sim, multiple projections (prose, then 3
 on top. `prior-art/tits.md`, `prior-art/liliths-throne.md`.
 
 **The one game that actually solved parametric-body rendering — CharacterViewer
-(DIC).** It is the visual half of the problem CoC/TiTS leave open, and it carries
-several patterns directly applicable to aeriea's body-render seam:
+(DIC).** It is the visual half of the problem CoC/TiTS leave open — the *same*
+numeric `Creature` body state the prose game runs on, turned into a finite, sparse,
+hand-authored vector-art set via **four clean seams** (full pipeline in
+`prior-art/deep/charviewer-render.md`):
 
-- **Quantize-at-the-seam.** Continuous sim body values → a small discrete art
-  index via a threshold table (`SaveTranslator`), with the index→symbol map held
-  as **data** (`*_Dictionary.json`), not code. The sim stays continuous; the art
-  stays a finite authored set. `prior-art/character-viewer.md`.
-- **Graceful-degradation defaulter (the standout engineering idea).** If an
-  `(type, j, k, l)` art-index combo has no symbol, a per-type priority order
-  (`CoC_Defaulter.json`) collapses unsupported indices to the nearest authored
-  asset until one resolves. A sparse combinatorial art set **never hard-fails** —
-  the single best idea for any combinatorial-asset renderer.
-- **Author one base color, derive the palette by color math** (`ColorDictionary`:
-  shade ≈ RGB×0.7 cool-biased; genital tint via HSV; fur tinted from hair). One
-  authored hex yields a coordinated palette — slashes color authoring.
-- **Named recolor segments + flat-tint-on-neutral-art** (art drawn in a key color,
-  tinted per segment at runtime via `ColorTransform`).
+- **(1) QUANTIZE-at-the-seam.** Continuous body scalars → small int "viewer indexes"
+  via hand-tuned **non-uniform threshold ladders**, one method per dimension
+  (`SaveTranslator.getRealBoobIndex :20-32` is a 10-bucket ladder *widening* with
+  size — fine gradation where it's perceptible, one mega-asset for the huge end).
+  Crucial detail: it quantizes the **render-relative** size (`value*heightMod`,
+  `heightMod=82/tallness`), *not* the raw stat, so proportions stay self-consistent
+  on a short vs tall body. (DIC's one self-inflicted wound: the ladders are *code*,
+  not data — aeriea should table them.)
+- **(2) SELECT + graceful-DEGRADE (the standout engineering idea).** A ragged/sparse
+  3-deep `type→i→j→k→ClassNameString` JSON dictionary; a reviver resolves leaf
+  strings to compiled-in Classes — **a missing/not-yet-drawn asset silently becomes
+  an `undefined` hole, so the table can reference art that doesn't exist yet (the
+  hole IS the TODO)**. On a miss, `getDefaultIndexes` runs a **minimal-collapse
+  search**: `TiTS_Defaulter.json` gives each type a digit-string priority order
+  (`body:"132"` = which axes to zero first, least-important first), trying to collapse
+  the *fewest, least-important* axes until a drawn cell hits, terminally falling to
+  `(0,0,0)` which every type must guarantee. A sparse combinatorial art set **never
+  hard-fails** — the single best artifact here, and acute for aeriea (NSFW-first deep
+  customization = a cross product no art set can fully cover). Author a base per axis
+  + a priority order; never enumerate the cross product. (Generalize the *arity*:
+  DIC hard-wires exactly 3 axes; aeriea needs variable-length tuple + defaulter.) A
+  reverse `Class→[type,i,j,k]` index gives O(1) round-tripping + dependent-part
+  coupling (ears track hair length, clit tracks vagina presence).
+- **(3) COMPOSE.** z-order **IS the `addChild` call sequence** in `drawLayer` (fine
+  for one pose, but aeriea's parkour/VR/many-poses needs *explicit data-driven*
+  z-order). The continuity bridge worth stealing directly: the **top bucket is a
+  *scalable* asset** (a child `MC` clip the code transforms) — render the bulk in
+  discrete buckets, reserve a scalable asset for the tail end to regain continuity
+  without N more drawings.
+- **(4) COLOR — author one base, derive the rest.** Art drawn in flat near-black;
+  `PartPainter` tints **named child segments** (7 slots: skin/hair/bits fill+shade,
+  eyes) via `ColorTransform` offset-as-color. Only *fill* colors are authored from a
+  tiny named palette; **shades are computed** (RGB darken ~30% + cool bias), missing
+  bits-colors derived from skin (HSV), goo-skin from hair, perceptual blends in
+  CIELab. One authored hex → a coordinated palette; color is a **separable late
+  stage** that re-runs without re-resolving geometry. `prior-art/character-viewer.md`.
 
 Its anti-patterns are equally instructive: **global `Math.random()` in the render
 path** (cock-fan layout, prose synonyms, random eye color — same save renders
@@ -443,27 +594,54 @@ weighed for aeriea; the `../decisions/` pillars remain the authority.
    separation** (CoC/TiTS/LT). The right shape for a deep customizable body —
    first-class plurality, clean separation — *with the tag vocabulary lifted to a
    typed, validated, serializable schema* (cf. playmate `frond`), not bare ints.
-2. **Identity-as-projection** (TiTS `race()`). Compute race/build/presentation as a
-   classification over current parts+tags; never store it. The single most aeriea-
-   relevant idea in the lineage.
+2. **Identity-as-projection** (TiTS `race()`/`mfn()`/`rawmfn()`; CoC's
+   `dogScore`/`foxScore`). Compute race/build/presented-gender/anatomical-sex by
+   **argmax over the trait bag**, never store it — *and use the same scores for both
+   prose word-choice and the visual channel* (one discriminant, two projections). The
+   single most aeriea-relevant idea in the lineage. Build the **normalized-argmax-with-
+   natural-max-tiebreak** selector TiTS *documented but never shipped* (`Creature.as:
+   9624-9632`), not its fragile ordered-`if` waterfall. (deep: `tits-body-taxonomy.md`,
+   `coc-tits-prose.md §2.3,§4`.)
 3. **Three-axis persistent deformation — current / resistance / permanence** (LT's
-   Capacity/Elasticity/Plasticity). Bodies that carry systemic history; generalizes
-   to any wear/deformation system, far beyond NSFW.
+   Capacity/Elasticity/Plasticity), with the closed loop `f(diameter, capacity,
+   elasticity, lube)` → arousal + prose-branch + deformation, all pure/seedable; the
+   same fit predicate is the single join between body-state, what changed, and how it
+   reads. Bodies that carry systemic history; generalizes to any wear/deformation
+   system far beyond NSFW. Hoist the magic fudge constants to named data params.
+   (deep: `lt-sex-engine.md §2`.)
 4. **Affinity → threshold → morphology TF, with gain/lose symmetry + a
    susceptibility stat** (Nimin) — made **data** (per-species config), seeded, on
    the structured part/tag system, so new species are content, not code.
-5. **Act space as a typed tuple over a part-area interface** —
-   `(participant, performingArea, targetedArea) × position × pace` (LT) — made
-   **serializable data (AST)**, not 1349 static objects.
-6. **The two-layer prose engine + `[part+]` descriptor-suffix + centralized grammar
-   agreement** (CoC + LT + Nimin), with templates/pools as data and selection
-   drawn from the seeded timeline (existence). See `../decisions/prose-generation.md`.
+5. **Act space as a *value-typed* tuple over a thin part-area interface** —
+   `(participant, performingArea, targetedArea)` with equals/hashCode/reverse + ambient
+   pace × position (LT) — made **serializable data**, not 1349 static objects, with
+   realization a **pure fn of (tuple, state, ctx)** (no `Main.sex` globals). Keep the
+   vocabulary tiny (~13 orifices × ~7 penetrations) and let the **surface be the cross
+   product, gated by a predicate cascade** (presence/free/exposed/known/enabled), never
+   an enumerated valid-combo table. Model concurrent engagements as an **event-sourced
+   `(part→occupant)` occupancy map** (`isFree` and double-penetration fall out free).
+   (deep: `lt-sex-engine.md §1,§3,§5`.)
+6. **The two-layer prose engine** (CoC + LT + Nimin), coupled by a **TYPED dispatch**
+   (tag enum → descriptor, not stringly-typed switch or runtime member-path
+   reflection), + `[part+]` descriptor-suffix + centralized grammar agreement +
+   **discretize-continuous-state-into-named-bands at the resolver** (CoC `cumHigh`) so
+   authors test semantics not magic numbers, + a depth-counted bracket parser with a
+   `\[` escape (TiTS) so tags nest, + TiTS's cheap output-polish pass (smart-quotes,
+   em-dash, double-space collapse). Templates/pools as data; selection drawn from the
+   seeded timeline (existence). (deep: `coc-tits-prose.md`.) See
+   `../decisions/prose-generation.md`.
 7. **Gate activity/intimacy menus by body predicates** (`hasX`/capacity checks) so
    content responds to an arbitrary body without authoring every combination
    (CoC/TiTS/Nimin) — the *good* part of authored-scene design.
-8. **Quantize continuous body → finite art index at the render seam, map as data**
-   + **graceful-degradation defaulter** + **author-one-color-derive-the-palette**
-   (CharacterViewer) — for aeriea's combinatorial body/cosmetic rendering.
+8. **Quantize continuous body → finite art index at the render seam** (ladders as
+   *data*, normalized to render-scale first) + **`(type, index-tuple)→asset`
+   dictionary** (an `undefined` hole = the TODO) + **per-type priority-collapse
+   defaulter** (the single most valuable artifact — sparse art never hard-fails;
+   generalize the arity beyond DIC's fixed 3 axes) + **reverse index** for
+   round-tripping/dependent parts + **top-bucket-is-a-scalable-asset** continuity trick
+   + **named-segment flat-tint with derived shades** from a tiny palette
+   (CharacterViewer). Add a **build-time validator** so the lenient hole behavior masks
+   TODOs, not bugs. (deep: `charviewer-render.md`.)
 9. **The determinism kit, wholesale** (existence): seeded multi-stream PRNG with
    fixed derivation order, cosmetic/mechanical stream split, action-log replay, and
    the fixed-draw-count discipline. This is what aeriea's `G` requires.
@@ -533,6 +711,13 @@ embodiment references are studied in their own docs.
 - `prior-art/coc.md`, `prior-art/tits.md`, `prior-art/nimin.md`,
   `prior-art/liliths-throne.md`, `prior-art/character-viewer.md` — the five
   firsthand studies this synthesizes.
+- **Targeted depth dives** (the full internals folded into the by-system sections
+  above): `prior-art/deep/lt-sex-engine.md` (LT's act-tuple + Capacity/Elasticity/
+  Plasticity), `prior-art/deep/coc-tits-prose.md` (the CoC/TiTS parser grammar +
+  descriptors + the argmax discriminant + TiTS's evolution),
+  `prior-art/deep/charviewer-render.md` (the quantize→select→compose→color render
+  pipeline + the graceful-degradation defaulter), `prior-art/deep/tits-body-taxonomy.md`
+  (TiTS parts+tags schema + `race()`/`mfn()`/`rawmfn()` as projection).
 - `../decisions/reference-analysis.md` — the interaction-graph / affordance framing
   this doc extends ("keep their content graph, replace their world graph").
 - `bdcc2-evaluation.md`, `../decisions/bdcc2-integration-plan.md`,

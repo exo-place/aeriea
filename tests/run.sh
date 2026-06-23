@@ -58,6 +58,8 @@ SUITES=(
   body_detail_library_test
   body_region_sliders_test
   body_caps_test
+  body_faceting_test
+  body_no_monster_test
   body_proxy_test
   body_locomotion_test
   body_motion_matching_test

@@ -69,6 +69,7 @@ SUITES=(
   creator_history_test
   creator_glow_test
   creator_phase3a_test
+  creator_phase3b_test
   morph_drag_test
   picker_test
   gpu_id_picker_test

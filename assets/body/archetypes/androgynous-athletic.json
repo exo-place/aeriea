@@ -1,0 +1,21 @@
+{
+	"_comment": "First-party archetype (Phase 3b). Frozen BodyState within every default cap interval (gate #11a). Aesthetic + roster USER-gated.",
+	"name": "Androgynous — athletic",
+	"family": "androgynous",
+	"build": "athletic",
+	"age_years": 27.0,
+	"masculinity": 52.0,
+	"muscle": 70.0,
+	"weight": 102.0,
+	"proportions": 0.55,
+	"height_cm": 176.0,
+	"modifiers": {
+		"armslegs/l-upperarm-muscle-decr|incr": 0.35,
+		"armslegs/r-upperarm-muscle-decr|incr": 0.35,
+		"armslegs/l-upperleg-muscle-decr|incr": 0.3,
+		"armslegs/r-upperleg-muscle-decr|incr": 0.3,
+		"torso/torso-vshape-decr|incr": 0.2,
+		"torso/torso-muscle-pectoral-decr|incr": 0.25,
+		"measure/measure-waist-circ-decr|incr": -0.2
+	}
+}

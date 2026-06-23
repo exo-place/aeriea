@@ -84,6 +84,8 @@ const GpuIdPickerScript := preload("res://scripts/util/gpu_id_picker.gd")
 var _morph                       ## MorphDrag (untyped: the class_name isn't visible at parse)
 var _sculpt_mode: bool = false
 var _sculpt_btn: Button
+var _sculpt_state_lbl: Label     ## live "Sculpt: ON/OFF" state indicator next to the toggle
+var _t3_main_section: Control    ## main-panel T3 section (sculpt + extremeness; tier-revealed)
 
 ## A morph drag in progress: the picked render-vertex, its world hit position, and the
 ## accumulated modifier value-deltas (so ONE history node is committed on drag-end).
@@ -132,6 +134,29 @@ var _extreme_lbl: Label              ## extremeness % readout
 var _modifier_sliders: Dictionary = {}
 
 # ---------------------------------------------------------------------------
+# PROGRESSIVE-REFINE TIERS (Phase 3b, SYNTHESIS §2.2). The creator surfaces edit depth in
+# four ADDITIVE/MONOTONE tiers — opening a deeper tier REVEALS more, never hides shallower:
+#   T0 Pick    — the archetype pick grid (BodyArchetypes roster), one button per archetype.
+#   T1 Headline— the 6 natural-unit axes (always visible once past T0).
+#   T2 Detail  — a curated subset of the region groups (high-impact, low-footgun).
+#   T3 Full    — the complete region tree + the visible Sculpt control + the extremeness gate.
+# The current tier is the MAX depth revealed; a tier selector raises it. T1 is always shown.
+# ---------------------------------------------------------------------------
+const TIER_T1 := 1
+const TIER_T2 := 2
+const TIER_T3 := 3
+var _tier: int = TIER_T1            ## the deepest tier currently revealed (monotone via UI)
+var _archetypes: Array = []         ## the loaded first-party roster (T0 pick grid source)
+var _tier_buttons: Dictionary = {}  ## tier int -> the selector Button (for pressed-state)
+var _t2_section: Control            ## the T2-curated-detail region panel section
+var _t3_section: Control            ## the T3-full region tree + sculpt section
+## Region groups surfaced at T2 (curated detail); the rest are T3-only (full registry tree).
+## A monotone reveal: T3 shows T2's groups PLUS these. (SYNTHESIS §2.2 — T2 is a curated
+## projection of registry entries; T3 is the complete tree.)
+const T2_GROUPS := ["Breasts", "Glutes & pelvis", "Belly & stomach", "Waist & hips",
+	"Torso & shoulders", "Head & face shape"]
+
+# ---------------------------------------------------------------------------
 # Edit HISTORY — a branching undo TREE over BodyState dicts (HistoryTree). Every
 # settled axis change commits a node; undo/redo walk the tree; the history panel
 # visualizes branches and jump_to lets you click any node to restore that state.
@@ -142,6 +167,7 @@ const HistoryTreeScript := preload("res://scripts/util/history_tree.gd")
 const CreatorIOScript := preload("res://scripts/body/creator_io.gd")
 const RegionSlidersScript := preload("res://scripts/body/region_sliders.gd")
 const BodyCapsScript := preload("res://scripts/body/body_caps.gd")
+const BodyArchetypesScript := preload("res://scripts/body/body_archetypes.gd")
 
 ## The cap-model foundation (SYNTHESIS.md §3): the global extremeness + the per-control
 ## allowed intervals + the apply_capped choke every LIVE write path routes through, with
@@ -183,6 +209,14 @@ func _ready() -> void:
 	var cap_errs: PackedStringArray = _caps.validate_neutral_in_interval()
 	if not cap_errs.is_empty():
 		push_error("BodyCaps gate FAILED (neutral∉[a,b]): %s" % ", ".join(cap_errs))
+	# Build-time gate #11a (§8 / §2.1): every shipped first-party archetype must lie within
+	# every control's DEFAULT interval cap(control, 0), so picking one at extremeness 0 — the
+	# most common first action — can never exceed default caps. A violation is a build defect.
+	_archetypes = BodyArchetypesScript.load_roster()
+	var arch_errs: PackedStringArray = _caps.validate_archetype_containment(
+		BodyArchetypesScript.roster_states())
+	if not arch_errs.is_empty():
+		push_error("Archetype containment gate #11a FAILED: %s" % ", ".join(arch_errs))
 	_history = HistoryTreeScript.new(_body_state.to_dict(), "initial")
 	_build_environment()
 	_build_body()
@@ -627,10 +661,28 @@ func _set_sculpt_mode(on: bool) -> void:
 	_sculpt_mode = on
 	if _sculpt_btn != null:
 		_sculpt_btn.button_pressed = on
-		_sculpt_btn.text = "Sculpt mode: ON (drag body to morph)" if on else "Sculpt mode: OFF (press M)"
+		_sculpt_btn.text = _sculpt_btn_text(on)
+	if _sculpt_state_lbl != null:
+		_sculpt_state_lbl.text = _sculpt_state_text(on)
+	# Cursor change as a second visible state indicator (§2.3): a cross in sculpt mode, the
+	# default arrow otherwise.
+	Input.set_default_cursor_shape(Input.CURSOR_CROSS if on else Input.CURSOR_ARROW)
 	if not on and _glow_overlay != null:
 		_glow_overlay.visible = false
 		_hover_vertex = -1
+
+
+## The Sculpt toggle button's label (a clearly-labeled visible control; M is only an
+## accelerator hint, never the only way in — §2.3).
+func _sculpt_btn_text(on: bool) -> String:
+	return "● Sculpt mode: ON" if on else "○ Sculpt mode: OFF"
+
+
+## The live state-indicator line under the Sculpt toggle.
+func _sculpt_state_text(on: bool) -> String:
+	if on:
+		return "drag the body to morph · drag empty space to orbit (M toggles)"
+	return "orbit/pan/zoom viewer — enable to drag-sculpt the body (M toggles)"
 
 
 # ---------------------------------------------------------------------------
@@ -793,15 +845,26 @@ func _build_ui() -> void:
 	title.text = "aeriea — character creator"
 	vbox.add_child(title)
 
-	# Sculpt-mode toggle (Slice D): the camera-vs-morph gate. ON => left-drag ON the body
-	# morphs (drag-to-modify with region glow); left-drag on the BACKGROUND still orbits.
-	_sculpt_btn = Button.new()
-	_sculpt_btn.toggle_mode = true
-	_sculpt_btn.text = "Sculpt mode: OFF (press M)"
-	_sculpt_btn.toggled.connect(func(on: bool) -> void: _set_sculpt_mode(on))
-	vbox.add_child(_sculpt_btn)
+	# TIER SELECTOR (Phase 3b, SYNTHESIS §2.2): the progressive-refine depth control. The
+	# tiers are ADDITIVE/MONOTONE — picking a deeper tier reveals more without hiding T1. T1
+	# (the headline axes) is ALWAYS visible; T2 reveals the curated detail region groups; T3
+	# reveals the full registry tree + the visible Sculpt control + the extremeness gate.
+	_build_tier_selector(vbox)
 
 	vbox.add_child(HSeparator.new())
+
+	# T0 PICK (SYNTHESIS §2.2): the archetype pick grid. Picking an archetype loads its frozen
+	# BodyState via the RAW restore path (Phase-1 raw/restore semantics; aborts any active
+	# gesture). Every shipped archetype is within default caps (gate #11a), so a pick at
+	# extremeness 0 never exceeds default caps.
+	_build_archetype_grid(vbox)
+
+	vbox.add_child(HSeparator.new())
+
+	var t1_hdr := Label.new()
+	t1_hdr.text = "T1 — headline (always visible)"
+	t1_hdr.add_theme_font_size_override("font_size", 10)
+	vbox.add_child(t1_hdr)
 
 	# [field, min, max, step, label, lo_pole, hi_pole] — the BodyState natural-unit
 	# headline axes (body-parameterization.md §2). age is in YEARS (the gate reads
@@ -825,18 +888,47 @@ func _build_ui() -> void:
 	for spec in axes:
 		_build_axis_row(vbox, spec[0], spec[1], spec[2], spec[3], spec[4], spec[5], spec[6])
 
-	vbox.add_child(HSeparator.new())
+	# T3 MAIN-PANEL SECTION (SYNTHESIS §2.2): the power-user controls — the VISIBLE Sculpt
+	# control and the global extremeness gate. Wrapped in a section the tier selector reveals
+	# at T3 (hidden at T1/T2). T1/T2 stay uncluttered; sculpt is never reachable ONLY via a
+	# hidden key — it is a clearly-labeled toggle in this revealed section (§2.3).
+	var t3_main := VBoxContainer.new()
+	t3_main.add_theme_constant_override("separation", 6)
+	_t3_main_section = t3_main
+	vbox.add_child(t3_main)
+
+	t3_main.add_child(HSeparator.new())
+	var t3_hdr := Label.new()
+	t3_hdr.text = "T3 — full control (sculpt + extremeness)"
+	t3_hdr.add_theme_font_size_override("font_size", 10)
+	t3_main.add_child(t3_hdr)
+
+	# Sculpt-mode toggle (Slice D / §2.3): the camera-vs-morph gate, surfaced as a VISIBLE,
+	# clearly-labeled toggle button with a live state indicator — NOT a hidden keybind (M
+	# remains only an accelerator). ON => left-drag ON the body morphs (drag-to-modify with
+	# region glow); left-drag on the BACKGROUND still orbits, and orbit stays instant (no pick
+	# latency) outside sculpt mode.
+	_sculpt_btn = Button.new()
+	_sculpt_btn.toggle_mode = true
+	_sculpt_btn.text = _sculpt_btn_text(false)
+	_sculpt_btn.tooltip_text = "Toggle sculpt mode — drag the body to morph it (accelerator: M)"
+	_sculpt_btn.toggled.connect(func(on: bool) -> void: _set_sculpt_mode(on))
+	t3_main.add_child(_sculpt_btn)
+
+	_sculpt_state_lbl = Label.new()
+	_sculpt_state_lbl.add_theme_font_size_override("font_size", 10)
+	_sculpt_state_lbl.text = _sculpt_state_text(false)
+	t3_main.add_child(_sculpt_state_lbl)
 
 	# EXTREMENESS control (§4 / §6): the single global scalar that widens every control's cap
 	# interval toward its hard range. Non-destructive — lowering it does NOT snap existing
 	# beyond-cap values (Phase-1 ratchet). A checkbox ("Allow extreme proportions") gates the
 	# 0..1 slider; both drive _caps.extremeness through _set_extremeness (a state-replacing op
 	# that aborts any gesture, then sweeps every control's widget bounds).
-	vbox.add_child(HSeparator.new())
 	var ex_hdr := Label.new()
 	ex_hdr.text = "extremeness (widens all caps; lowering keeps existing values)"
 	ex_hdr.add_theme_font_size_override("font_size", 10)
-	vbox.add_child(ex_hdr)
+	t3_main.add_child(ex_hdr)
 	var ex_row := HBoxContainer.new()
 	ex_row.add_theme_constant_override("separation", 4)
 	_extreme_check = CheckBox.new()
@@ -859,7 +951,7 @@ func _build_ui() -> void:
 	_extreme_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_extreme_lbl.text = "%.0f%%" % (_caps.extremeness * 100.0)
 	ex_row.add_child(_extreme_lbl)
-	vbox.add_child(ex_row)
+	t3_main.add_child(ex_row)
 
 	vbox.add_child(HSeparator.new())
 
@@ -889,7 +981,103 @@ func _build_ui() -> void:
 	_build_history_panel(canvas)
 	_build_legend_panel(canvas)
 
+	# Apply the initial tier visibility (T1 only — T2/T3 sections hidden until revealed).
+	_apply_tier()
 	_apply_state()
+	_refresh_history_panel()
+
+
+# ---------------------------------------------------------------------------
+# PROGRESSIVE-REFINE TIERS (Phase 3b, SYNTHESIS §2.2). The tier selector + the T0 pick grid,
+# and the monotone reveal: raising the tier shows more, never hides T1.
+# ---------------------------------------------------------------------------
+
+## The tier selector — three radio-like buttons (T1 / T2 / T3) that raise the revealed depth.
+## Monotone: the tier IS the max depth shown. T1 (headline) is always visible regardless.
+func _build_tier_selector(parent: VBoxContainer) -> void:
+	var hdr := Label.new()
+	hdr.text = "detail tier (deeper reveals more; T1 always shown)"
+	hdr.add_theme_font_size_override("font_size", 10)
+	parent.add_child(hdr)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	for spec in [[TIER_T1, "T1 headline"], [TIER_T2, "T2 detail"], [TIER_T3, "T3 full"]]:
+		var t := int(spec[0])
+		var btn := Button.new()
+		btn.toggle_mode = true
+		btn.text = String(spec[1])
+		btn.button_pressed = (t == _tier)
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.pressed.connect(func() -> void: _set_tier(t))
+		row.add_child(btn)
+		_tier_buttons[t] = btn
+	parent.add_child(row)
+
+
+## Raise (or set) the revealed tier and re-apply visibility. Additive/monotone reveal.
+func _set_tier(t: int) -> void:
+	_tier = clampi(t, TIER_T1, TIER_T3)
+	_apply_tier()
+
+
+## Apply the current tier to every tier-gated section's visibility (T1 always on; T2 section
+## shown at tier >= T2; T3 section + the main-panel T3 controls shown at tier == T3). The
+## tier-selector buttons reflect the active tier.
+func _apply_tier() -> void:
+	for t in _tier_buttons:
+		(_tier_buttons[t] as Button).button_pressed = (int(t) == _tier)
+	if _t2_section != null:
+		_t2_section.visible = _tier >= TIER_T2
+	if _t3_section != null:
+		_t3_section.visible = _tier >= TIER_T3
+	if _t3_main_section != null:
+		_t3_main_section.visible = _tier >= TIER_T3
+	# Leaving T3 also leaves sculpt mode (its control is no longer visible — no orphaned mode).
+	if _tier < TIER_T3 and _sculpt_mode:
+		_set_sculpt_mode(false)
+
+
+## The T0 ARCHETYPE PICK GRID (SYNTHESIS §2.2 / §2.1): one button per first-party archetype,
+## grouped by family. Picking one loads its frozen BodyState via the raw restore path
+## (Phase-1 raw/restore semantics) — every archetype is within default caps (gate #11a), so a
+## pick at extremeness 0 never exceeds default caps. Whether an archetype LOOKS GOOD is
+## USER-taste-gated content; the grid surfaces the system + representative set.
+func _build_archetype_grid(parent: VBoxContainer) -> void:
+	var hdr := Label.new()
+	hdr.text = "T0 — pick an archetype"
+	hdr.add_theme_font_size_override("font_size", 10)
+	parent.add_child(hdr)
+	if _archetypes.is_empty():
+		var empty := Label.new()
+		empty.text = "(no archetypes installed)"
+		empty.add_theme_font_size_override("font_size", 10)
+		parent.add_child(empty)
+		return
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 4)
+	grid.add_theme_constant_override("v_separation", 4)
+	for arch in _archetypes:
+		var btn := Button.new()
+		btn.text = String(arch["name"])
+		btn.tooltip_text = "Load the '%s' archetype (raw — replaces the current body)" % arch["name"]
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var state: Dictionary = arch["state"]
+		btn.pressed.connect(func() -> void: _pick_archetype(state, String(arch["name"])))
+		grid.add_child(btn)
+	parent.add_child(grid)
+
+
+## Load an archetype's frozen BodyState (T0 pick). This is the RAW restore path (§2.1 / §4.3
+## path 7a): it commits the archetype state into the history tree as a new node, then restores
+## it via _restore_current — which aborts any active gesture and writes the model RAW (no
+## re-clamp). Because the archetype is within default caps by construction (gate #11a), raw ==
+## capped at extremeness 0 and no slider bound ratchets open on the pick.
+func _pick_archetype(state: Dictionary, name: String) -> void:
+	# Commit the archetype as a history node so the pick is undoable + recorded, then restore.
+	_caps.abort_gesture()
+	_history.commit(state.duplicate(true), "archetype: %s" % name)
+	_restore_current()
 	_refresh_history_panel()
 
 
@@ -1304,8 +1492,33 @@ func _build_region_sliders_panel(canvas: CanvasLayer) -> void:
 	list.add_theme_constant_override("separation", 2)
 	scroll.add_child(list)
 
+	# T2 CURATED DETAIL (SYNTHESIS §2.2): a curated subset of the region groups (high-impact,
+	# low-footgun). Revealed at tier >= T2. The remaining groups (the full registry tree) live
+	# in the T3 section below — a monotone reveal: T3 shows T2's groups PLUS the rest.
+	var t2 := VBoxContainer.new()
+	t2.add_theme_constant_override("separation", 2)
+	_t2_section = t2
+	list.add_child(t2)
+	var t2_hdr := Label.new()
+	t2_hdr.text = "T2 — curated detail"
+	t2_hdr.add_theme_font_size_override("font_size", 10)
+	t2.add_child(t2_hdr)
+
+	# T3 FULL REGISTRY TREE (SYNTHESIS §2.2): every remaining region group (the long tail of
+	# the registry). Revealed at tier == T3. Sculpt + extremeness live in the main-panel T3
+	# section; this is the full slider tree.
+	var t3 := VBoxContainer.new()
+	t3.add_theme_constant_override("separation", 2)
+	_t3_section = t3
+	list.add_child(t3)
+	var t3_hdr := Label.new()
+	t3_hdr.text = "T3 — full registry tree"
+	t3_hdr.add_theme_font_size_override("font_size", 10)
+	t3.add_child(t3_hdr)
+
 	for grp in RegionSlidersScript.GROUPS:
 		var group_label: String = grp[0]
+		var dest: VBoxContainer = t2 if T2_GROUPS.has(group_label) else t3
 		# Collapsible region group: a header button that toggles its contents.
 		var group_box := VBoxContainer.new()
 		group_box.add_theme_constant_override("separation", 1)
@@ -1323,8 +1536,8 @@ func _build_region_sliders_panel(canvas: CanvasLayer) -> void:
 		for spec in grp[1]:
 			_build_modifier_row(contents, spec[0], spec[1], spec[2], spec[3])
 		group_box.add_child(contents)
-		list.add_child(group_box)
-		list.add_child(HSeparator.new())
+		dest.add_child(group_box)
+		dest.add_child(HSeparator.new())
 
 
 ## One detail-slider row, bound to a RegionSliders spec. The slider's range/default come from

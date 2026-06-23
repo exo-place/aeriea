@@ -1,0 +1,22 @@
+{
+	"_comment": "First-party archetype (Phase 3b). Frozen BodyState within every default cap interval (gate #11a). Aesthetic + roster USER-gated.",
+	"name": "Feminine — curvy",
+	"family": "feminine",
+	"build": "curvy",
+	"age_years": 28.0,
+	"masculinity": 22.0,
+	"muscle": 35.0,
+	"weight": 110.0,
+	"proportions": 0.55,
+	"height_cm": 164.0,
+	"modifiers": {
+		"measure/measure-bust-circ-decr|incr": 0.4,
+		"measure/measure-underbust-circ-decr|incr": 0.2,
+		"measure/measure-waist-circ-decr|incr": -0.2,
+		"measure/measure-hips-circ-decr|incr": 0.45,
+		"buttocks/buttocks-volume-decr|incr": 0.42,
+		"hip/hip-scale-horiz-decr|incr": 0.3,
+		"measure/measure-thigh-circ-decr|incr": 0.3,
+		"measure/measure-shoulder-dist-decr|incr": -0.1
+	}
+}

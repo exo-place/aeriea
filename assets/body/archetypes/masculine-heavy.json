@@ -1,0 +1,20 @@
+{
+	"_comment": "First-party archetype (Phase 3b). Frozen BodyState within every default cap interval (gate #11a). Aesthetic + roster USER-gated.",
+	"name": "Masculine — heavy",
+	"family": "masculine",
+	"build": "heavy",
+	"age_years": 38.0,
+	"masculinity": 74.0,
+	"muscle": 45.0,
+	"weight": 114.0,
+	"proportions": 0.5,
+	"height_cm": 180.0,
+	"modifiers": {
+		"measure/measure-waist-circ-decr|incr": 0.4,
+		"torso/torso-scale-depth-decr|incr": 0.35,
+		"stomach/stomach-tone-decr|incr": -0.3,
+		"measure/measure-shoulder-dist-decr|incr": 0.3,
+		"neck/neck-double-decr|incr": 0.2,
+		"head/head-fat-decr|incr": 0.25
+	}
+}

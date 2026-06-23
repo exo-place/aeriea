@@ -1,0 +1,20 @@
+{
+	"_comment": "First-party archetype (Phase 3b). A frozen BodyState authored WITHIN every control's DEFAULT cap interval cap(control, 0) — gate #11a fails the build otherwise. Aesthetic verdict + roster expansion are USER-gated (docs/decisions/character-creator-and-body.md §2.1).",
+	"name": "Feminine — slim",
+	"family": "feminine",
+	"build": "slim",
+	"age_years": 24.0,
+	"masculinity": 24.0,
+	"muscle": 38.0,
+	"weight": 92.0,
+	"proportions": 0.58,
+	"height_cm": 166.0,
+	"modifiers": {
+		"measure/measure-bust-circ-decr|incr": 0.12,
+		"measure/measure-waist-circ-decr|incr": -0.3,
+		"measure/measure-hips-circ-decr|incr": 0.18,
+		"buttocks/buttocks-volume-decr|incr": 0.15,
+		"measure/measure-shoulder-dist-decr|incr": -0.15,
+		"torso/torso-vshape-decr|incr": -0.1
+	}
+}

@@ -187,6 +187,14 @@ var _history: HistoryTree
 ## record ONE node per settled change, not one per pixel.
 var _drag_pending: Dictionary = {}   ## field -> bool (a drag is in progress)
 var _suspend_commit: bool = false    ## true while applying a restored state (no commit)
+## True while a RAW restore/load is rewriting widgets (§3.2 paths 6/7). Setting a slider's
+## min/max while tightening the cap interval below the prior value makes Godot's Range
+## clamp-and-EMIT value_changed; the live capped callback would then WRITE a stepped value into
+## the model (commit suppressed by _suspend_commit, but the model write is NOT) and corrupt the
+## restore. This flag makes every live slider/spin callback a hard no-op during restore — the
+## restore writes the model itself, raw. Surfaces when a load LOWERS extremeness (import/autosave),
+## narrowing caps below the loaded values.
+var _restoring: bool = false
 
 var _history_list: VBoxContainer     ## the linear branch-nav node list (rebuilt on change)
 var _history_panel: Control          ## the whole history panel (hidden by default; toggled)
@@ -200,6 +208,10 @@ var _ctrl_used_combo: bool = false   ## a Ctrl-combo fired this hold (so release
 
 ## The image format the export actions use (one of CreatorIO/ImageMetadata FORMAT_* keys).
 var _image_format: String = "png"
+
+## True once _ready finished restoring (so the build-time _refresh_history_panel calls and the
+## restore itself don't autosave the default over a saved character before it is loaded, §6).
+var _persistence_armed: bool = false
 
 
 func _ready() -> void:
@@ -225,6 +237,29 @@ func _ready() -> void:
 	_build_ui()
 	_recenter_pivot()
 	_update_camera()
+	# PERSISTENCE (Phase 4 / SYNTHESIS §6): restore the autosaved character if one exists —
+	# this is what makes creator → parkour → creator (cross-scene; the launcher FREES this scene
+	# on switch) AND an app restart keep the body. Restored RAW through the same path import uses
+	# (beyond-cap persists). Absent → the default new character built above stands.
+	_restore_from_autosave()
+	# Arm persistence only AFTER the restore, so the build-time panel refreshes + the restore's
+	# own commit don't autosave the default state over the saved character before it loads.
+	_persistence_armed = true
+
+
+## Restore the autosaved character (cross-scene + restart persistence, §6). The autosave store
+## is the CharacterAutosave autoload (survives scene frees) mirrored to user://. Applies the
+## payload via the RAW restore path (replaces the history tree if the save carried one, else
+## seeds a fresh tree from the body), and restores the global extremeness. No-op (keeps the
+## default new character) if nothing is saved.
+func _restore_from_autosave() -> void:
+	var store := get_node_or_null("/root/CharacterAutosave")
+	if store == null or not store.has_save():
+		return
+	var res: Dictionary = store.restore()
+	if not bool(res.get("ok", false)) or res.get("body", null) == null:
+		return
+	_apply_imported(res, "restored")
 
 
 # ---------------------------------------------------------------------------
@@ -1235,6 +1270,22 @@ func _build_export_ui(vbox: VBoxContainer) -> void:
 	_img_history_btn.pressed.connect(func() -> void: _export_image(true))
 	vbox.add_child(_img_history_btn)
 
+	# IMPORT (Phase 4 / SYNTHESIS §6 slice 1): pair the export actions with an Import affordance
+	# that loads a previously-EXPORTED character — a JSON payload (current or with-history) OR an
+	# image (PNG/JPG/WEBP) carrying the embedded history — via the EXISTING creator_io.gd read
+	# functions (parse_payload / extract_history_from_image). Applied RAW (a beyond-cap value
+	# persists). A FileDialog is the picker; drag-and-drop of a file onto the window is the second
+	# affordance (see _on_files_dropped). No new parser — pure wiring over the read side.
+	vbox.add_child(HSeparator.new())
+	var imp_hdr := Label.new()
+	imp_hdr.text = "import"
+	vbox.add_child(imp_hdr)
+	var imp_btn := Button.new()
+	imp_btn.text = "Import character… (JSON / image)"
+	imp_btn.tooltip_text = "Load a previously-exported character (or drag a saved file onto the window)"
+	imp_btn.pressed.connect(_open_import_dialog)
+	vbox.add_child(imp_btn)
+
 	_status_lbl = Label.new()
 	_status_lbl.add_theme_font_size_override("font_size", 10)
 	_status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1242,6 +1293,82 @@ func _build_export_ui(vbox: VBoxContainer) -> void:
 	vbox.add_child(_status_lbl)
 
 	_update_image_history_enabled()
+	# Wire window file-drop as the drag-and-drop import affordance (§6 slice 1).
+	if get_window() != null and not get_window().files_dropped.is_connected(_on_files_dropped):
+		get_window().files_dropped.connect(_on_files_dropped)
+
+
+# ---------------------------------------------------------------------------
+# IMPORT (§6 slice 1) — the read side EXISTS in creator_io.gd; this is the scene wiring: a
+# FileDialog picker + window drag-and-drop, both funneling a chosen file through _import_file →
+# the existing CreatorIO parse/extract functions → _apply_imported (the RAW restore path).
+# ---------------------------------------------------------------------------
+
+var _import_dialog: FileDialog
+
+## Open (lazily building) the import FileDialog filtered to the exportable character formats.
+func _open_import_dialog() -> void:
+	if _import_dialog == null:
+		_import_dialog = FileDialog.new()
+		_import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		_import_dialog.access = FileDialog.ACCESS_FILESYSTEM
+		_import_dialog.use_native_dialog = false
+		_import_dialog.add_filter("*.json", "Character JSON")
+		_import_dialog.add_filter("*.png", "Character image (PNG)")
+		_import_dialog.add_filter("*.jpg,*.jpeg", "Character image (JPG)")
+		_import_dialog.add_filter("*.webp", "Character image (WEBP)")
+		_import_dialog.size = Vector2i(640, 480)
+		_import_dialog.file_selected.connect(_import_file)
+		# Parent under a CanvasLayer so it draws above the 3D view.
+		var layer := CanvasLayer.new()
+		add_child(layer)
+		layer.add_child(_import_dialog)
+	# Default to the creator's own export dir if it exists (where the export buttons write).
+	var exp_dir := ProjectSettings.globalize_path(CreatorIOScript.EXPORT_DIR)
+	if DirAccess.dir_exists_absolute(exp_dir):
+		_import_dialog.current_dir = exp_dir
+	_import_dialog.popup_centered()
+
+
+## The window drag-and-drop import handler (§6 slice 1): import the FIRST dropped file.
+func _on_files_dropped(files: PackedStringArray) -> void:
+	if files.size() > 0:
+		_import_file(files[0])
+
+
+## Import a character from an absolute file path. JSON → CreatorIO.parse_payload directly; an
+## image (PNG/JPG/WEBP) → extract the embedded history JSON via CreatorIO.extract_history_from_image
+## then parse it. Applies the result RAW via _apply_imported. Reports failures honestly (a toast).
+func _import_file(path: String) -> void:
+	var ext := path.get_extension().to_lower()
+	var text := ""
+	if ext == "json":
+		var f := FileAccess.open(path, FileAccess.READ)
+		if f == null:
+			_toast("import failed: cannot open %s" % path.get_file())
+			return
+		text = f.get_as_text()
+		f.close()
+	elif ext in ["png", "jpg", "jpeg", "webp"]:
+		var f := FileAccess.open(path, FileAccess.READ)
+		if f == null:
+			_toast("import failed: cannot open %s" % path.get_file())
+			return
+		var bytes := f.get_buffer(f.get_length())
+		f.close()
+		var fmt := "jpg" if ext == "jpeg" else ext
+		text = CreatorIOScript.extract_history_from_image(bytes, fmt)
+		if text == "":
+			_toast("import failed: %s carries no embedded character" % path.get_file())
+			return
+	else:
+		_toast("import failed: unsupported file type .%s" % ext)
+		return
+	var res: Dictionary = CreatorIOScript.parse_payload(text)
+	if not bool(res.get("ok", false)) or res.get("body", null) == null:
+		_toast("import failed: not a valid character file")
+		return
+	_apply_imported(res, "imported")
 
 
 func _on_image_format_selected(idx: int) -> void:
@@ -1264,6 +1391,11 @@ func _update_image_history_enabled() -> void:
 ## child) show a `‹ i/n ›` selector whose arrows switch which child branch is followed from
 ## that junction (switch_branch = jump current onto that child's preferred-child leaf).
 func _refresh_history_panel() -> void:
+	# Autosave on every state change (§6): this is the universal "the current state moved" funnel
+	# — every commit AND every navigation (undo/redo/jump/branch/restore) routes through here, so
+	# the autosave always reflects the live character. Guarded by _persistence_armed so the
+	# build-time + restore-time calls don't clobber a saved character before it loads.
+	_autosave()
 	if _undo_btn != null:
 		_undo_btn.disabled = not _history.can_undo()
 	if _redo_btn != null:
@@ -1369,6 +1501,8 @@ func _build_axis_row(parent: VBoxContainer, field: String, _lo: float, _hi: floa
 	# the requested v is clamped to the headline axis's allowed interval; the clamped
 	# `new` is written back to the thumb + label via set_value_no_signal (no re-entry).
 	slider.value_changed.connect(func(v: float) -> void:
+		if _restoring:
+			return   # raw restore is rewriting widgets; ignore the clamp-emitted callback
 		var one_write := not bool(_drag_pending.get(field, false))
 		if one_write:
 			_caps.start_gesture()
@@ -1425,6 +1559,8 @@ func _build_axis_row(parent: VBoxContainer, field: String, _lo: float, _hi: floa
 	spin.add_theme_font_size_override("font_size", 10)
 	spin.set_value_no_signal(float(_body_state.get(field)))
 	spin.value_changed.connect(func(v: float) -> void:
+		if _restoring:
+			return
 		_caps.start_gesture()
 		var cur := float(_body_state.get(field))
 		var nv: float = _caps.apply_capped(field, v, cur)
@@ -1582,6 +1718,8 @@ func _build_modifier_row(parent: VBoxContainer, spec_name: String, display: Stri
 	# thumb's value write-back uses the clamped result for full_names[0]. Bounds reflect the
 	# CONSERVATIVE intersection of the resolved sides (§3.2 step 4, MI14-1).
 	slider.value_changed.connect(func(v: float) -> void:
+		if _restoring:
+			return   # raw restore is rewriting widgets; ignore the clamp-emitted callback
 		var one_write := not bool(_drag_pending.get(spec_name, false))
 		if one_write:
 			_caps.start_gesture()
@@ -1624,6 +1762,8 @@ func _build_modifier_row(parent: VBoxContainer, spec_name: String, display: Stri
 	spin.add_theme_font_size_override("font_size", 10)
 	spin.set_value_no_signal(_modifier_to_display(float(slider.value), is_bidir))
 	spin.value_changed.connect(func(disp: float) -> void:
+		if _restoring:
+			return
 		# A numeric commit is a one-write gesture through the choke (§4.3 path 4).
 		_caps.start_gesture()
 		var req := _display_to_modifier(disp, is_bidir)
@@ -1872,9 +2012,9 @@ func _restore_modifier_sliders() -> void:
 		var e = _modifier_sliders[spec_name]
 		var fn := (e["full_names"] as PackedStringArray)[0]
 		var v := float(_body_state.modifiers.get(fn, 0.0))
+		var slider := e["slider"] as HSlider
 		# Recompute bounds from the (now restored) settled values, then widen to contain v.
 		_apply_modifier_slider_bounds(spec_name)
-		var slider := e["slider"] as HSlider
 		slider.min_value = minf(slider.min_value, v)
 		slider.max_value = maxf(slider.max_value, v)
 		slider.set_value_no_signal(v)
@@ -2038,6 +2178,62 @@ func _jump_to_node(id: int) -> void:
 		_restore_current()
 
 
+## Apply a parsed import/restore payload ({ body: BodyState, tree: HistoryTree-or-null,
+## extremeness: float }) onto the live creator. The single funnel for BOTH the Import button
+## and the autosave restore (§6). RAW (paths 7 / 7-import): aborts any active gesture, replaces
+## the history tree (or seeds a fresh one from the body when the payload carried no history),
+## restores the global extremeness, then restores the body + widgets via _restore_current
+## (no re-clamp → a beyond-cap value persists). `verb` labels the transient toast.
+func _apply_imported(res: Dictionary, verb: String) -> void:
+	var body: BodyState = res.get("body", null)
+	if body == null:
+		return
+	# Gesture-lifecycle-interruption invariant (§3.2): a load is a state-replacing op — abort any
+	# in-flight gesture and clear sculpt accumulators BEFORE replacing the model underneath it.
+	_caps.abort_gesture()
+	_dragging_morph = false
+	_drag_accum = {}
+	_drag_vertex = -1
+	# Restore the global extremeness FIRST so the bounds sweep in _restore_current uses the
+	# loaded cap envelope. Set the scalar directly (not via _set_extremeness, which aborts the
+	# gesture again + sweeps before the body is loaded); the widgets sync below.
+	_caps.extremeness = clampf(float(res.get("extremeness", 0.0)), 0.0, 1.0)
+	if _extreme_slider != null:
+		_extreme_slider.set_value_no_signal(_caps.extremeness)
+	if _extreme_check != null:
+		_extreme_check.set_pressed_no_signal(_caps.extremeness > 0.0)
+	if _extreme_lbl != null:
+		_extreme_lbl.text = "%.0f%%" % (_caps.extremeness * 100.0)
+	# Replace the history tree: a with-history payload carries the whole branching tree; a
+	# current-only payload seeds a fresh single-node tree from the body (so undo still works).
+	var tree = res.get("tree", null)
+	if tree != null:
+		_history = tree
+	else:
+		_history = HistoryTreeScript.new(body.to_dict(), verb)
+	# _restore_current reads the tree's CURRENT node and writes it raw onto the body + widgets.
+	_restore_current()
+	_refresh_history_panel()
+	_toast("%s character" % verb)
+
+
+## Autosave the current character to the CharacterAutosave store (cross-scene + restart, §6).
+## Called on every committed change funnel and on _exit_tree. Serializes BodyState + the whole
+## HistoryTree + the global extremeness (RAW). Cheap; the store mirrors to user://.
+func _autosave() -> void:
+	if not _persistence_armed:
+		return
+	var store := get_node_or_null("/root/CharacterAutosave")
+	if store != null:
+		store.save(_body_state, _history, _caps.extremeness)
+
+
+## On scene free (the launcher frees this mode on a tab switch, and the app frees it on close),
+## persist the final character so re-entering the creator restores it (§6).
+func _exit_tree() -> void:
+	_autosave()
+
+
 ## Apply the history's current node state onto the body + sliders WITHOUT committing.
 ## A RAW restore/load (§3.2 paths 6/7) — it BYPASSES the choke (set_value_no_signal, no
 ## re-clamp, beyond-cap persists) AND, per the gesture-lifecycle-interruption invariant
@@ -2054,6 +2250,10 @@ func _restore_current() -> void:
 	_drag_vertex = -1
 	var bs := BodyState.from_dict(d)
 	_suspend_commit = true
+	# Raw-restore guard (§3.2 paths 6/7): tightening a slider's bounds below its prior value makes
+	# Godot's Range clamp-and-EMIT value_changed; _restoring makes the live callback a no-op so the
+	# emit can't write a stepped value into the model. The restore writes the model itself, raw.
+	_restoring = true
 	for field in _sliders:
 		var v := float(bs.get(field))
 		_body_state.set(field, v)
@@ -2071,6 +2271,7 @@ func _restore_current() -> void:
 	# region sliders re-sync to it. Replace the live map so cleared modifiers actually clear.
 	_body_state.modifiers = bs.modifiers.duplicate()
 	_restore_modifier_sliders()
+	_restoring = false
 	_suspend_commit = false
 	_apply_state()
 	_refresh_history_panel()

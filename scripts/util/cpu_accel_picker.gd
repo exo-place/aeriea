@@ -61,7 +61,23 @@ func is_dirty() -> bool:
 
 
 ## Mark the grid stale. The owner calls this on a morph bake; the next pick() rebuilds.
+## NOTE: a bare mark_dirty() rebuilds from the CACHED `_positions` (the geometry from the
+## LAST build). On a morph bake the rest-space positions CHANGE, so the owner must push the
+## new morphed positions via set_geometry() — otherwise the lazy rebuild re-grids the STALE
+## neutral surface and picks land on neutral geometry, not the morphed body (B2 defect).
 func mark_dirty() -> void:
+	_dirty = true
+
+
+## Owner-driven source refresh: replace the cached source geometry with the CURRENT morphed
+## rest-space positions (+ the unchanged triangle index list) and mark the grid stale, so the
+## next pick() rebuilds the spatial grid over the MORPHED surface. The owner calls this on a
+## morph bake with the same baked ARRAY_VERTEX the renderer + glow + locality read, so the
+## raycast targets the surface the player actually sees (B2 correctness). Cheap: no rebuild
+## here — the grid is rebuilt lazily once on the next pick (the drag-frame-rebuild guard).
+func set_geometry(rest_positions: PackedVector3Array, tris: PackedInt32Array) -> void:
+	_positions = rest_positions
+	_tris = tris
 	_dirty = true
 
 

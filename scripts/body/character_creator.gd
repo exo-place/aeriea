@@ -410,6 +410,24 @@ func _refresh_glow_geometry() -> void:
 	_glow_geom_dirty = false
 
 
+## Feed the CPU picker the CURRENT morphed rest-space surface (B2 correctness). The owner
+## (this creator) reads the SAME baked ARRAY_VERTEX the renderer + glow + locality read and
+## pushes it into the picker on every morph bake, so the next pick raycasts the morphed body
+## rather than the picker's stale build-time neutral source. Topology (ARRAY_INDEX) is invariant
+## under morph, so the cached _glow_tris stays correct. set_geometry() only updates the source +
+## marks dirty — the grid rebuild stays lazy (once on the next pick), preserving the no-per-
+## drag-frame-rebuild guarantee.
+func _refresh_picker_geometry() -> void:
+	if _cpu_picker == null:
+		return
+	if _rig == null or _rig.mesh_instance == null or not (_rig.mesh_instance.mesh is ArrayMesh):
+		return
+	var morphed: PackedVector3Array = (_rig.mesh_instance.mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	if morphed.is_empty() or _glow_tris.is_empty():
+		return
+	_cpu_picker.set_geometry(morphed, _glow_tris)
+
+
 func _build_camera() -> void:
 	_camera = Camera3D.new()
 	_camera.name = "OrbitCamera"
@@ -1937,8 +1955,8 @@ func _display_to_modifier(disp: float, _is_bidir: bool) -> float:
 func _rebake_tangents_on_commit() -> void:
 	if _rig != null and _rig.mesh_instance != null:
 		_rig.apply_body_state(_body_state, true)
-		if _cpu_picker != null:
-			_cpu_picker.mark_dirty()
+		# Re-bake changed the rest-space positions → feed the picker the morphed surface (B2).
+		_refresh_picker_geometry()
 
 
 ## RESET one region control to neutral (§2.3): a RESTORE-class op (raw write, no re-clamp) —
@@ -2048,13 +2066,13 @@ func _apply_state() -> void:
 		# in-game skinned body uses). Godot's octahedral blendshape-normal storage can't
 		# carry normal deltas, so a GPU-only morph is mis-lit (see BodyState/BodyRig).
 		_rig.apply_body_state(_body_state)
-		# The rest-space baked positions just changed → the CPU pick grid is stale. Mark it
-		# dirty; the picker rebuilds lazily on the next pick (no per-bake-frame rebuild cost).
-		if _cpu_picker != null:
-			_cpu_picker.mark_dirty()
-		# The glow overlay reads the SAME baked surface — mark it dirty too so the next glow
-		# rebuild re-fetches the morphed positions+normals (tracks the morph; §2.3 / §6.6).
+		# The rest-space baked positions just changed → both the CPU pick grid AND the glow
+		# overlay are stale. Mark the glow dirty so its next rebuild re-fetches the morphed
+		# positions+normals (§2.3 / §6.6), and FEED the picker the SAME morphed surface so its
+		# next lazy rebuild raycasts the morphed body — NOT its stale neutral source cache
+		# (B2 correctness: a bare mark_dirty() would re-grid the build-time neutral positions).
 		_glow_geom_dirty = true
+		_refresh_picker_geometry()
 	for field in _value_labels:
 		(_value_labels[field] as Label).text = _format_value(field)
 	for field in _axis_spins:

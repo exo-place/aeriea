@@ -164,6 +164,38 @@ static func resolve_full_names(spec_name: String) -> PackedStringArray:
 		out.append(spec_name)
 	return out
 
+## The contralateral MIRROR-application map (SYNTHESIS §1.3 / decision §2.3): given a registry
+## `full_name`, return its left/right TWIN — the same name with the side marker flipped (l-↔r-)
+## — or the SAME name when it has no twin (a MIDLINE modifier: the midline guard). This is the
+## sole map the MIRROR toggle uses to ALSO apply a one-sided edit to the opposite side. It is
+## ORTHOGONAL to resolve_full_names (which is structural bilateral RESOLUTION, always on):
+## resolution turns a bare bilateral STEM into both side full_names regardless of the toggle;
+## this map flips the side of an already-resolved full_name only when mirror is ON.
+##
+## A side marker is `l-`/`r-` at a path-segment boundary — either right after the registry group
+## prefix ("armslegs/l-…" ↔ "armslegs/r-…") or at the very start of a bare name ("l-…" ↔ "r-…").
+## A name with neither (e.g. "nose/nose-scale-vert-decr|incr", "stomach/stomach-tone-decr|incr")
+## is midline and returns unchanged, so the caller's `twin(M) != M` guard suppresses a
+## double-apply on midline edits.
+static func twin(full_name: String) -> String:
+	# "<prefix>/l-<rest>" ↔ "<prefix>/r-<rest>" (the armslegs bilateral modifiers).
+	var slash := full_name.rfind("/")
+	if slash >= 0:
+		var head := full_name.substr(0, slash + 1)
+		var tail := full_name.substr(slash + 1)
+		if tail.begins_with("l-"):
+			return "%sr-%s" % [head, tail.substr(2)]
+		if tail.begins_with("r-"):
+			return "%sl-%s" % [head, tail.substr(2)]
+		return full_name
+	# Bare name with a leading side marker ("l-…" ↔ "r-…"); else midline (unchanged).
+	if full_name.begins_with("l-"):
+		return "r-%s" % full_name.substr(2)
+	if full_name.begins_with("r-"):
+		return "l-%s" % full_name.substr(2)
+	return full_name
+
+
 ## A flat list of every slider spec across all groups, as Dictionaries:
 ##   { group, name (spec token), display, lo_pole, hi_pole }. Iteration order = display order.
 static func all_specs() -> Array:

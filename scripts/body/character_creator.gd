@@ -83,6 +83,16 @@ const GpuIdPickerScript := preload("res://scripts/util/gpu_id_picker.gd")
 
 var _morph                       ## MorphDrag (untyped: the class_name isn't visible at parse)
 var _sculpt_mode: bool = false
+## MIRROR (contralateral symmetry) toggle — DEFAULT ON (SYNTHESIS §1.3 / decision §2.3). When
+## ON, a ONE-SIDED edit (a sculpt drag on one arm/leg, or a lateral slider whose resolved name
+## has an l-/r- twin) ALSO applies the same capped write to the contralateral twin(M) — so the
+## body stays symmetric by default (the user disliked asymmetry-on-by-default). When OFF, the
+## edit applies only to the touched side. ORTHOGONAL to bilateral RESOLUTION (resolve_full_names
+## drives both sides of a bare bilateral stem at all times, mirror-independent — a bilateral
+## slider always drives both). The midline guard (twin(M) == M) suppresses a double-apply on
+## midline modifiers, which are unaffected by the toggle.
+var _mirror: bool = true
+var _mirror_btn: CheckBox
 var _sculpt_btn: Button
 var _sculpt_state_lbl: Label     ## live "Sculpt: ON/OFF" state indicator next to the toggle
 var _t3_main_section: Control    ## main-panel T3 section (sculpt + extremeness; tier-revealed)
@@ -126,6 +136,10 @@ var _axis_spins: Dictionary = {}     ## field -> SpinBox (headline numeric entry
 var _extreme_slider: HSlider         ## the global extremeness 0..1 slider
 var _extreme_check: CheckBox         ## "allow extreme proportions" gate
 var _extreme_lbl: Label              ## extremeness % readout
+## EYE COLOR (procedural iris_color uniform, §6.3): the live color + its picker widget. Drives
+## BodyRig.set_eye_params({"iris_color": …}); no texture, no gaze change.
+var _eye_color: Color = BodyRig.EYE_PARAMS_DEFAULT["iris_color"]
+var _eye_color_btn: ColorPickerButton
 
 ## DATA-DRIVEN per-region detail sliders (RegionSliders). Kept SEPARATE from `_sliders`
 ## (the headline-axis dials) because these write BodyState.modifiers[<full_name>] rather
@@ -623,25 +637,43 @@ func _apply_morph_drag(drag_screen: Vector2) -> void:
 	if deltas.is_empty():
 		return
 	for full_name in deltas:
-		# Route the sculpt write through the choke (§3.2 path 1): req = cur + delta, capped.
-		# apply_capped reads cur as the stored value or neutral if absent, captures the held
-		# cur_start on first touch within this sculpt gesture, and clamps to the DERIVED-or-
-		# AUTHORED interval so even an uncurated modifier (build_accel reaches all ~280) caps.
-		var cur := float(_body_state.modifiers.get(full_name, 0.0))
-		var req := cur + float(deltas[full_name])
-		var nv: float = _caps.apply_capped(full_name, req, cur)
-		if absf(nv) < 1e-6:
-			_body_state.modifiers.erase(full_name)
-		else:
-			_body_state.modifiers[full_name] = nv
-		# Sync the bound region slider's value + bounds to the clamped result (B10-1) — the
-		# modifier may be bound to a T2/T3 slider; bounds-first then no-signal value write.
-		_sync_modifier_slider(full_name, nv)
-		_drag_accum[full_name] = float(_drag_accum.get(full_name, 0.0)) + (nv - cur)
+		_apply_sculpt_delta_mirrored(full_name, float(deltas[full_name]))
 	_apply_state()
 	# Keep the glow on the active region while dragging (re-pick the vertex's footprint).
 	var weights: Dictionary = _morph.glow_weights(_drag_vertex, hit_local, _glow_base_pos)
 	_rebuild_glow_mesh(weights)
+
+
+## Apply a sculpt delta to a touched modifier AND — when MIRROR is ON — to its contralateral
+## twin(M) (decision §2.3). This is the sculpt write the per-frame drag loop runs for each
+## decomposed modifier. The touched side always writes; with mirror ON the SAME delta also
+## applies to twin(M) (capped against ITS OWN cur), so sculpting one arm/leg shapes the other —
+## the user's "sculpted one arm, the other didn't change" fix. The midline guard (twin == self)
+## suppresses a double-apply on midline modifiers, which the toggle leaves unaffected.
+func _apply_sculpt_delta_mirrored(full_name: String, delta: float) -> void:
+	_apply_sculpt_delta(full_name, delta)
+	if _mirror:
+		var tw := RegionSlidersScript.twin(full_name)
+		if tw != full_name:
+			_apply_sculpt_delta(tw, delta)
+
+
+## Apply ONE sculpt delta to ONE modifier through the choke (§3.2 path 1): req = cur + delta,
+## capped against the modifier's own cur (held cur_start after first touch this gesture), stored
+## with the erase-at-neutral housekeeping, the bound region slider synced, and the drag-accum
+## updated by the ACTUAL applied delta. Shared by the touched modifier and its mirror twin.
+func _apply_sculpt_delta(full_name: String, delta: float) -> void:
+	var cur := float(_body_state.modifiers.get(full_name, 0.0))
+	var req := cur + delta
+	var nv: float = _caps.apply_capped(full_name, req, cur)
+	if absf(nv) < 1e-6:
+		_body_state.modifiers.erase(full_name)
+	else:
+		_body_state.modifiers[full_name] = nv
+	# Sync the bound region slider's value + bounds to the clamped result (B10-1) — the
+	# modifier may be bound to a T2/T3 slider; bounds-first then no-signal value write.
+	_sync_modifier_slider(full_name, nv)
+	_drag_accum[full_name] = float(_drag_accum.get(full_name, 0.0)) + (nv - cur)
 
 
 ## World metres that one screen pixel spans at `world_pos`'s DEPTH, under the current camera —
@@ -723,6 +755,64 @@ func _set_sculpt_mode(on: bool) -> void:
 	if not on and _glow_overlay != null:
 		_glow_overlay.visible = false
 		_hover_vertex = -1
+
+
+## Set the MIRROR (contralateral symmetry) toggle (decision §2.3). Pure state — it changes only
+## how SUBSEQUENT one-sided edits apply (it does not re-symmetrize the existing body). Keeps the
+## CheckBox in sync without re-firing.
+func _set_mirror(on: bool) -> void:
+	_mirror = on
+	if _mirror_btn != null:
+		_mirror_btn.set_pressed_no_signal(on)
+
+
+## Build the EYE-COLOR control (§6.3): a ColorPickerButton bound to the procedural `iris_color`
+## uniform, plus a row of common preset swatches. Both route through _set_eye_color, which calls
+## BodyRig.set_eye_params({"iris_color": …}) — the only eye-color control needed (no texture).
+func _build_eye_color_ui(parent: VBoxContainer) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	var lbl := Label.new()
+	lbl.text = "eye color"
+	lbl.custom_minimum_size = Vector2(110, 0)
+	row.add_child(lbl)
+	_eye_color_btn = ColorPickerButton.new()
+	_eye_color_btn.color = _eye_color
+	_eye_color_btn.edit_alpha = false
+	_eye_color_btn.custom_minimum_size = Vector2(64, 0)
+	_eye_color_btn.tooltip_text = "Procedural iris color (drives the eye shader's iris_color uniform)"
+	_eye_color_btn.color_changed.connect(func(c: Color) -> void: _set_eye_color(c))
+	row.add_child(_eye_color_btn)
+	# Quick preset swatches (a small set, per §6.3 "a color picker or a small set of presets").
+	for preset in [
+		["brown", Color(0.36, 0.20, 0.09)],
+		["amber", Color(0.55, 0.34, 0.10)],
+		["green", Color(0.20, 0.42, 0.20)],
+		["blue", Color(0.20, 0.40, 0.62)],
+		["grey", Color(0.45, 0.47, 0.50)],
+	]:
+		var sw := Button.new()
+		sw.custom_minimum_size = Vector2(20, 20)
+		sw.tooltip_text = String(preset[0])
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = preset[1]
+		sw.add_theme_stylebox_override("normal", sb)
+		sw.add_theme_stylebox_override("hover", sb)
+		sw.add_theme_stylebox_override("pressed", sb)
+		var col: Color = preset[1]
+		sw.pressed.connect(func() -> void: _set_eye_color(col))
+		row.add_child(sw)
+	parent.add_child(row)
+
+
+## Set the procedural iris color (§6.3): drive the eye shader's `iris_color` uniform via the
+## BodyRig API and keep the picker widget in sync without re-firing. Gaze is left alone.
+func _set_eye_color(c: Color) -> void:
+	_eye_color = c
+	if _rig != null:
+		_rig.set_eye_params({"iris_color": c})
+	if _eye_color_btn != null and _eye_color_btn.color != c:
+		_eye_color_btn.color = c
 
 
 ## The Sculpt toggle button's label (a clearly-labeled visible control; M is only an
@@ -941,6 +1031,12 @@ func _build_ui() -> void:
 	for spec in axes:
 		_build_axis_row(vbox, spec[0], spec[1], spec[2], spec[3], spec[4], spec[5], spec[6])
 
+	# EYE COLOR (decision §6.3 / SYNTHESIS §5.2): the procedural iris color is a SHADER UNIFORM
+	# (eye.gdshader `iris_color`), not a texture — surfaced here as a color picker + preset swatches
+	# that drive BodyRig.set_eye_params({"iris_color": …}). Base-creation identity (ungated, §3).
+	# Gaze is NOT touched (the eyes track via the eye bones; §6.3).
+	_build_eye_color_ui(vbox)
+
 	# T3 MAIN-PANEL SECTION (SYNTHESIS §2.2): the power-user controls — the VISIBLE Sculpt
 	# control and the global extremeness gate. Wrapped in a section the tier selector reveals
 	# at T3 (hidden at T1/T2). T1/T2 stay uncluttered; sculpt is never reachable ONLY via a
@@ -972,6 +1068,18 @@ func _build_ui() -> void:
 	_sculpt_state_lbl.add_theme_font_size_override("font_size", 10)
 	_sculpt_state_lbl.text = _sculpt_state_text(false)
 	t3_main.add_child(_sculpt_state_lbl)
+
+	# MIRROR toggle (decision §2.3) — DEFAULT ON. Governs whether a one-sided edit (a sculpt drag
+	# on one arm/leg, or a lateral slider with an l-/r- twin) ALSO applies to the contralateral
+	# side, keeping the body symmetric by default. OFF allows asymmetry (edit only the touched
+	# side). It does NOT touch bilateral RESOLUTION (a bare-stem bilateral slider drives both sides
+	# regardless) or midline controls (twin == self → unaffected). A visible labeled CheckBox.
+	_mirror_btn = CheckBox.new()
+	_mirror_btn.text = "Mirror (symmetric edits)"
+	_mirror_btn.button_pressed = _mirror
+	_mirror_btn.tooltip_text = "When on, editing one side (sculpt or a lateral slider) also shapes the other side symmetrically. Off = edit one side only."
+	_mirror_btn.toggled.connect(func(on: bool) -> void: _set_mirror(on))
+	t3_main.add_child(_mirror_btn)
 
 	# EXTREMENESS control (§4 / §6): the single global scalar that widens every control's cap
 	# interval toward its hard range. Non-destructive — lowering it does NOT snap existing
@@ -1836,19 +1944,44 @@ func _set_modifier(full_names: PackedStringArray, v: float) -> void:
 ## apply_capped choke against ITS OWN current value (so an asymmetric/ratcheted L/R side
 ## caps independently), then store via the same erase-at-neutral housekeeping. Returns the
 ## clamped value of the PRIMARY (first) resolved name — what the single thumb displays.
+##
+## MIRROR (decision §2.3): when mirror is ON, each resolved name's contralateral twin(M) is
+## ALSO written (capped against ITS OWN cur), so a lateral edit stays symmetric. The midline
+## guard (twin(M) == M) and the already-resolved guard keep midline + bare-bilateral-stem
+## sliders writing each modifier exactly once. The mirrored write IS just another apply_capped
+## call (the choke captures the twin's held interval per the gesture-capture invariant).
 func _set_modifier_capped(full_names: PackedStringArray, req: float) -> float:
 	var primary := req
-	for i in full_names.size():
-		var fn := full_names[i]
+	var targets := _mirror_targets(full_names)
+	for i in targets.size():
+		var fn: String = targets[i]
 		var cur := float(_body_state.modifiers.get(fn, 0.0))
 		var nv: float = _caps.apply_capped(fn, req, cur)
 		if absf(nv) < 1e-6:
 			_body_state.modifiers.erase(fn)
 		else:
 			_body_state.modifiers[fn] = nv
-		if i == 0:
+		# The PRIMARY (thumb-displayed) value is the first RESOLVED name (targets[0] is always
+		# full_names[0]; appended twins follow), so this only fires for the primary.
+		if fn == full_names[0]:
 			primary = nv
 	return primary
+
+
+## The full set of modifier names a write should touch: the resolved names, plus — when MIRROR
+## is ON — each resolved name's contralateral twin(M) (added once, only when twin(M) != M and not
+## already resolved). Mirror OFF, or all-midline names, returns the resolved set unchanged.
+## Resolution (resolve_full_names) is structural and mirror-INDEPENDENT; this only ADDS the
+## contralateral application the toggle governs.
+func _mirror_targets(full_names: PackedStringArray) -> PackedStringArray:
+	var targets := PackedStringArray(full_names)
+	if not _mirror:
+		return targets
+	for fn in full_names:
+		var tw := RegionSlidersScript.twin(fn)
+		if tw != fn and not targets.has(tw):
+			targets.append(tw)
+	return targets
 
 
 ## Set a region slider's bounds to its live cap interval — the CONSERVATIVE intersection of

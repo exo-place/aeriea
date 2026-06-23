@@ -631,8 +631,19 @@ static func _render_to_base(arrays: Array, rn: int) -> PackedInt32Array:
 	return map
 
 
+## `rebake_tangents` (default false): also recompute ARRAY_TANGENT from the morphed
+## positions + UVs (per-render-vertex, NOT welded across UV seams — a tangent is
+## UV-parameterised and split corners carry distinct UVs, exactly the converter's
+## _compute_tangents seam-split path). This is the COMMIT-TIME path (§6.1 of the
+## creator-body decision): a tangent-space skin normal/detail map SHEARS under morph
+## unless tangents track the deformed surface, but recomputing them on every drag frame
+## (over 14,517 verts) is too costly. So drag frames bake positions+normals only (false)
+## and a morph COMMIT (drag release / settled slider) re-runs this with true. Mirroring
+## the per-base-vertex NORMAL weld here would re-introduce the very UV seam the converter
+## split — so tangents are accumulated PER RENDER VERTEX (per corner), un-welded.
 func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array,
-		weights_override: Dictionary = {}, base_index: PackedInt32Array = PackedInt32Array()) -> void:
+		weights_override: Dictionary = {}, base_index: PackedInt32Array = PackedInt32Array(),
+		rebake_tangents: bool = false) -> void:
 	if mesh == null or mesh.get_surface_count() == 0:
 		return
 	var arrays := mesh.surface_get_arrays(0)
@@ -718,18 +729,86 @@ func bake_morphed_normals(mesh: ArrayMesh, base_pos: PackedVector3Array,
 	# surface still declares them and the skin/format are unchanged.
 	arrays[Mesh.ARRAY_VERTEX] = morphed
 	arrays[Mesh.ARRAY_NORMAL] = normals
+	# COMMIT-TIME tangent rebake (§6.1). Without it ARRAY_TANGENT keeps the NEUTRAL-base
+	# tangent basis while positions/normals deform, so a tangent-space skin detail-normal
+	# shears under the large morphs the creator exists to make. Recompute the per-render-
+	# vertex tangent basis (Lengyel, from morphed positions + UVs + the just-rebaked
+	# normals), NOT welded across UV seams — the IDENTICAL mechanism as the converter's
+	# _compute_tangents (tools/body_converter.gd). Only on commit, never per drag frame.
+	if rebake_tangents:
+		var uvs: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV]
+		if uvs != null and uvs.size() == n:
+			arrays[Mesh.ARRAY_TANGENT] = _compute_morphed_tangents(morphed, uvs, tris, normals)
 	var blends := mesh.surface_get_blend_shape_arrays(0)
 	var fmt := mesh.surface_get_format(0)
 	mesh.clear_surfaces()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, blends, {}, fmt)
 	mesh.surface_set_name(0, "body")
 
+## Per-render-vertex tangents (ARRAY_TANGENT: 4 floats/vertex = tangent.xyz +
+## handedness w) for the MORPHED surface — the IDENTICAL Lengyel + Gram-Schmidt method
+## as tools/body_converter.gd `_compute_tangents`, kept byte-faithful so a re-baked
+## tangent matches the asset-built one at neutral. Deterministic (triangles iterated in
+## index order). NOT seam-welded: tangents are UV-parameterised and UV-split corners
+## carry distinct UVs, so each corner legitimately gets its own tangent (welding here —
+## as the normal rebake does per BASE vertex — would re-introduce the UV seam the
+## converter split). Accumulation is therefore PER RENDER VERTEX (per corner). `normals`
+## is the per-render-vertex (seam-welded) normal array this bake just computed.
+static func _compute_morphed_tangents(verts: PackedVector3Array, uvs: PackedVector2Array,
+		tris: PackedInt32Array, normals: PackedVector3Array) -> PackedFloat32Array:
+	var n := verts.size()
+	var tan := PackedVector3Array()   # accumulated tangent (per corner)
+	var bit := PackedVector3Array()   # accumulated bitangent (per corner)
+	tan.resize(n)
+	bit.resize(n)
+	var t := 0
+	while t < tris.size():
+		var ia := tris[t]
+		var ib := tris[t + 1]
+		var ic := tris[t + 2]
+		var e1 := verts[ib] - verts[ia]
+		var e2 := verts[ic] - verts[ia]
+		var d1 := uvs[ib] - uvs[ia]
+		var d2 := uvs[ic] - uvs[ia]
+		var denom := d1.x * d2.y - d2.x * d1.y
+		if absf(denom) > 1e-12:
+			var r := 1.0 / denom
+			var sd := (e1 * d2.y - e2 * d1.y) * r   # tangent dir for this tri
+			var td := (e2 * d1.x - e1 * d2.x) * r   # bitangent dir for this tri
+			tan[ia] += sd; tan[ib] += sd; tan[ic] += sd
+			bit[ia] += td; bit[ib] += td; bit[ic] += td
+		t += 3
+	var out := PackedFloat32Array()
+	out.resize(n * 4)
+	for i in n:
+		var nrm := normals[i]
+		var tv := tan[i]
+		# Gram-Schmidt: project the tangent off the normal, then normalize.
+		tv = (tv - nrm * nrm.dot(tv))
+		if tv.length() <= 1e-9:
+			# Degenerate (no usable UV gradient) — pick any vector orthogonal to nrm so the
+			# tangent is never zero/NaN (the gate #7a non-degeneracy invariant).
+			tv = nrm.cross(Vector3.RIGHT)
+			if tv.length() <= 1e-9:
+				tv = nrm.cross(Vector3.UP)
+		tv = tv.normalized()
+		# Handedness: +1 if (n×t) agrees with the bitangent, else -1.
+		var w := -1.0 if nrm.cross(tv).dot(bit[i]) < 0.0 else 1.0
+		var o := i * 4
+		out[o] = tv.x
+		out[o + 1] = tv.y
+		out[o + 2] = tv.z
+		out[o + 3] = w
+	return out
+
+
 ## CPU-morph driver for static viewers (the character creator): bake the full morph
 ## onto a per-instance mesh and zero the GPU blend weights so nothing is double-applied.
 ## `mesh_instance.mesh` must be a per-instance ArrayMesh copy. The neutral base
 ## positions are captured once into instance metadata so every call bakes from neutral
 ## (stable, non-cumulative). Use this INSTEAD of apply_to for a correctly-lit morph.
-func apply_morph_cpu(mesh_instance: MeshInstance3D, weights_override: Dictionary = {}) -> void:
+func apply_morph_cpu(mesh_instance: MeshInstance3D, weights_override: Dictionary = {},
+		rebake_tangents: bool = false) -> void:
 	var mesh := mesh_instance.mesh as ArrayMesh
 	if mesh == null or mesh.get_surface_count() == 0:
 		return
@@ -750,7 +829,7 @@ func apply_morph_cpu(mesh_instance: MeshInstance3D, weights_override: Dictionary
 	else:
 		base_index = mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
 		mesh_instance.set_meta("neutral_base_index", base_index)
-	bake_morphed_normals(mesh, base_pos, weights_override, base_index)
+	bake_morphed_normals(mesh, base_pos, weights_override, base_index, rebake_tangents)
 	# Zero every GPU blend weight: the morph is fully baked on the CPU now.
 	for i in mesh.get_blend_shape_count():
 		mesh_instance.set("blend_shapes/%s" % mesh.get_blend_shape_name(i), 0.0)

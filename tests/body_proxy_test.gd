@@ -260,6 +260,32 @@ func _test_rig_attach() -> void:
 			var gmat2 := rig.proxy_instance.get_surface_override_material(gen_si) as StandardMaterial3D
 			_assert("set_proxy_visible('genitals', true) makes it opaque",
 				gmat2 != null and gmat2.albedo_color.a > 0.99, "alpha=%.2f" % (gmat2.albedo_color.a if gmat2 else -1.0))
+
+	# --- SKIN TIER-A material config (§6.2 creator-body decision; OBJECTIVE) ----------
+	# The flat albedo+roughness StandardMaterial3D is upgraded to: a generated tiling
+	# DETAIL NORMAL (micro-pores — no skin PBR map ships), a skin ROUGHNESS (kills the flat
+	# sheen), and SUBSURFACE SCATTERING (Forward+ only, gated OFF on Quest/Mobile). Assert
+	# the config OBJECTIVELY (the LOOK is the user's call, not asserted here).
+	var sm := rig._skin_material as StandardMaterial3D
+	_assert("body skin material is a StandardMaterial3D", sm != null, "type=%s" % (rig._skin_material.get_class() if rig._skin_material else "null"))
+	if sm != null:
+		_assert("skin DETAIL NORMAL enabled with a generated detail-normal texture",
+			sm.detail_enabled and sm.detail_normal != null, "enabled=%s tex=%s" % [sm.detail_enabled, sm.detail_normal != null])
+		_assert("skin detail UV is tiled (uv1_scale > 1, micro-surface, not macro)",
+			sm.uv1_scale.x > 1.0, "uv1_scale.x=%.1f" % sm.uv1_scale.x)
+		_assert("skin normal mapping enabled with a positive strength",
+			sm.normal_enabled and sm.normal_scale > 0.0, "enabled=%s scale=%.2f" % [sm.normal_enabled, sm.normal_scale])
+		_assert("skin ROUGHNESS is a sensible skin value < the old flat 0.7",
+			sm.roughness > 0.0 and sm.roughness < 0.7, "roughness=%.2f" % sm.roughness)
+		# SSS must match the renderer tier: ON for Forward+, OFF otherwise (Quest/Mobile gate).
+		var fwd_plus := str(ProjectSettings.get_setting("rendering/renderer/rendering_method", "forward_plus")) == "forward_plus"
+		if fwd_plus:
+			_assert("skin SUBSURFACE SCATTERING enabled on Forward+ (strength>0, skin tint)",
+				sm.subsurf_scatter_enabled and sm.subsurf_scatter_strength > 0.0,
+				"enabled=%s strength=%.2f" % [sm.subsurf_scatter_enabled, sm.subsurf_scatter_strength])
+		else:
+			_assert("skin SUBSURFACE SCATTERING gated OFF on non-Forward+ (Quest/Mobile)",
+				not sm.subsurf_scatter_enabled, "enabled=%s" % sm.subsurf_scatter_enabled)
 	rig.queue_free()
 
 

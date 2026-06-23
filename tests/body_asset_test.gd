@@ -262,6 +262,62 @@ func _ready() -> void:
 		"format = %d" % mfmt)
 	mi.queue_free()
 
+	# --- TANGENT REBAKE ON COMMIT (§6.1 creator-body decision; gate #7a OBJECTIVE) ----
+	# bake_morphed_normals rebakes ARRAY_VERTEX + ARRAY_NORMAL every frame but ARRAY_TANGENT
+	# ONLY when rebake_tangents=true (the commit path), so a tangent-space skin detail-normal
+	# does not shear under morph. Assert that after a morph COMMIT bake the tangents are
+	# (i) present + sized, (ii) NON-DEGENERATE (no zero/NaN tangent.xyz; |w| == 1), and
+	# (iii) actually TRACK the morph (they differ from the neutral-base tangents — proving
+	# the rebake ran and is not stale). Tangents are recomputed PER RENDER VERTEX (un-welded
+	# across UV seams), matching the converter, so this is over the full render-vert set.
+	var neutral_tan: PackedFloat32Array = arrays[Mesh.ARRAY_TANGENT]
+	_assert("base asset carries ARRAY_TANGENT (4*render verts)",
+		neutral_tan != null and neutral_tan.size() == verts.size() * 4,
+		"got %d" % (neutral_tan.size() if neutral_tan != null else -1))
+	var tmesh := (load(MESH_PATH) as ArrayMesh).duplicate(true)
+	var tmi := MeshInstance3D.new()
+	tmi.mesh = tmesh
+	add_child(tmi)
+	var tstate := BodyState.new()
+	tstate.weight = 150.0
+	tstate.muscle = 90.0
+	tstate.age_years = 68.0
+	tstate.masculinity = 85.0
+	tstate.apply_morph_cpu(tmi, {}, true)   # COMMIT path — rebake tangents
+	var ta: Array = tmesh.surface_get_arrays(0)
+	var morph_tan: PackedFloat32Array = ta[Mesh.ARRAY_TANGENT]
+	_assert("morph-commit ARRAY_TANGENT present + sized (4*render verts)",
+		morph_tan != null and morph_tan.size() == verts.size() * 4,
+		"got %d" % (morph_tan.size() if morph_tan != null else -1))
+	if morph_tan != null and morph_tan.size() == verts.size() * 4:
+		var bad_tan := 0          # zero-length tangent.xyz or NaN/Inf in any component
+		var bad_w := 0            # handedness not ±1
+		var changed := 0          # render verts whose tangent moved vs the neutral base
+		for vi in verts.size():
+			var o := vi * 4
+			var tx := morph_tan[o]; var ty := morph_tan[o + 1]; var tz := morph_tan[o + 2]
+			var tw := morph_tan[o + 3]
+			var len2 := tx * tx + ty * ty + tz * tz
+			if is_nan(tx) or is_nan(ty) or is_nan(tz) or is_nan(tw) \
+					or is_inf(tx) or is_inf(ty) or is_inf(tz) \
+					or len2 < 0.25:   # near-unit expected; flag anything collapsed
+				bad_tan += 1
+			if absf(absf(tw) - 1.0) > 1e-3:
+				bad_w += 1
+			if neutral_tan != null and neutral_tan.size() == morph_tan.size():
+				var dx := tx - neutral_tan[o]
+				var dy := ty - neutral_tan[o + 1]
+				var dz := tz - neutral_tan[o + 2]
+				if dx * dx + dy * dy + dz * dz > 1e-6:
+					changed += 1
+		_assert("morph-commit tangents NON-DEGENERATE (no zero/NaN tangent.xyz)",
+			bad_tan == 0, "%d degenerate of %d" % [bad_tan, verts.size()])
+		_assert("morph-commit tangent handedness w is ±1",
+			bad_w == 0, "%d bad-w of %d" % [bad_w, verts.size()])
+		_assert("morph-commit tangents TRACK the morph (differ from neutral-base tangents)",
+			changed > 100, "%d verts changed" % changed)
+	tmi.queue_free()
+
 	# --- GLOBAL ORIENTATION: the mesh must face OUTWARD (not globally inverted) ----
 	# This is an INTERPRETATION-FREE test of triangle winding, independent of any
 	# rendered image and of normals. A previously-shipped check ("baked normals agree

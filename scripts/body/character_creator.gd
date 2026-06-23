@@ -538,6 +538,7 @@ func _end_morph_drag() -> void:
 		top.append("%s %+.2f" % [_short_modifier_name(String(names[i])), float(_drag_accum[names[i]])])
 	var label := "sculpt: " + ", ".join(top)
 	if not _suspend_commit:
+		_rebake_tangents_on_commit()
 		_history.commit(_body_state.to_dict(), label)
 		_refresh_history_panel()
 	_drag_accum = {}
@@ -1386,8 +1387,25 @@ func _update_modifier_value_label(spec_name: String) -> void:
 		(e["value_lbl"] as Label).text = "%+.2f" % float((e["slider"] as HSlider).value)
 
 
+## Re-bake ARRAY_TANGENT on the morphed body at a morph COMMIT (§6.1 creator-body
+## decision). The live drag/slider path (_apply_state) bakes positions + normals every
+## frame but NOT tangents (a per-frame tangent rebake over 14,517 verts is too costly), so
+## ARRAY_TANGENT would otherwise keep the neutral-base basis and a tangent-space skin
+## detail-normal would shear under the morph. Called from every commit funnel
+## (_commit_modifier / _commit_axis / _end_morph_drag) — drag release / settled slider /
+## numeric / committed sculpt — so the committed surface carries a morph-correct tangent
+## basis. During a drag the detail-normal uses pre-commit tangents (slightly off mid-drag,
+## snaps correct on release — the user-judged drag-time-look call in §6.1).
+func _rebake_tangents_on_commit() -> void:
+	if _rig != null and _rig.mesh_instance != null:
+		_rig.apply_body_state(_body_state, true)
+		if _cpu_picker != null:
+			_cpu_picker.mark_dirty()
+
+
 ## Commit one settled region-slider change as a history node.
 func _commit_modifier(spec_name: String, display: String, value: float) -> void:
+	_rebake_tangents_on_commit()
 	_history.commit(_body_state.to_dict(), "%s = %+.2f" % [display, value])
 	_refresh_history_panel()
 
@@ -1464,6 +1482,7 @@ func _commit_axis(field: String, value: float, override_label: String = "") -> v
 	var label := override_label
 	if label == "":
 		label = "%s = %s" % [field, _format_value(field)]
+	_rebake_tangents_on_commit()
 	_history.commit(_body_state.to_dict(), label)
 	_refresh_history_panel()
 

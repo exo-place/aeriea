@@ -70,7 +70,31 @@ const PROXY_DEFAULT_HIDDEN := {"genitals": true, "hair": true}
 ## The single SKIN tone, shared by the body mesh AND the genital proxy so the genitals
 ## follow skin tone/masculinity (not a fixed paler colour) — fixing the pale-genital seam.
 const SKIN_ALBEDO := Color(0.86, 0.68, 0.58)
+## Fallback flat roughness for proxy/part materials that derive from the skin colour but
+## don't carry the full Tier-A map set. The body skin itself uses SKIN_ROUGHNESS_TIER_A.
 const SKIN_ROUGHNESS := 0.7
+
+# --- Skin Tier-A material tuning (§6.2 creator-body decision) -------------------
+## A skin base roughness lower than the old flat 0.7 — real skin is semi-matte but not as
+## diffuse as 0.7 (which reads chalky/plastic-flat); 0.55 gives a subtle sheen without a
+## hard specular hotspot. The detail-normal breaks the specular up across the micro-surface.
+const SKIN_ROUGHNESS_TIER_A := 0.55
+## Detail-normal UV tiling: how many times the generated pore normal repeats across the
+## body UV atlas. High enough that pores read as micro-surface, not macro blobs.
+const SKIN_DETAIL_UV_SCALE := 48.0
+## Detail-normal strength (normal_scale on the detail layer) — subtle, skin-like, not a
+## reptilian relief. 0.35 is a gentle micro-pore break-up.
+const SKIN_DETAIL_NORMAL_STRENGTH := 0.35
+## Generated detail-normal texture resolution + noise frequency. A small seamless tile
+## (it repeats SKIN_DETAIL_UV_SCALE× over the body), procedurally generated at build (no
+## skin PBR map ships with MakeHuman). Seeded so the tile is byte-reproducible.
+const SKIN_DETAIL_TEX_SIZE := 256
+const SKIN_DETAIL_NOISE_FREQ := 0.18
+const SKIN_DETAIL_NOISE_SEED := 1337
+## Subsurface scattering strength + skin tint (warm red, the classic skin SSS look).
+## Forward+ only — gated OFF on Quest/Mobile (SSS is a screen-space Forward+ effect).
+const SKIN_SSS_STRENGTH := 0.25
+const SKIN_SSS_TINT := Color(0.80, 0.30, 0.22)
 ## Slice 4 — the committed Motion-Matching feature DB (100STYLE CC BY 4.0). When
 ## present, MM drives the gross body pose (replacing the procedural sine cycle);
 ## foot-IK stays the ground-adaptation layer on top. When absent, the Slice-3
@@ -353,12 +377,12 @@ func build() -> bool:
 	# arrays) is unchanged by the bake, so LBS still composes correctly on top.
 	mesh = (mesh as ArrayMesh).duplicate(true)
 	mesh_instance.mesh = mesh
-	# A simple skin material so the body reads as a body (not a flat silhouette). The
-	# genital proxy shares THIS material (see _proxy_material) so its tone follows the
-	# body skin, eliminating the former pale-genital mismatch at the seam.
-	_skin_material = StandardMaterial3D.new()
-	_skin_material.albedo_color = SKIN_ALBEDO
-	_skin_material.roughness = SKIN_ROUGHNESS
+	# Skin Tier-A material (§6.2 creator-body decision): a generated tiling detail-normal
+	# (micro-surface pores — MakeHuman ships NO skin PBR maps, so it is generated), a skin
+	# roughness (kills the flat plastic sheen), and subsurface scattering (Forward+ only,
+	# gated OFF on Quest/Mobile). The genital proxy shares THIS material (see
+	# _proxy_material) so its tone follows the body skin (no pale-genital seam).
+	_skin_material = _build_skin_material()
 	mesh_instance.material_override = _skin_material
 	skeleton.add_child(mesh_instance)
 	mesh_instance.skin = skin
@@ -401,6 +425,86 @@ func build() -> bool:
 	_setup_micro_life()
 
 	return true
+
+
+## Whether the active renderer supports the Forward+ subsurface-scattering screen-space
+## effect. SSS is NOT available on the Mobile / GL-compatibility renderers (Quest standalone
+## runs the Mobile renderer), so it must be gated OFF there per §6.2 — the body then renders
+## with normal + roughness only (the rest of Tier-A is renderer-agnostic). Reads the
+## CONFIGURED rendering method ("forward_plus" / "mobile" / "gl_compatibility"); a Quest /
+## mobile build sets this to "mobile" via its platform render override, so SSS is dropped
+## there by construction. (RenderingServer has no static rendering-method getter in this
+## Godot build, so the project setting is the available, correct tier signal.)
+static func _supports_sss() -> bool:
+	var method := str(ProjectSettings.get_setting(
+		"rendering/renderer/rendering_method", "forward_plus"))
+	# On a mobile platform Godot uses the .mobile override key when present.
+	if OS.has_feature("mobile"):
+		method = str(ProjectSettings.get_setting(
+			"rendering/renderer/rendering_method.mobile", method))
+	return method == "forward_plus"
+
+
+## Build the Tier-A skin material (§6.2 creator-body decision): albedo + a generated tiling
+## DETAIL NORMAL (micro-surface pores — no skin PBR map ships with MakeHuman) + a skin
+## ROUGHNESS (kills the flat plastic sheen) + SUBSURFACE SCATTERING (Forward+ only, gated
+## OFF on Quest/Mobile). A StandardMaterial3D so the genital/part materials can keep
+## deriving from it. NOT a per-instance random look — the detail tile is seeded, so the
+## skin is byte-reproducible across runs.
+func _build_skin_material() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = SKIN_ALBEDO
+	mat.roughness = SKIN_ROUGHNESS_TIER_A
+	# (a) DETAIL NORMAL — a generated, tiling micro-pore normal layered on top of the base
+	# (the base mesh ships no skin normal map). The detail layer multiplies/overlays onto the
+	# main surface; with no main normal map the detail normal IS the surface micro-relief.
+	mat.detail_enabled = true
+	mat.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+	mat.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1
+	mat.detail_normal = _generate_skin_detail_normal()
+	# A neutral white detail albedo so the detail layer changes only the surface normal,
+	# not the skin colour (the albedo break-up is left subtle / for Tier-B). An opaque-white
+	# tile makes the detail-albedo MIX a no-op so only the detail NORMAL contributes.
+	var di := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	di.fill(Color(1, 1, 1, 1))
+	mat.detail_albedo = ImageTexture.create_from_image(di)
+	# Tile the detail map densely so pores read as micro-surface (uv1_scale also scales the
+	# DETAIL_UV_1 layer — the detail normal repeats SKIN_DETAIL_UV_SCALE× across the atlas).
+	mat.uv1_scale = Vector3(SKIN_DETAIL_UV_SCALE, SKIN_DETAIL_UV_SCALE, 1.0)
+	mat.normal_enabled = true
+	mat.normal_scale = SKIN_DETAIL_NORMAL_STRENGTH
+	# (c) SUBSURFACE SCATTERING — the warm under-skin light bleed. Forward+ ONLY; on
+	# Quest/Mobile (the Mobile renderer) it is not available, so gate it OFF there (§6.2).
+	if _supports_sss():
+		mat.subsurf_scatter_enabled = true
+		mat.subsurf_scatter_strength = SKIN_SSS_STRENGTH
+		mat.subsurf_scatter_skin_mode = true
+		mat.subsurf_scatter_transmittance_color = SKIN_SSS_TINT
+	return mat
+
+
+## Generate the tiling skin DETAIL NORMAL texture (§6.2). No skin normal map ships with
+## MakeHuman, so a subtle micro-pore normal is generated procedurally from seamless noise.
+## NoiseTexture2D with as_normal_map=true converts the height noise to a tangent-space
+## normal map at build; seamless so it tiles across the densely-repeated detail UVs without
+## a visible seam. Seeded → byte-reproducible.
+func _generate_skin_detail_normal() -> NoiseTexture2D:
+	var noise := FastNoiseLite.new()
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	noise.seed = SKIN_DETAIL_NOISE_SEED
+	noise.frequency = SKIN_DETAIL_NOISE_FREQ
+	noise.fractal_type = FastNoiseLite.FRACTAL_FBM
+	noise.fractal_octaves = 3
+	var tex := NoiseTexture2D.new()
+	tex.width = SKIN_DETAIL_TEX_SIZE
+	tex.height = SKIN_DETAIL_TEX_SIZE
+	tex.seamless = true
+	tex.as_normal_map = true
+	# A gentle bump depth — the perceived strength is normal_scale on the material; this
+	# keeps the generated normals from being a harsh relief at the source.
+	tex.bump_strength = 1.2
+	tex.noise = noise
+	return tex
 
 
 ## Initialise the micro-life layer: default params if none, seed the COSMETIC rng,
@@ -709,11 +813,18 @@ func _set_hair_cap_visible(_vis: bool) -> void:
 ## render). We use the CPU bake instead of GPU blendshape weights because Godot stores
 ## blendshape normals octahedral-compressed, which cannot carry a normal delta — the
 ## GPU-only morph leaves stale normals that mis-light the morphed surface (BodyState).
-func apply_body_state(state: BodyState) -> void:
+## `rebake_tangents` (default false): also recompute ARRAY_TANGENT on the morphed body
+## surface (§6.1 creator-body decision). FALSE on the interactive drag path (the bake is
+## the per-motion-frame hot path; a tangent rebake over 14,517 verts every frame is too
+## costly), TRUE on a morph COMMIT (drag release / settled slider) so a tangent-space
+## skin detail-normal does not shear under the morph. The creator calls this with true at
+## each commit site; in-game NPC morphs (one-shot, not dragged) may pass true for a
+## correct first bake.
+func apply_body_state(state: BodyState, rebake_tangents: bool = false) -> void:
 	body_state = state
 	if mesh_instance == null or mesh_instance.mesh == null:
 		return
-	body_state.apply_morph_cpu(mesh_instance)
+	body_state.apply_morph_cpu(mesh_instance, {}, rebake_tangents)
 	# Morph-follow the proxy pieces (eyes/teeth/tongue/genitals) through the SAME
 	# BodyState projection, so they stay seated + correctly lit under every morph.
 	if proxy_instance != null and proxy_instance.mesh != null:

@@ -127,6 +127,14 @@ var _modifier_sliders: Dictionary = {}
 const HistoryTreeScript := preload("res://scripts/util/history_tree.gd")
 const CreatorIOScript := preload("res://scripts/body/creator_io.gd")
 const RegionSlidersScript := preload("res://scripts/body/region_sliders.gd")
+const BodyCapsScript := preload("res://scripts/body/body_caps.gd")
+
+## The cap-model foundation (SYNTHESIS.md §3): the global extremeness + the per-control
+## allowed intervals + the apply_capped choke every LIVE write path routes through, with
+## the gesture-scoped held-interval map. No UI control for extremeness yet (Phase 3).
+## Untyped: the BodyCaps class_name is not visible at this file's parse time (same pattern
+## as `_morph` / `_gpu_picker`); methods are called dynamically.
+var _caps = BodyCapsScript.new()
 
 var _history: HistoryTree
 ## Per-axis pending value during a slider drag — committed once on drag-end so we
@@ -149,6 +157,12 @@ var _image_format: String = "png"
 
 
 func _ready() -> void:
+	# Build-time gate (§8 #11b): neutral ∈ [a,b] for EVERY control (authored + derived).
+	# A violating default interval is a build defect — fail loudly (the test suite asserts
+	# this too, but at scene load it surfaces a bad caps asset immediately).
+	var cap_errs: PackedStringArray = _caps.validate_neutral_in_interval()
+	if not cap_errs.is_empty():
+		push_error("BodyCaps gate FAILED (neutral∉[a,b]): %s" % ", ".join(cap_errs))
 	_history = HistoryTreeScript.new(_body_state.to_dict(), "initial")
 	_build_environment()
 	_build_body()
@@ -463,12 +477,21 @@ func _apply_morph_drag(drag_screen: Vector2) -> void:
 	if deltas.is_empty():
 		return
 	for full_name in deltas:
-		var nv := float(_body_state.modifiers.get(full_name, 0.0)) + float(deltas[full_name])
+		# Route the sculpt write through the choke (§3.2 path 1): req = cur + delta, capped.
+		# apply_capped reads cur as the stored value or neutral if absent, captures the held
+		# cur_start on first touch within this sculpt gesture, and clamps to the DERIVED-or-
+		# AUTHORED interval so even an uncurated modifier (build_accel reaches all ~280) caps.
+		var cur := float(_body_state.modifiers.get(full_name, 0.0))
+		var req := cur + float(deltas[full_name])
+		var nv: float = _caps.apply_capped(full_name, req, cur)
 		if absf(nv) < 1e-6:
 			_body_state.modifiers.erase(full_name)
 		else:
 			_body_state.modifiers[full_name] = nv
-		_drag_accum[full_name] = float(_drag_accum.get(full_name, 0.0)) + float(deltas[full_name])
+		# Sync the bound region slider's value + bounds to the clamped result (B10-1) — the
+		# modifier may be bound to a T2/T3 slider; bounds-first then no-signal value write.
+		_sync_modifier_slider(full_name, nv)
+		_drag_accum[full_name] = float(_drag_accum.get(full_name, 0.0)) + (nv - cur)
 	_apply_state()
 	# Keep the glow on the active region while dragging (re-pick the vertex's footprint).
 	var weights: Dictionary = _morph.glow_weights(_drag_vertex, hit_local, _glow_base_pos)
@@ -499,6 +522,11 @@ func _world_per_pixel_at(world_pos: Vector3) -> float:
 ## End a morph drag: commit ONE history node labelled by the dominant modifier(s).
 func _end_morph_drag() -> void:
 	_dragging_morph = false
+	# End the gesture: clear the held-interval map and recompute bounds from the settled
+	# values (§3.2 — the ratchet collapses inward once, on commit). Recompute BEFORE the
+	# clear so held_interval still reads the gesture's cur_start for any leftover sync.
+	_caps.end_gesture()
+	_recompute_modifier_slider_bounds()
 	if _drag_accum.is_empty():
 		_drag_vertex = -1
 		return
@@ -640,6 +668,9 @@ func _unhandled_input(event: InputEvent) -> void:
 							_drag_vertex = int(hit["vertex"])
 							_drag_hit_pos = hit["pos"]
 							_drag_accum = {}
+							# A sculpt drag IS an active edit gesture (§3.2): the held-interval
+							# map captures each touched modifier's cur_start on first touch.
+							_caps.start_gesture()
 							get_viewport().set_input_as_handled()
 							return
 					_dragging_orbit = true
@@ -1012,8 +1043,10 @@ func _switch_branch(junction_id: int, child_index: int) -> void:
 		_restore_current()
 
 
-func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float,
+func _build_axis_row(parent: VBoxContainer, field: String, _lo: float, _hi: float,
 		step: float, label: String, lo_pole: String, hi_pole: String) -> void:
+	# _lo/_hi (the old hard min/max from the axes table) are no longer the slider bounds —
+	# the slider's min/max come from the LIVE cap interval (§3.2), set after registration.
 	# Row layout (per axis):
 	#   [label (110)] [lo-pole (54)] [slider (expand)] [hi-pole (54)] [value (46)]
 	var row := HBoxContainer.new()
@@ -1032,8 +1065,8 @@ func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float,
 	row.add_child(lo_lbl)
 
 	var slider := HSlider.new()
-	slider.min_value = lo
-	slider.max_value = hi
+	# Slider bounds reflect the LIVE cap interval (§3.2), not the hard registry range. The
+	# step is kept; the cap interval is set after the slider is registered (below).
 	slider.step = step
 	slider.value = float(_body_state.get(field))
 	slider.custom_minimum_size = Vector2(100, 0)
@@ -1042,23 +1075,41 @@ func _build_axis_row(parent: VBoxContainer, field: String, lo: float, hi: float,
 	# frame (so the body tracks the slider) but DEBOUNCE the history commit. We
 	# commit one node only when the value SETTLES — on drag-end (drag_ended) or,
 	# for keyboard/click steps that don't drag, on the value_changed itself when no
-	# drag is in progress.
+	# drag is in progress. The write routes through the apply_capped choke (§3.2 path 3):
+	# the requested v is clamped to the headline axis's allowed interval; the clamped
+	# `new` is written back to the thumb + label via set_value_no_signal (no re-entry).
 	slider.value_changed.connect(func(v: float) -> void:
-		_body_state.set(field, v)
+		var one_write := not bool(_drag_pending.get(field, false))
+		if one_write:
+			_caps.start_gesture()
+		var cur := float(_body_state.get(field))
+		var nv: float = _caps.apply_capped(field, v, cur)
+		_body_state.set(field, nv)
 		_apply_state()
-		if not bool(_drag_pending.get(field, false)) and not _suspend_commit:
-			_commit_axis(field, v)
+		_write_back_axis_widget(field, slider, nv)
+		if one_write:
+			_caps.end_gesture()
+			_apply_axis_slider_bounds(field, slider)
+		if one_write and not _suspend_commit:
+			_commit_axis(field, nv)
 	)
 	slider.drag_started.connect(func() -> void:
 		_drag_pending[field] = true
+		_caps.start_gesture()
 	)
 	slider.drag_ended.connect(func(value_changed: bool) -> void:
 		_drag_pending[field] = false
+		_caps.end_gesture()
+		_apply_axis_slider_bounds(field, slider)
 		if value_changed and not _suspend_commit:
 			_commit_axis(field, float(_sliders[field].value))
 	)
 	row.add_child(slider)
 	_sliders[field] = slider
+	# Drive the slider's min/max from the live cap interval (held-aware, but at build time
+	# there is no active gesture, so this is the settled-value interval). Widened to contain
+	# the current value so the value write above is in range (§3.2 step 4 ordering).
+	_apply_axis_slider_bounds(field, slider)
 
 	var hi_lbl := Label.new()
 	hi_lbl.text = hi_pole
@@ -1146,8 +1197,8 @@ func _build_modifier_row(parent: VBoxContainer, spec_name: String, display: Stri
 	var kind := RegionSlidersScript.KIND_BIDIRECTIONAL
 	if full_names.size() > 0 and by.has(full_names[0]):
 		kind = String(by[full_names[0]]["kind"])
-	var lo := RegionSlidersScript.BIDIR_MIN if kind == RegionSlidersScript.KIND_BIDIRECTIONAL else RegionSlidersScript.UNIPOLAR_MIN
-	var hi := RegionSlidersScript.BIDIR_MAX if kind == RegionSlidersScript.KIND_BIDIRECTIONAL else RegionSlidersScript.UNIPOLAR_MAX
+	# Slider min/max are no longer the static hard range — they come from the LIVE cap
+	# interval via _apply_modifier_slider_bounds after the slider is registered (§3.2).
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 3)
@@ -1166,21 +1217,33 @@ func _build_modifier_row(parent: VBoxContainer, spec_name: String, display: Stri
 	row.add_child(lo_lbl)
 
 	var slider := HSlider.new()
-	slider.min_value = lo
-	slider.max_value = hi
 	slider.step = RegionSlidersScript.STEP
 	slider.value = float(_body_state.modifiers.get(full_names[0], 0.0))
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.custom_minimum_size = Vector2(70, 0)
+	# The write routes through the apply_capped choke for EVERY resolved full_name (§3.2
+	# path 2). A bilateral stem drives L+R: each side caps against its OWN cur; the single
+	# thumb's value write-back uses the clamped result for full_names[0]. Bounds reflect the
+	# CONSERVATIVE intersection of the resolved sides (§3.2 step 4, MI14-1).
 	slider.value_changed.connect(func(v: float) -> void:
-		_set_modifier(full_names, v)
+		var one_write := not bool(_drag_pending.get(spec_name, false))
+		if one_write:
+			_caps.start_gesture()
+		var primary := _set_modifier_capped(full_names, v)
 		_apply_state()
-		_update_modifier_value_label(spec_name)
-		if not bool(_drag_pending.get(spec_name, false)) and not _suspend_commit:
-			_commit_modifier(spec_name, display, v))
-	slider.drag_started.connect(func() -> void: _drag_pending[spec_name] = true)
+		_write_back_modifier_widget(spec_name, slider, primary)
+		if one_write:
+			_caps.end_gesture()
+			_apply_modifier_slider_bounds(spec_name)
+		if one_write and not _suspend_commit:
+			_commit_modifier(spec_name, display, primary))
+	slider.drag_started.connect(func() -> void:
+		_drag_pending[spec_name] = true
+		_caps.start_gesture())
 	slider.drag_ended.connect(func(changed: bool) -> void:
 		_drag_pending[spec_name] = false
+		_caps.end_gesture()
+		_apply_modifier_slider_bounds(spec_name)
 		if changed and not _suspend_commit:
 			_commit_modifier(spec_name, display, float(slider.value)))
 	row.add_child(slider)
@@ -1202,16 +1265,118 @@ func _build_modifier_row(parent: VBoxContainer, spec_name: String, display: Stri
 		"slider": slider, "value_lbl": val_lbl, "full_names": full_names, "kind": kind,
 	}
 	parent.add_child(row)
+	# Drive the slider's min/max from the live cap interval (conservative intersection of
+	# the resolved sides). No active gesture at build time → settled-value interval.
+	_apply_modifier_slider_bounds(spec_name)
 
 
 ## Write `v` into BodyState.modifiers for every resolved full_name (clearing near-zero so a
-## neutral body stays a tiny dict — matching the drag path's housekeeping).
+## neutral body stays a tiny dict — matching the drag path's housekeeping). RAW write, used
+## by restore/load paths only; live edits go through _set_modifier_capped.
 func _set_modifier(full_names: PackedStringArray, v: float) -> void:
 	for fn in full_names:
 		if absf(v) < 1e-6:
 			_body_state.modifiers.erase(fn)
 		else:
 			_body_state.modifiers[fn] = v
+
+
+## CAPPED region-slider write (§3.2 path 2): route every resolved full_name through the
+## apply_capped choke against ITS OWN current value (so an asymmetric/ratcheted L/R side
+## caps independently), then store via the same erase-at-neutral housekeeping. Returns the
+## clamped value of the PRIMARY (first) resolved name — what the single thumb displays.
+func _set_modifier_capped(full_names: PackedStringArray, req: float) -> float:
+	var primary := req
+	for i in full_names.size():
+		var fn := full_names[i]
+		var cur := float(_body_state.modifiers.get(fn, 0.0))
+		var nv: float = _caps.apply_capped(fn, req, cur)
+		if absf(nv) < 1e-6:
+			_body_state.modifiers.erase(fn)
+		else:
+			_body_state.modifiers[fn] = nv
+		if i == 0:
+			primary = nv
+	return primary
+
+
+## Set a region slider's bounds to its live cap interval — the CONSERVATIVE intersection of
+## the resolved sides (held during a gesture, settled-value otherwise; §3.2 step 4 / MI14-1).
+func _apply_modifier_slider_bounds(spec_name: String) -> void:
+	var e = _modifier_sliders.get(spec_name, null)
+	if e == null:
+		return
+	var slider := e["slider"] as HSlider
+	var full_names := e["full_names"] as PackedStringArray
+	var lo := -INF
+	var hi := INF
+	for fn in full_names:
+		var iv: Array
+		if _caps.has_held(fn):
+			iv = _caps.held_interval(fn)
+		else:
+			var cur := float(_body_state.modifiers.get(fn, 0.0))
+			var ci: Array = _caps.cap(fn)
+			iv = [minf(float(ci[0]), cur), maxf(float(ci[1]), cur)]
+		lo = maxf(lo, float(iv[0]))   # conservative intersection: tightest floor
+		hi = minf(hi, float(iv[1]))   # conservative intersection: tightest ceiling
+	# Bounds-FIRST (widened to contain the value), so the value write can't clamp-and-emit.
+	slider.min_value = lo
+	slider.max_value = hi
+
+
+## Recompute EVERY region slider's bounds from the settled values (gesture-end / load).
+func _recompute_modifier_slider_bounds() -> void:
+	for spec_name in _modifier_sliders:
+		_apply_modifier_slider_bounds(spec_name)
+
+
+## Write the clamped `new` back to a region slider's thumb (no-signal) + numeric label
+## WITHOUT re-firing value_changed (§3.2 step 4): bounds-first, then set_value_no_signal,
+## then the label reads the clamped value.
+func _write_back_modifier_widget(spec_name: String, slider: HSlider, new_value: float) -> void:
+	_apply_modifier_slider_bounds(spec_name)
+	slider.set_value_no_signal(new_value)
+	var e = _modifier_sliders.get(spec_name, null)
+	if e != null:
+		(e["value_lbl"] as Label).text = "%+.2f" % new_value
+
+
+## Set a headline-axis slider's bounds to its live cap interval (held during a gesture,
+## settled-value otherwise; §3.2 step 4).
+func _apply_axis_slider_bounds(field: String, slider: HSlider) -> void:
+	var iv: Array
+	if _caps.has_held(field):
+		iv = _caps.held_interval(field)
+	else:
+		var cur := float(_body_state.get(field))
+		var ci: Array = _caps.cap(field)
+		iv = [minf(float(ci[0]), cur), maxf(float(ci[1]), cur)]
+	slider.min_value = float(iv[0])
+	slider.max_value = float(iv[1])
+
+
+## Write the clamped `new` back to a headline slider's thumb (no-signal) + numeric label
+## WITHOUT re-firing value_changed (§3.2 step 4): bounds-first, then set_value_no_signal,
+## then the label reads the clamped value.
+func _write_back_axis_widget(field: String, slider: HSlider, new_value: float) -> void:
+	_apply_axis_slider_bounds(field, slider)
+	slider.set_value_no_signal(new_value)
+	var lbl = _value_labels.get(field, null)
+	if lbl != null:
+		(lbl as Label).text = _format_value(field)
+
+
+## Sync a single modifier's bound region slider to a clamped sculpt-driven value WITHOUT
+## re-firing its value_changed (§3.2 path 1 sculpt→slider sync, B10-1). No-op if the
+## modifier is not bound to a curated region slider (the uncurated-sculpt case).
+func _sync_modifier_slider(full_name: String, new_value: float) -> void:
+	for spec_name in _modifier_sliders:
+		var e = _modifier_sliders[spec_name]
+		var fns := e["full_names"] as PackedStringArray
+		if fns.has(full_name):
+			_write_back_modifier_widget(spec_name, e["slider"] as HSlider, new_value)
+			return
 
 
 ## Update one region slider's numeric value label from its current slider value.
@@ -1228,13 +1393,20 @@ func _commit_modifier(spec_name: String, display: String, value: float) -> void:
 
 
 ## Restore every region slider from the live BodyState.modifiers (called by _restore_current
-## after a headline-axis restore). Suspends commits while syncing.
+## after a headline-axis restore). RAW (§3.2 paths 6/7): writes via set_value_no_signal so
+## the capped callback never re-fires and a persisted beyond-cap value is NOT re-clamped.
+## Bounds are widened to contain the raw value first, so the no-signal write is in range.
 func _restore_modifier_sliders() -> void:
 	for spec_name in _modifier_sliders:
 		var e = _modifier_sliders[spec_name]
 		var fn := (e["full_names"] as PackedStringArray)[0]
 		var v := float(_body_state.modifiers.get(fn, 0.0))
-		(e["slider"] as HSlider).value = v
+		# Recompute bounds from the (now restored) settled values, then widen to contain v.
+		_apply_modifier_slider_bounds(spec_name)
+		var slider := e["slider"] as HSlider
+		slider.min_value = minf(slider.min_value, v)
+		slider.max_value = maxf(slider.max_value, v)
+		slider.set_value_no_signal(v)
 		(e["value_lbl"] as Label).text = "%+.2f" % v
 
 
@@ -1312,16 +1484,34 @@ func _jump_to_node(id: int) -> void:
 
 
 ## Apply the history's current node state onto the body + sliders WITHOUT committing.
+## A RAW restore/load (§3.2 paths 6/7) — it BYPASSES the choke (set_value_no_signal, no
+## re-clamp, beyond-cap persists) AND, per the gesture-lifecycle-interruption invariant
+## (§3.2), ABORTS any active gesture FIRST so no held cur_start references the stale model.
 func _restore_current() -> void:
 	var d = _history.current_state()
 	if typeof(d) != TYPE_DICTIONARY:
 		return
+	# Gesture-lifecycle-interruption invariant: abort any in-flight gesture before replacing
+	# the model underneath it (also clears the sculpt brackets/accumulators).
+	_caps.abort_gesture()
+	_dragging_morph = false
+	_drag_accum = {}
+	_drag_vertex = -1
 	var bs := BodyState.from_dict(d)
 	_suspend_commit = true
 	for field in _sliders:
 		var v := float(bs.get(field))
 		_body_state.set(field, v)
-		(_sliders[field] as HSlider).value = v
+		var slider := _sliders[field] as HSlider
+		# Bounds first (recompute, then widen to contain the raw v), then no-signal write so
+		# the capped callback never re-fires and a beyond-cap headline value persists.
+		_apply_axis_slider_bounds(field, slider)
+		slider.min_value = minf(slider.min_value, v)
+		slider.max_value = maxf(slider.max_value, v)
+		slider.set_value_no_signal(v)
+		var lbl = _value_labels.get(field, null)
+		if lbl != null:
+			(lbl as Label).text = _format_value(field)
 	# The detail envelope is a whole-map replacement (restored dict's modifiers), then the
 	# region sliders re-sync to it. Replace the live map so cleared modifiers actually clear.
 	_body_state.modifiers = bs.modifiers.duplicate()
@@ -1355,11 +1545,11 @@ func _export_json(with_history: bool) -> void:
 	var base := _export_basename()
 	if with_history:
 		var path := "%s/%s.history.json" % [CreatorIOScript.EXPORT_DIR, base]
-		_write_text(path, CreatorIOScript.history_to_json(_body_state, _history))
+		_write_text(path, CreatorIOScript.history_to_json(_body_state, _history, _caps.extremeness))
 		_toast("exported JSON + history")
 	else:
 		var path := "%s/%s.json" % [CreatorIOScript.EXPORT_DIR, base]
-		_write_text(path, CreatorIOScript.body_to_json(_body_state))
+		_write_text(path, CreatorIOScript.body_to_json(_body_state, _caps.extremeness))
 		_toast("exported JSON (current)")
 
 
@@ -1382,7 +1572,7 @@ func _export_image(with_history: bool) -> void:
 	var suffix := ".history" if with_history else ""
 	if with_history:
 		bytes = CreatorIOScript.embed_history_in_image(bytes, _image_format,
-			CreatorIOScript.history_to_json(_body_state, _history))
+			CreatorIOScript.history_to_json(_body_state, _history, _caps.extremeness))
 	var path := "%s/%s%s.%s" % [CreatorIOScript.EXPORT_DIR, base, suffix, _image_format]
 	_write_bytes(path, bytes)
 	_toast("exported %s%s" % [_image_format.to_upper(), " + history" if with_history else ""])

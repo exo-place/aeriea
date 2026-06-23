@@ -30,35 +30,47 @@ const EXPORT_DIR := "user://creator_exports"
 # Serialization payloads (pure; the load-bearing round-trip)
 # ---------------------------------------------------------------------------
 
-## JSON text for the current BodyState only (variant 1).
-static func body_to_json(body: BodyState) -> String:
-	return JSON.stringify(body.to_dict(), "  ")
+## JSON text for the current BodyState only (variant 1). The single global `extremeness`
+## (the creator-settings layer's cap scalar, SYNTHESIS.md §3.1/§6) round-trips alongside the
+## body — one scalar per save. Defaults to 0 and is only emitted when non-zero (a neutral
+## save stays a tiny dict).
+static func body_to_json(body: BodyState, extremeness: float = 0.0) -> String:
+	var d := body.to_dict()
+	if extremeness != 0.0:
+		d["extremeness"] = extremeness
+	return JSON.stringify(d, "  ")
 
 
 ## JSON text for the full history + current pointer (variant 2 / the PNG payload).
-## Shape: { "current_state": <BodyState dict>, "history": <HistoryTree dict> }.
-static func history_to_json(body: BodyState, tree: HistoryTree) -> String:
-	return JSON.stringify({
+## Shape: { "current_state": <BodyState dict>, "history": <HistoryTree dict>,
+##          "extremeness": <float> }. extremeness is the global cap scalar (§3.1/§6).
+static func history_to_json(body: BodyState, tree: HistoryTree, extremeness: float = 0.0) -> String:
+	var payload := {
 		"current_state": body.to_dict(),
 		"history": tree.to_dict(),
-	}, "  ")
+	}
+	if extremeness != 0.0:
+		payload["extremeness"] = extremeness
+	return JSON.stringify(payload, "  ")
 
 
 ## Parse an import payload (the text of a variant-1, variant-2, or PNG-embedded JSON)
-## into { "body": BodyState, "tree": HistoryTree-or-null, "ok": bool }.
+## into { "body": BodyState, "tree": HistoryTree-or-null, "extremeness": float, "ok": bool }.
 ##   - current-only JSON  -> body set, tree null (caller starts a fresh tree from it).
 ##   - with-history JSON  -> body + rebuilt tree.
+## extremeness (the global cap scalar) is read from the payload (default 0); a variant-1 bare
+## body dict may carry it as a top-level key alongside the body fields.
 static func parse_payload(text: String) -> Dictionary:
 	var parsed = JSON.parse_string(text)
 	if typeof(parsed) != TYPE_DICTIONARY:
-		return {"ok": false, "body": null, "tree": null}
+		return {"ok": false, "body": null, "tree": null, "extremeness": 0.0}
 	var d: Dictionary = parsed
 	if d.has("history") and d.has("current_state"):
 		var body := BodyState.from_dict(d["current_state"])
 		var tree := HistoryTreeScript.from_dict(d["history"])
-		return {"ok": true, "body": body, "tree": tree}
+		return {"ok": true, "body": body, "tree": tree, "extremeness": float(d.get("extremeness", 0.0))}
 	# Treat any other dict as a bare BodyState dict (variant 1).
-	return {"ok": true, "body": BodyState.from_dict(d), "tree": null}
+	return {"ok": true, "body": BodyState.from_dict(d), "tree": null, "extremeness": float(d.get("extremeness", 0.0))}
 
 
 ## Extract the embedded history JSON from PNG bytes (variant-4 import). Returns ""

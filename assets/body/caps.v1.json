@@ -1,0 +1,299 @@
+{
+	"_comment": "PROVISIONAL conservative cap intervals (Phase 1 cap-model foundation). Authored intervals are USER-TASTE-GATED placeholders pending the SYNTHESIS.md \u00a78 #1b N=10000 plausibility sweep + user sign-off; numeric values WILL be tuned. See docs/artifacts/design/creator-body/SYNTHESIS.md \u00a73.",
+	"version": 1,
+	"derived_fraction": 0.25,
+	"modifiers": {
+		"armslegs/l-lowerarm-muscle-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/l-lowerleg-muscle-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/l-upperarm-fat-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/l-upperarm-muscle-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/l-upperleg-fat-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/l-upperleg-muscle-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/lowerlegs-height-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/r-lowerarm-muscle-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/r-lowerleg-muscle-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/r-upperarm-fat-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/r-upperarm-muscle-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/r-upperleg-fat-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/r-upperleg-muscle-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"armslegs/upperlegs-height-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"breast/breast-dist-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"breast/breast-point-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"breast/breast-trans-down|up": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"breast/breast-volume-vert-down|up": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"breast/nipple-point-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"breast/nipple-size-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"buttocks/buttocks-volume-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"chin/chin-jaw-drop-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"head/head-age-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"head/head-fat-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"head/head-oval": {
+			"a": 0.0,
+			"b": 0.5
+		},
+		"head/head-rectangular": {
+			"a": 0.0,
+			"b": 0.5
+		},
+		"head/head-round": {
+			"a": 0.0,
+			"b": 0.5
+		},
+		"head/head-scale-depth-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"head/head-scale-horiz-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"head/head-scale-vert-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"head/head-square": {
+			"a": 0.0,
+			"b": 0.5
+		},
+		"head/head-triangular": {
+			"a": 0.0,
+			"b": 0.5
+		},
+		"hip/hip-scale-horiz-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"hip/hip-waist-down|up": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-ankle-circ-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-bust-circ-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-calf-circ-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-frontchest-dist-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-hips-circ-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-knee-circ-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-lowerarm-length-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-neck-circ-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-neck-height-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-shoulder-dist-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-thigh-circ-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-underbust-circ-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-upperarm-circ-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-upperarm-length-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-waist-circ-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-waisttohip-dist-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"measure/measure-wrist-circ-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"neck/neck-double-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"nose/nose-scale-vert-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"pelvis/bulge-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"pelvis/pelvis-tone-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"stomach/stomach-navel-down|up": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"stomach/stomach-navel-in|out": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"stomach/stomach-pregnant-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"stomach/stomach-tone-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"torso/torso-muscle-dorsi-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"torso/torso-muscle-pectoral-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		},
+		"torso/torso-vshape-decr|incr": {
+			"a": -0.5,
+			"b": 0.5
+		}
+	},
+	"headline": {
+		"age_years": {
+			"a": 18.0,
+			"b": 60.0,
+			"hard_min": 18.0,
+			"hard_max": 90.0,
+			"neutral": 25.0
+		},
+		"masculinity": {
+			"a": 20.0,
+			"b": 80.0,
+			"hard_min": 0.0,
+			"hard_max": 100.0,
+			"neutral": 50.0
+		},
+		"muscle": {
+			"a": 25.0,
+			"b": 75.0,
+			"hard_min": 0.0,
+			"hard_max": 100.0,
+			"neutral": 50.0
+		},
+		"weight": {
+			"a": 85.0,
+			"b": 115.0,
+			"hard_min": 50.0,
+			"hard_max": 150.0,
+			"neutral": 100.0
+		},
+		"proportions": {
+			"a": 0.3,
+			"b": 0.7,
+			"hard_min": 0.0,
+			"hard_max": 1.0,
+			"neutral": 0.5
+		},
+		"height_cm": {
+			"a": 150.0,
+			"b": 190.0,
+			"hard_min": 50.0,
+			"hard_max": 230.0,
+			"neutral": 166.6
+		}
+	}
+}

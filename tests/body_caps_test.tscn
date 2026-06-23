@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://body_caps_test_v1"]
+
+[ext_resource type="Script" path="res://tests/body_caps_test.gd" id="1_bodycapstest"]
+
+[node name="BodyCapsTest" type="Node"]
+script = ExtResource("1_bodycapstest")

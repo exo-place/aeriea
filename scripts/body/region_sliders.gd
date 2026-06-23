@@ -39,13 +39,21 @@ const KIND_UNIPOLAR := "unipolar"
 ## the panel is deep but navigable. The long tail stays reachable via drag-to-modify.
 const GROUPS := [
 	["Breasts", [
-		["breast/breast-volume-vert-down|up", "size", "small", "large"],
+		# NOTE (Phase 3a, breast-size guard): "breast/breast-volume-vert-down|up" was
+		# proposed as the "size" control (SYNTHESIS §5), but a render probe proved it is a
+		# PURELY VERTICAL redistribution axis (net displacement is ±y; forward/projection z
+		# ≈ 0 at both poles) — driving it does NOT change apparent size. Shipping it as "size"
+		# would be a size slider that doesn't change size (the guard's stop condition). It is
+		# therefore labeled HONESTLY as breast height/lift, not size. The real size fix is the
+		# DEFERRED cup-cube import (a decision item). The genuine size axes already ship below:
+		# "fullness" (bust circumference) and "projection" (breast point).
+		["breast/breast-volume-vert-down|up", "height / lift", "low", "high"],
 		["breast/breast-dist-decr|incr", "spacing", "close", "wide"],
 		["breast/breast-point-decr|incr", "projection", "flat", "pointed"],
-		["breast/breast-trans-down|up", "height", "low", "high"],
+		["breast/breast-trans-down|up", "position", "low", "high"],
 		["breast/nipple-size-decr|incr", "nipple size", "small", "large"],
 		["breast/nipple-point-decr|incr", "nipple out", "in", "out"],
-		["measure/measure-bust-circ-decr|incr", "bust circ.", "narrow", "full"],
+		["measure/measure-bust-circ-decr|incr", "fullness", "narrow", "full"],
 		["measure/measure-underbust-circ-decr|incr", "underbust", "narrow", "full"],
 	]],
 	["Glutes & pelvis", [
@@ -53,15 +61,19 @@ const GROUPS := [
 		["pelvis/pelvis-tone-decr|incr", "pelvis tone", "soft", "toned"],
 		["pelvis/bulge-decr|incr", "bulge", "less", "more"],
 	]],
+	# Belly group (SYNTHESIS §3): the pregnancy "belly" slider is RETIRED — the gravid
+	# stomach-pregnant morph leaves base creation (it belongs to the future pregnancy
+	# simulation). The persistent-identity belly shape is the soft/tone axis + belly-forward
+	# depth; girth is the existing single waist slider (NOT re-added here — no modifier driven
+	# by two controls); whole-body fat is the Weight headline axis. Navel/love-handle fine
+	# detail moves to the T3 "Fine detail" group below.
 	["Belly & stomach", [
-		["stomach/stomach-pregnant-decr|incr", "belly", "flat", "round"],
-		["stomach/stomach-tone-decr|incr", "abs tone", "soft", "defined"],
-		["stomach/stomach-navel-in|out", "navel depth", "in", "out"],
-		["stomach/stomach-navel-down|up", "navel height", "low", "high"],
+		["stomach/stomach-tone-decr|incr", "belly softness / tone", "soft", "defined"],
+		["torso/torso-scale-depth-decr|incr", "belly forward", "flat", "deep"],
 	]],
 	["Waist & hips", [
 		["measure/measure-waist-circ-decr|incr", "waist", "narrow", "wide"],
-		["measure/measure-hips-circ-decr|incr", "hips circ.", "narrow", "wide"],
+		["measure/measure-hips-circ-decr|incr", "hips circumference", "narrow", "wide"],
 		["hip/hip-scale-horiz-decr|incr", "hip width", "narrow", "wide"],
 		["hip/hip-waist-down|up", "hip line", "low", "high"],
 		["measure/measure-waisttohip-dist-decr|incr", "torso-to-hip", "short", "long"],
@@ -107,10 +119,18 @@ const GROUPS := [
 		["head/head-oval", "oval shape", "none", "oval"],
 		["head/head-round", "round shape", "none", "round"],
 		["head/head-square", "square shape", "none", "square"],
-		["head/head-rectangular", "rectangular shape", "none", "rect."],
-		["head/head-triangular", "triangular shape", "none", "triangle"],
+		["head/head-rectangular", "rectangular shape", "none", "rectangular"],
+		["head/head-triangular", "triangular shape", "none", "triangular"],
 		["chin/chin-jaw-drop-decr|incr", "jaw drop", "less", "more"],
 		["nose/nose-scale-vert-decr|incr", "nose size", "small", "large"],
+	]],
+	# T3 fine detail (SYNTHESIS §3): the navel rows and love-handle axes, demoted from the
+	# headline belly/hip groups to a fine-detail group for power users.
+	["Fine detail", [
+		["stomach/stomach-navel-in|out", "navel depth", "in", "out"],
+		["stomach/stomach-navel-down|up", "navel height", "low", "high"],
+		["hip/hip-scale-depth-decr|incr", "love-handle depth", "less", "more"],
+		["hip/hip-trans-in|out", "love-handle out", "in", "out"],
 	]],
 ]
 

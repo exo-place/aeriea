@@ -120,6 +120,10 @@ var _use_gpu_picker: bool = false
 
 var _value_labels: Dictionary = {}   ## field -> Label showing current value
 var _sliders: Dictionary = {}        ## field -> HSlider
+var _axis_spins: Dictionary = {}     ## field -> SpinBox (headline numeric entry, natural units)
+var _extreme_slider: HSlider         ## the global extremeness 0..1 slider
+var _extreme_check: CheckBox         ## "allow extreme proportions" gate
+var _extreme_lbl: Label              ## extremeness % readout
 
 ## DATA-DRIVEN per-region detail sliders (RegionSliders). Kept SEPARATE from `_sliders`
 ## (the headline-axis dials) because these write BodyState.modifiers[<full_name>] rather
@@ -145,6 +149,12 @@ const BodyCapsScript := preload("res://scripts/body/body_caps.gd")
 ## Untyped: the BodyCaps class_name is not visible at this file's parse time (same pattern
 ## as `_morph` / `_gpu_picker`); methods are called dynamically.
 var _caps = BodyCapsScript.new()
+
+## Deterministic randomize state (§2.3): a fixed creator seed + a monotonic counter feed every
+## randomize gesture's RNG, so a recorded sequence of randomize ops replays byte-identically
+## against a fixed caps version + extremeness. The seed is fixed (not time-based) for replay.
+var _random_seed: int = 0x5eed_a4_1a
+var _random_counter: int = 0
 
 var _history: HistoryTree
 ## Per-axis pending value during a slider drag — committed once on drag-end so we
@@ -817,10 +827,52 @@ func _build_ui() -> void:
 
 	vbox.add_child(HSeparator.new())
 
+	# EXTREMENESS control (§4 / §6): the single global scalar that widens every control's cap
+	# interval toward its hard range. Non-destructive — lowering it does NOT snap existing
+	# beyond-cap values (Phase-1 ratchet). A checkbox ("Allow extreme proportions") gates the
+	# 0..1 slider; both drive _caps.extremeness through _set_extremeness (a state-replacing op
+	# that aborts any gesture, then sweeps every control's widget bounds).
+	vbox.add_child(HSeparator.new())
+	var ex_hdr := Label.new()
+	ex_hdr.text = "extremeness (widens all caps; lowering keeps existing values)"
+	ex_hdr.add_theme_font_size_override("font_size", 10)
+	vbox.add_child(ex_hdr)
+	var ex_row := HBoxContainer.new()
+	ex_row.add_theme_constant_override("separation", 4)
+	_extreme_check = CheckBox.new()
+	_extreme_check.text = "allow"
+	_extreme_check.button_pressed = _caps.extremeness > 0.0
+	_extreme_check.toggled.connect(func(on: bool) -> void:
+		# Toggling on jumps to full unlock; off returns to 0 (existing beyond-cap persists).
+		_set_extremeness(1.0 if on else 0.0))
+	ex_row.add_child(_extreme_check)
+	_extreme_slider = HSlider.new()
+	_extreme_slider.min_value = 0.0
+	_extreme_slider.max_value = 1.0
+	_extreme_slider.step = 0.01
+	_extreme_slider.value = _caps.extremeness
+	_extreme_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_extreme_slider.value_changed.connect(func(v: float) -> void: _set_extremeness(v))
+	ex_row.add_child(_extreme_slider)
+	_extreme_lbl = Label.new()
+	_extreme_lbl.custom_minimum_size = Vector2(40, 0)
+	_extreme_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_extreme_lbl.text = "%.0f%%" % (_caps.extremeness * 100.0)
+	ex_row.add_child(_extreme_lbl)
+	vbox.add_child(ex_row)
+
+	vbox.add_child(HSeparator.new())
+
 	var reset := Button.new()
 	reset.text = "Reset to neutral"
 	reset.pressed.connect(_reset_all)
 	vbox.add_child(reset)
+
+	# GLOBAL randomize (§2.3): bounded seeded randomize of every control within the live cap.
+	var rand_all := Button.new()
+	rand_all.text = "Randomize (within extremeness)"
+	rand_all.pressed.connect(_randomize_all)
+	vbox.add_child(rand_all)
 
 	# History-toggle button lives in the main panel; the history nav itself is a SEPARATE
 	# corner panel hidden by default (toggled by this button or the H hotkey).
@@ -1174,6 +1226,47 @@ func _build_axis_row(parent: VBoxContainer, field: String, _lo: float, _hi: floa
 	row.add_child(value_lbl)
 	_value_labels[field] = value_lbl
 
+	# NUMERIC ENTRY (§2.3 / §4.3): a SpinBox in NATURAL UNITS (age yr / height cm / %; the same
+	# units _format_value shows). Editing routes the request through the apply_capped choke and
+	# re-displays the CLAMPED stored value, so an out-of-cap entry visibly clamps at the field.
+	var spin := SpinBox.new()
+	spin.min_value = _lo
+	spin.max_value = _hi
+	spin.step = step
+	spin.custom_minimum_size = Vector2(64, 0)
+	spin.add_theme_font_size_override("font_size", 10)
+	spin.set_value_no_signal(float(_body_state.get(field)))
+	spin.value_changed.connect(func(v: float) -> void:
+		_caps.start_gesture()
+		var cur := float(_body_state.get(field))
+		var nv: float = _caps.apply_capped(field, v, cur)
+		_body_state.set(field, nv)
+		_apply_state()
+		_write_back_axis_widget(field, slider, nv)
+		_caps.end_gesture()
+		_apply_axis_slider_bounds(field, slider)
+		if not _suspend_commit:
+			_commit_axis(field, nv))
+	row.add_child(spin)
+	_axis_spins[field] = spin
+
+	# Per-axis RESET (↺) + RANDOMIZE (⚄) (§2.3).
+	var rst := Button.new()
+	rst.text = "↺"
+	rst.tooltip_text = "Reset %s to neutral" % label
+	rst.custom_minimum_size = Vector2(22, 0)
+	rst.add_theme_font_size_override("font_size", 10)
+	rst.pressed.connect(func() -> void: _reset_axis(field))
+	row.add_child(rst)
+
+	var rnd := Button.new()
+	rnd.text = "⚄"
+	rnd.tooltip_text = "Randomize %s (within current extremeness)" % label
+	rnd.custom_minimum_size = Vector2(22, 0)
+	rnd.add_theme_font_size_override("font_size", 10)
+	rnd.pressed.connect(func() -> void: _randomize_axis(field))
+	row.add_child(rnd)
+
 	parent.add_child(row)
 
 
@@ -1304,15 +1397,52 @@ func _build_modifier_row(parent: VBoxContainer, spec_name: String, display: Stri
 	hi_lbl.add_theme_font_size_override("font_size", 9)
 	row.add_child(hi_lbl)
 
-	var val_lbl := Label.new()
-	val_lbl.custom_minimum_size = Vector2(34, 0)
-	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	val_lbl.add_theme_font_size_override("font_size", 10)
-	val_lbl.text = "%+.2f" % float(slider.value)
-	row.add_child(val_lbl)
+	# NUMERIC ENTRY (SYNTHESIS §2.3 / §4.3): a SpinBox bound to the SAME value, DISPLAY-REMAPPED
+	# (bidirectional [-1,1] → ±100; unipolar [0,1] → 0..100). Editing it routes the un-remapped
+	# request through the apply_capped choke and re-displays the CLAMPED stored value (so an
+	# out-of-cap entry visibly clamps). This is BOTH the value display and the typeable field —
+	# the old static label is gone.
+	var is_bidir := kind == RegionSlidersScript.KIND_BIDIRECTIONAL
+	var spin := SpinBox.new()
+	spin.min_value = -100.0 if is_bidir else 0.0
+	spin.max_value = 100.0
+	spin.step = 1.0
+	spin.custom_minimum_size = Vector2(56, 0)
+	spin.add_theme_font_size_override("font_size", 10)
+	spin.set_value_no_signal(_modifier_to_display(float(slider.value), is_bidir))
+	spin.value_changed.connect(func(disp: float) -> void:
+		# A numeric commit is a one-write gesture through the choke (§4.3 path 4).
+		_caps.start_gesture()
+		var req := _display_to_modifier(disp, is_bidir)
+		var primary := _set_modifier_capped(full_names, req)
+		_apply_state()
+		_write_back_modifier_widget(spec_name, slider, primary)
+		_caps.end_gesture()
+		_apply_modifier_slider_bounds(spec_name)
+		if not _suspend_commit:
+			_commit_modifier(spec_name, display, primary))
+	row.add_child(spin)
+
+	# Per-control RESET (↺, raw to neutral) + RANDOMIZE (⚄, seeded, within cap) buttons (§2.3).
+	var rst := Button.new()
+	rst.text = "↺"
+	rst.tooltip_text = "Reset %s to neutral" % display
+	rst.custom_minimum_size = Vector2(22, 0)
+	rst.add_theme_font_size_override("font_size", 10)
+	rst.pressed.connect(func() -> void: _reset_modifier(spec_name, display))
+	row.add_child(rst)
+
+	var rnd := Button.new()
+	rnd.text = "⚄"
+	rnd.tooltip_text = "Randomize %s (within current extremeness)" % display
+	rnd.custom_minimum_size = Vector2(22, 0)
+	rnd.add_theme_font_size_override("font_size", 10)
+	rnd.pressed.connect(func() -> void: _randomize_modifier(spec_name, display))
+	row.add_child(rnd)
 
 	_modifier_sliders[spec_name] = {
-		"slider": slider, "value_lbl": val_lbl, "full_names": full_names, "kind": kind,
+		"slider": slider, "spin": spin, "is_bidir": is_bidir,
+		"full_names": full_names, "kind": kind, "display": display,
 	}
 	parent.add_child(row)
 	# Drive the slider's min/max from the live cap interval (conservative intersection of
@@ -1381,15 +1511,15 @@ func _recompute_modifier_slider_bounds() -> void:
 		_apply_modifier_slider_bounds(spec_name)
 
 
-## Write the clamped `new` back to a region slider's thumb (no-signal) + numeric label
-## WITHOUT re-firing value_changed (§3.2 step 4): bounds-first, then set_value_no_signal,
-## then the label reads the clamped value.
+## Write the clamped `new` back to a region slider's thumb (no-signal) + numeric SpinBox
+## WITHOUT re-firing value_changed (§3.2 step 4): bounds-first, then set_value_no_signal on
+## both widgets, so the SpinBox shows the CLAMPED stored value (remapped), never the request.
 func _write_back_modifier_widget(spec_name: String, slider: HSlider, new_value: float) -> void:
 	_apply_modifier_slider_bounds(spec_name)
 	slider.set_value_no_signal(new_value)
 	var e = _modifier_sliders.get(spec_name, null)
 	if e != null:
-		(e["value_lbl"] as Label).text = "%+.2f" % new_value
+		(e["spin"] as SpinBox).set_value_no_signal(_modifier_to_display(new_value, bool(e["is_bidir"])))
 
 
 ## Set a headline-axis slider's bounds to its live cap interval (held during a gesture,
@@ -1415,6 +1545,9 @@ func _write_back_axis_widget(field: String, slider: HSlider, new_value: float) -
 	var lbl = _value_labels.get(field, null)
 	if lbl != null:
 		(lbl as Label).text = _format_value(field)
+	var spin = _axis_spins.get(field, null)
+	if spin != null:
+		(spin as SpinBox).set_value_no_signal(new_value)
 
 
 ## Sync a single modifier's bound region slider to a clamped sculpt-driven value WITHOUT
@@ -1429,11 +1562,14 @@ func _sync_modifier_slider(full_name: String, new_value: float) -> void:
 			return
 
 
-## Update one region slider's numeric value label from its current slider value.
-func _update_modifier_value_label(spec_name: String) -> void:
-	var e = _modifier_sliders.get(spec_name, null)
-	if e != null:
-		(e["value_lbl"] as Label).text = "%+.2f" % float((e["slider"] as HSlider).value)
+## Display-remap helpers (§2.3 numeric entry): modifier stored value ↔ the typed/shown number.
+## Bidirectional [-1,1] ↔ ±100; unipolar [0,1] ↔ 0..100.
+func _modifier_to_display(stored: float, is_bidir: bool) -> float:
+	return stored * 100.0 if is_bidir else stored * 100.0
+
+
+func _display_to_modifier(disp: float, _is_bidir: bool) -> float:
+	return disp / 100.0
 
 
 ## Re-bake ARRAY_TANGENT on the morphed body at a morph COMMIT (§6.1 creator-body
@@ -1450,6 +1586,61 @@ func _rebake_tangents_on_commit() -> void:
 		_rig.apply_body_state(_body_state, true)
 		if _cpu_picker != null:
 			_cpu_picker.mark_dirty()
+
+
+## RESET one region control to neutral (§2.3): a RESTORE-class op (raw write, no re-clamp) —
+## abort any active gesture, write neutral (0) to every resolved full_name via the erase-at-
+## neutral raw write site, re-sync the widget without re-firing, commit.
+func _reset_modifier(spec_name: String, display: String) -> void:
+	var e = _modifier_sliders.get(spec_name, null)
+	if e == null:
+		return
+	_caps.abort_gesture()
+	var full_names := e["full_names"] as PackedStringArray
+	_set_modifier(full_names, 0.0)   # raw to neutral (erases the keys)
+	_apply_state()
+	# Raw widget write-back (recompute bounds from settled, widen to contain 0, no-signal).
+	_apply_modifier_slider_bounds(spec_name)
+	var slider := e["slider"] as HSlider
+	slider.min_value = minf(slider.min_value, 0.0)
+	slider.max_value = maxf(slider.max_value, 0.0)
+	slider.set_value_no_signal(0.0)
+	(e["spin"] as SpinBox).set_value_no_signal(0.0)
+	if not _suspend_commit:
+		_commit_modifier(spec_name, display, 0.0)
+
+
+## RANDOMIZE one region control (§2.3): a bounded SEEDED sample WITHIN cap(·, extremeness),
+## routed through the choke (so it can never exceed the live interval). Deterministic for a
+## given seed + spec + extremeness. A one-write gesture.
+func _randomize_modifier(spec_name: String, display: String) -> void:
+	var e = _modifier_sliders.get(spec_name, null)
+	if e == null:
+		return
+	var full_names := e["full_names"] as PackedStringArray
+	var rng := _seeded_rng_for(spec_name)
+	_caps.start_gesture()
+	# Sample uniformly within the PRIMARY side's current cap interval, then route through the
+	# choke (which clamps each resolved side to its own interval — the bilateral case).
+	var ci: Array = _caps.cap(full_names[0])
+	var req := rng.randf_range(float(ci[0]), float(ci[1]))
+	var primary := _set_modifier_capped(full_names, req)
+	_apply_state()
+	_write_back_modifier_widget(spec_name, e["slider"] as HSlider, primary)
+	_caps.end_gesture()
+	_apply_modifier_slider_bounds(spec_name)
+	if not _suspend_commit:
+		_commit_modifier(spec_name, display, primary)
+
+
+## A DETERMINISTIC RNG for a randomize op: seeded from a global creator seed + the control key
+## + a monotonic counter, so a sequence of randomize gestures is reproducible (action-logged,
+## SYNTHESIS §2.3 "deterministic + shareable") and independent per control.
+func _seeded_rng_for(key: String) -> RandomNumberGenerator:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("%d:%s:%d" % [_random_seed, key, _random_counter])
+	_random_counter += 1
+	return rng
 
 
 ## Commit one settled region-slider change as a history node.
@@ -1474,7 +1665,7 @@ func _restore_modifier_sliders() -> void:
 		slider.min_value = minf(slider.min_value, v)
 		slider.max_value = maxf(slider.max_value, v)
 		slider.set_value_no_signal(v)
-		(e["value_lbl"] as Label).text = "%+.2f" % v
+		(e["spin"] as SpinBox).set_value_no_signal(_modifier_to_display(v, bool(e["is_bidir"])))
 
 
 func _format_value(field: String) -> String:
@@ -1513,6 +1704,8 @@ func _apply_state() -> void:
 		_glow_geom_dirty = true
 	for field in _value_labels:
 		(_value_labels[field] as Label).text = _format_value(field)
+	for field in _axis_spins:
+		(_axis_spins[field] as SpinBox).set_value_no_signal(float(_body_state.get(field)))
 
 
 ## RESET-TO-NEUTRAL: branch from the ROOT (HistoryTree.reset_to), and be IDEMPOTENT — a
@@ -1523,6 +1716,84 @@ func _reset_all() -> void:
 	var neutral := BodyState.new()
 	_history.reset_to(neutral.to_dict(), "reset to neutral")
 	_restore_current()
+
+
+## RESET one headline axis to its neutral (§2.3): a RESTORE-class raw write (abort gesture,
+## set the field neutral, no-signal widget write-back, commit).
+func _reset_axis(field: String) -> void:
+	_caps.abort_gesture()
+	var neutral := float(_caps.neutral_of(field))
+	_body_state.set(field, neutral)
+	_apply_state()
+	var slider := _sliders[field] as HSlider
+	_apply_axis_slider_bounds(field, slider)
+	slider.min_value = minf(slider.min_value, neutral)
+	slider.max_value = maxf(slider.max_value, neutral)
+	slider.set_value_no_signal(neutral)
+	var lbl = _value_labels.get(field, null)
+	if lbl != null:
+		(lbl as Label).text = _format_value(field)
+	var spin = _axis_spins.get(field, null)
+	if spin != null:
+		(spin as SpinBox).set_value_no_signal(neutral)
+	if not _suspend_commit:
+		_commit_axis(field, neutral)
+
+
+## RANDOMIZE one headline axis (§2.3): a bounded SEEDED sample WITHIN cap(field, extremeness),
+## through the choke (deterministic for a given seed + field + extremeness).
+func _randomize_axis(field: String) -> void:
+	var rng := _seeded_rng_for(field)
+	_caps.start_gesture()
+	var ci: Array = _caps.cap(field)
+	var req := rng.randf_range(float(ci[0]), float(ci[1]))
+	var cur := float(_body_state.get(field))
+	var nv: float = _caps.apply_capped(field, req, cur)
+	_body_state.set(field, nv)
+	_apply_state()
+	var slider := _sliders[field] as HSlider
+	_write_back_axis_widget(field, slider, nv)
+	_caps.end_gesture()
+	_apply_axis_slider_bounds(field, slider)
+	if not _suspend_commit:
+		_commit_axis(field, nv)
+
+
+## SET the global extremeness (§4 / §6): a STATE-REPLACING op — abort any active gesture
+## FIRST (gesture-lifecycle-interruption invariant), set the scalar, then sweep EVERY control's
+## widget bounds (each interval widens/narrows with extremeness). NON-DESTRUCTIVE: stored values
+## are NOT touched, so a beyond-cap value set at higher extremeness persists when it is lowered.
+func _set_extremeness(e: float) -> void:
+	_caps.abort_gesture()
+	_caps.extremeness = clampf(e, 0.0, 1.0)
+	# Keep the two widgets + readout in sync without re-firing each other.
+	if _extreme_slider != null:
+		_extreme_slider.set_value_no_signal(_caps.extremeness)
+	if _extreme_check != null:
+		_extreme_check.set_pressed_no_signal(_caps.extremeness > 0.0)
+	if _extreme_lbl != null:
+		_extreme_lbl.text = "%.0f%%" % (_caps.extremeness * 100.0)
+	# All-controls bounds sweep: every slider's reachable range now reflects the new extremeness
+	# (widened to still contain the current stored value, so nothing snaps).
+	for field in _sliders:
+		_apply_axis_slider_bounds(field, _sliders[field] as HSlider)
+	_recompute_modifier_slider_bounds()
+
+
+## GLOBAL randomize (§2.3): randomize every headline axis and region control within the live
+## cap, deterministically. Suspends per-control commits and records ONE history node for the
+## whole gesture, so a global randomize is a single undoable step.
+func _randomize_all() -> void:
+	_suspend_commit = true
+	for field in _sliders:
+		_randomize_axis(field)
+	for spec_name in _modifier_sliders:
+		var e = _modifier_sliders[spec_name]
+		_randomize_modifier(spec_name, String(e["display"]))
+	_suspend_commit = false
+	_rebake_tangents_on_commit()
+	_history.commit(_body_state.to_dict(), "randomize all")
+	_refresh_history_panel()
 
 
 # ---------------------------------------------------------------------------

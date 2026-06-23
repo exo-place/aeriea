@@ -96,7 +96,17 @@ var _drag_accum: Dictionary = {}    ## full_name -> total applied delta this dra
 ## alpha driven by MorphDrag.glow_weights. Rebuilt cheaply on hover move (sparse highlight).
 var _glow_overlay: MeshInstance3D
 var _glow_base_pos: PackedVector3Array   ## the body's rest-space vertex positions (for glow + pick)
+var _glow_base_nrm: PackedVector3Array   ## the body's rest-space vertex normals (for the outward glow offset)
 var _glow_tris: PackedInt32Array         ## the body's triangle index list (for pick + overlay)
+## The glow geometry (positions + normals) is captured from the MORPHED surface, not once at
+## build: a morph bake sets this dirty so the next glow rebuild re-reads the current baked
+## ARRAY_VERTEX/ARRAY_NORMAL (the same arrays the renderer + picker use). Without this the glow
+## stamps stale neutral positions and floats off the morphed body (§2.3 / §6.6).
+var _glow_geom_dirty: bool = true
+## Outward offset of the glow shell above the skin, in WORLD metres (so it reads the same across
+## the height range). Applied in rest space as ε/height_scale() since the overlay is a child of
+## the scaled skeleton (§6.6: a fixed rest-space epsilon mis-renders across stature).
+const GLOW_WORLD_OFFSET := 0.003
 var _hover_vertex: int = -1
 
 ## The picking backend (default the deterministic CPU uniform-grid). The Picker interface
@@ -254,7 +264,9 @@ func _build_morph_drag() -> void:
 	if _rig != null and _rig.mesh_instance != null and _rig.mesh_instance.mesh is ArrayMesh:
 		var arrays := (_rig.mesh_instance.mesh as ArrayMesh).surface_get_arrays(0)
 		_glow_base_pos = arrays[Mesh.ARRAY_VERTEX]
+		_glow_base_nrm = arrays[Mesh.ARRAY_NORMAL]
 		_glow_tris = arrays[Mesh.ARRAY_INDEX]
+		_glow_geom_dirty = false
 	# Build the CPU spatial-grid picker over the rest-space baked triangles. Deterministic;
 	# rebuilt lazily on the next pick after a morph bake marks it dirty (_apply_state).
 	_cpu_picker = CpuAccelPickerScript.new()
@@ -296,6 +308,27 @@ func _build_glow_overlay() -> void:
 	_glow_overlay.material_override = mat
 	_glow_overlay.visible = false
 	_rig.skeleton.add_child(_glow_overlay)
+	# The world-space outward offset (§6.6) divides ε by the skeleton's uniform scale to land a
+	# constant world thickness. That math assumes scale is UNIFORM (one scalar). Assert it so a
+	# future non-uniform skeleton scale can't silently re-break the offset.
+	var sc := _rig.skeleton.scale
+	assert(absf(sc.x - sc.y) < 1e-4 and absf(sc.x - sc.z) < 1e-4,
+		"glow outward-offset assumes uniform skeleton scale; got %s" % sc)
+
+
+## Re-read the glow geometry (positions + normals) from the CURRENT morphed body surface — the
+## same baked ARRAY_VERTEX/ARRAY_NORMAL the renderer + picker use. Lazy: only does work when a
+## morph bake (_apply_state) has marked the geometry dirty. This is what makes the glow TRACK
+## the morph instead of stamping a stale once-at-build neutral capture (§2.3 / §6.6).
+func _refresh_glow_geometry() -> void:
+	if not _glow_geom_dirty:
+		return
+	if _rig == null or _rig.mesh_instance == null or not (_rig.mesh_instance.mesh is ArrayMesh):
+		return
+	var arrays := (_rig.mesh_instance.mesh as ArrayMesh).surface_get_arrays(0)
+	_glow_base_pos = arrays[Mesh.ARRAY_VERTEX]
+	_glow_base_nrm = arrays[Mesh.ARRAY_NORMAL]
+	_glow_geom_dirty = false
 
 
 func _build_camera() -> void:
@@ -418,6 +451,7 @@ func _update_hover_glow(screen_pos: Vector2) -> void:
 			_glow_overlay.visible = false
 		return
 	_hover_vertex = int(hit["vertex"])
+	_refresh_glow_geometry()   # use the current morphed positions for the weight radius
 	# glow_weights works in the SAME space as the positions we pass — use rest-space positions
 	# (the overlay is a child of the skeleton, so it inherits the scale; weights are computed in
 	# rest space and the hit pos is converted back to rest space for a consistent radius).
@@ -437,15 +471,29 @@ func _rebuild_glow_mesh(weights: Dictionary) -> void:
 	if weights.is_empty():
 		_glow_overlay.visible = false
 		return
+	# Track the morph: re-read the current baked surface if a bake marked it dirty.
+	_refresh_glow_geometry()
 	var n := _glow_base_pos.size()
+	# OUTWARD OFFSET (§6.6): push each glow vertex a constant WORLD distance off the skin along
+	# its morphed normal, so the additive shell sits just ABOVE the surface instead of z-fighting
+	# it. The overlay is a child of the scaled skeleton, so a world ε must be divided by the
+	# uniform stature scale to land the same world thickness across the height range.
+	var hscale := 1.0
+	if _body_state != null:
+		hscale = maxf(_body_state.height_scale(), 1e-4)
+	var eps := GLOW_WORLD_OFFSET / hscale
+	var have_nrm := _glow_base_nrm.size() == n
+	var pos := PackedVector3Array()
+	pos.resize(n)
 	var colors := PackedColorArray()
 	colors.resize(n)
 	for i in n:
 		var w := float(weights.get(i, 0.0))
 		colors[i] = Color(1, 1, 1, w)   # tinted by the material albedo; alpha = glow strength
+		pos[i] = _glow_base_pos[i] + (_glow_base_nrm[i] * eps if have_nrm else Vector3.ZERO)
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = _glow_base_pos
+	arrays[Mesh.ARRAY_VERTEX] = pos
 	arrays[Mesh.ARRAY_INDEX] = _glow_tris
 	arrays[Mesh.ARRAY_COLOR] = colors
 	var mesh := ArrayMesh.new()
@@ -465,6 +513,7 @@ func _apply_morph_drag(drag_screen: Vector2) -> void:
 	# skeleton-local rest space (the same frame glow_weights uses), converting the world hit in.
 	var inv := _rig.skeleton.global_transform.affine_inverse()
 	var hit_local: Vector3 = inv * _drag_hit_pos
+	_refresh_glow_geometry()   # decompose_drag biases against the CURRENT morphed positions
 	# ZOOM/DEPTH-ADAPTIVE sensitivity: the world-metres a screen pixel spans at the hit's depth.
 	# Perspective camera: world_per_px = 2·z·tan(fov_y/2) / viewport_height, where z is the
 	# hit's view-space depth (distance along the camera's forward -Z). So a pixel of drag maps
@@ -1459,6 +1508,9 @@ func _apply_state() -> void:
 		# dirty; the picker rebuilds lazily on the next pick (no per-bake-frame rebuild cost).
 		if _cpu_picker != null:
 			_cpu_picker.mark_dirty()
+		# The glow overlay reads the SAME baked surface — mark it dirty too so the next glow
+		# rebuild re-fetches the morphed positions+normals (tracks the morph; §2.3 / §6.6).
+		_glow_geom_dirty = true
 	for field in _value_labels:
 		(_value_labels[field] as Label).text = _format_value(field)
 

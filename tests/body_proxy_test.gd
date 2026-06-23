@@ -324,6 +324,15 @@ func _test_polish() -> void:
 		var teeth_front := teeth.position.z + teeth.size.z
 		_assert("tongue tip juts forward to the teeth front (visible in an open mouth)",
 			tongue_front >= teeth_front - 0.004, "tongue_z=%.4f teeth_z=%.4f" % [tongue_front, teeth_front])
+		# CONTAINMENT (cavity-derived seating, §6.7): the tongue sits INSIDE the mouth cavity
+		# bounded by the teeth — its dorsum does not poke ABOVE the teeth top and its tip does
+		# not protrude FORWARD past the teeth front by the face. (Small tolerance: the tip is
+		# seated to ~the teeth front, dorsum to just under the teeth top.)
+		var tol := 0.006
+		_assert("tongue dorsum stays at/under the teeth top (not poking out of the cavity)",
+			tongue_top <= teeth_top + tol, "tongue_top=%.4f teeth_top=%.4f" % [tongue_top, teeth_top])
+		_assert("tongue tip does not protrude past the teeth front (seated in the cavity)",
+			tongue_front <= teeth_front + tol, "tongue_z=%.4f teeth_z=%.4f" % [tongue_front, teeth_front])
 
 	# EYEBROWS/EYELASHES seated: above / on the eye, in front of it (so they read at all).
 	if ext.has("eyes") and ext.has("eyebrows"):

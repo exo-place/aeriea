@@ -67,6 +67,7 @@ SUITES=(
   interpreter_slice1_test
   legend_projection_test
   creator_history_test
+  creator_glow_test
   morph_drag_test
   picker_test
   gpu_id_picker_test

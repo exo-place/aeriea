@@ -89,12 +89,17 @@ const PIECES := [
 	{"name": "tongue", "kind": "helper", "group": "helper-tongue", "material": "tongue",
 		# SEATING (polish): the MakeHuman base tongue rest shape sits low/recessed in
 		# the cavity — its dorsum reads below the teeth and its tip falls behind the
-		# incisors, so at a front open-mouth angle it looks swallowed. We lift the
-		# dorsum + ease the tip forward by a small RAW-MH-space nudge applied AFTER the
-		# binding (so skin weights + the morph delta-library are untouched: the tongue
-		# stays rigged + fully morph-following — it is just re-seated higher/forward in
-		# its rest pose). Tuned against the open-mouth render. MH units (×0.1 = metres).
-		"seat_up": 0.16, "seat_fwd": 0.18},
+		# incisors, so at a front open-mouth angle it looks swallowed. We re-seat it
+		# INTO THE MOUTH CAVITY by deriving the target from the MOUTH-CAVITY LANDMARKS
+		# (the teeth piece's rest AABB), NOT magic offsets: lift the dorsum so its top
+		# sits just under the teeth band, ease the tip forward to ~the teeth front. The
+		# re-seat is a tapered RAW-MH-space edit applied AFTER the binding (so skin
+		# weights + the morph delta-library are untouched — the tongue stays rigged +
+		# fully morph-following, just re-seated in its rest pose). The landmark margins
+		# below are fractions of the teeth-cavity extent, not absolute nudges.
+		"seat_to_cavity": true,
+		"cavity_top_margin": 0.10,    # tongue dorsum lands this fraction of teeth height BELOW the teeth top
+		"cavity_front_margin": 0.06}, # tongue tip lands this fraction of teeth depth BEHIND the teeth front
 	{"name": "genitals", "kind": "helper", "group": "helper-genital", "material": "genitals"},
 	# HAIR — the CC0 `helper-hair` group is a real scalp cap that drapes to mid-back. We
 	# render it as a hair surface and RE-SKIN it (after the normal helper bind) onto the
@@ -165,6 +170,10 @@ func _run() -> int:
 	# binding[global_ri] = Array of [base_idx, weight] (the barycentric base-vert binding).
 	var binding := []
 
+	# Mouth-cavity landmark: the teeth piece's RAW-MH AABB, captured when teeth is built so the
+	# tongue seating (a later piece) can re-seat the tongue INTO the cavity the teeth bound,
+	# instead of using magic offsets (§6.7). Teeth precedes tongue in PIECES, so it is available.
+	var teeth_aabb_raw = null
 	for piece in PIECES:
 		var built: Dictionary
 		if piece["kind"] == "proxy":
@@ -174,10 +183,19 @@ func _run() -> int:
 		else:
 			var groups: Array = piece.get("groups", [piece.get("group", "")])
 			built = _build_helper_piece(groups, base_verts, base_uvs, group_faces)
-			# SEATING nudge (tongue): a tapered RAW-MH-space re-seat applied to the bound
-			# rest positions only — binding (skin weights + morph deltas) is unchanged.
-			if not built.is_empty() and (piece.has("seat_up") or piece.has("seat_fwd")):
-				_apply_seating(built, float(piece.get("seat_up", 0.0)), float(piece.get("seat_fwd", 0.0)))
+			# Capture the teeth cavity landmark for the tongue re-seat.
+			if not built.is_empty() and String(piece["name"]) == "teeth":
+				teeth_aabb_raw = _raw_aabb(built["render_pos_raw"])
+			# SEATING (tongue): re-seat into the mouth cavity derived from the teeth AABB. A
+			# tapered RAW-MH-space edit of the bound rest positions only — binding (skin weights
+			# + morph deltas) is unchanged, so the tongue stays rigged + morph-following.
+			if not built.is_empty() and piece.get("seat_to_cavity", false):
+				if teeth_aabb_raw == null:
+					push_error("body_proxy_build: tongue seat_to_cavity needs the teeth AABB (teeth must build first)")
+					return 1
+				_seat_into_cavity(built, teeth_aabb_raw,
+					float(piece.get("cavity_top_margin", 0.10)),
+					float(piece.get("cavity_front_margin", 0.06)))
 		if built.is_empty():
 			push_error("body_proxy_build: piece '%s' produced no geometry" % piece["name"])
 			return 1
@@ -307,30 +325,54 @@ func _build_helper_piece(groups: Array, base_verts: PackedVector3Array, base_uvs
 	return {"render_pos_raw": render_pos, "render_uv": render_uv, "tris": tris, "binding": binding}
 
 
-## SEATING re-pose (tongue): lift + ease-forward the bound rest positions of a helper
-## piece, TAPERED so the front/dorsum moves most and the back/root stays anchored (no
-## throat clipping). Pure raw-MH-space edit of render_pos_raw; the binding (skin weights,
-## morph delta library) is derived from the UNCHANGED base verts, so the piece stays fully
-## rigged + morph-following — it is only re-seated higher/forward in its rest pose. The
-## taper weight is the normalised front-ness (z) × upper-ness (y) of each vert within the
-## piece's own bbox, so the tip+dorsum rise into the cavity and the root holds.
-func _apply_seating(built: Dictionary, up_mh: float, fwd_mh: float) -> void:
-	var pos: PackedVector3Array = built["render_pos_raw"]
+## Raw-MH-space AABB of a position array.
+func _raw_aabb(pos: PackedVector3Array) -> AABB:
 	if pos.is_empty():
-		return
+		return AABB()
 	var ab := AABB(pos[0], Vector3.ZERO)
 	for p in pos:
 		ab = ab.expand(p)
+	return ab
+
+
+## SEAT-INTO-CAVITY (tongue): re-seat the tongue so it sits INSIDE the mouth cavity, with the
+## target DERIVED FROM THE MOUTH-CAVITY LANDMARKS (the teeth piece's rest AABB) rather than from
+## magic offsets (§6.7). The lift/push needed is computed from the gap between the tongue's
+## current rest extent and the teeth-bounded cavity:
+##   * dorsum top  -> just BELOW the teeth top (teeth_top − margin·teeth_height)
+##   * tip front   -> just BEHIND the teeth front (teeth_front − margin·teeth_depth)
+## The motion is TAPERED by each vert's front-ness (z) × upper-ness (y) in the tongue's own
+## bbox so the tip/dorsum rise into the cavity while the root stays anchored (no throat clip).
+## Pure raw-MH-space edit of render_pos_raw; the binding (skin weights + morph delta library) is
+## untouched, so the tongue stays rigged + fully morph-following — only its rest seat moves.
+func _seat_into_cavity(built: Dictionary, teeth: AABB, top_margin: float, front_margin: float) -> void:
+	var pos: PackedVector3Array = built["render_pos_raw"]
+	if pos.is_empty():
+		return
+	var ab := _raw_aabb(pos)
 	var z0 := ab.position.z
 	var zr := maxf(ab.size.z, 1e-6)
 	var y0 := ab.position.y
 	var yr := maxf(ab.size.y, 1e-6)
+	# Cavity targets from the teeth landmarks.
+	var teeth_top := teeth.position.y + teeth.size.y
+	var teeth_front := teeth.position.z + teeth.size.z
+	var target_top := teeth_top - top_margin * teeth.size.y
+	var target_front := teeth_front - front_margin * teeth.size.z
+	# Lift the FULL upper surface so the dorsum's top lands at target_top; push the tip forward
+	# so it reaches target_front. Both are gaps measured from the tongue's current extent — the
+	# re-seat is exactly "what it takes to land in the cavity", not a tuned constant.
+	var lift_gap := target_top - (ab.position.y + ab.size.y)        # dorsum top -> under teeth top
+	var push_gap := target_front - (ab.position.z + ab.size.z)      # tip -> ~teeth front
+	# Only re-seat UP/FORWARD (a recessed tongue); never pull it down/back below where it sits.
+	lift_gap = maxf(lift_gap, 0.0)
+	push_gap = maxf(push_gap, 0.0)
 	for i in pos.size():
 		var fwdness := clampf((pos[i].z - z0) / zr, 0.0, 1.0)        # 0 back -> 1 front/tip
 		var upness := clampf((pos[i].y - y0) / yr, 0.0, 1.0)         # 0 floor -> 1 dorsum
-		# lift the dorsum (blend of fwd+up so the whole upper surface rises), ease the tip fwd.
-		var lift := up_mh * (0.45 + 0.55 * maxf(fwdness, upness))
-		var push := fwd_mh * (fwdness * fwdness)                      # strongest at the very tip
+		# the whole upper surface rises toward the cavity roof; the very tip eases forward.
+		var lift := lift_gap * (0.45 + 0.55 * maxf(fwdness, upness))
+		var push := push_gap * (fwdness * fwdness)
 		pos[i] = pos[i] + Vector3(0.0, lift, push)
 	built["render_pos_raw"] = pos
 

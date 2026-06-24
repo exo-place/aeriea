@@ -236,6 +236,42 @@ func editable_names() -> PackedStringArray:
 	return out
 
 
+## True iff `full_name` is a drag-editable modifier with a known footprint (so a grab-handle
+## can be anchored on it). Pure lookup.
+func has_footprint(full_name: String) -> bool:
+	var fp: Dictionary = _modifier_footprint.get(full_name, {})
+	return not fp.is_empty()
+
+
+## The ANCHOR render-vertex for a modifier's grab-handle (§5.2): the footprint vertex this
+## modifier moves MOST (its peak — the place the edit is most visibly "about"). The handle is
+## drawn at this vertex's CURRENT surface position and dragged along its surface-motion. Returns
+## -1 if the modifier has no footprint. Pure; deterministic (ties broken by lowest index).
+func handle_anchor_vertex(full_name: String) -> int:
+	var fp: Dictionary = _modifier_footprint.get(full_name, {})
+	if fp.is_empty():
+		return -1
+	var best := -1
+	var best_mag := -1.0
+	for ri in fp:
+		var m := float(fp[ri])
+		if m > best_mag or (m == best_mag and (best < 0 or int(ri) < best)):
+			best_mag = m
+			best = int(ri)
+	return best
+
+
+## The WORLD +value surface-motion direction (metres/unit, UNNORMALIZED) of a modifier at a
+## render vertex — the direction raising the modifier pushes the surface there. This is the
+## handle's drag AXIS: dragging the handle along this on-screen direction raises the value.
+## Returns Vector3.ZERO if the modifier is not a candidate at that vertex. Pure lookup.
+func motion_dir_at(full_name: String, render_vertex: int) -> Vector3:
+	for c in candidates_at(render_vertex):
+		if String(c["full_name"]) == full_name:
+			return c["dir"]
+	return Vector3.ZERO
+
+
 # ---------------------------------------------------------------------------
 # DRAG DECOMPOSITION (the testable core math).
 # ---------------------------------------------------------------------------

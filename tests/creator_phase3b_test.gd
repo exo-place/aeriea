@@ -13,8 +13,9 @@
 ##       focusing a region shows the contextual dock (the active-surface rule); clearing focus
 ##       hides it (no persistent panel). (The detailed tree-projection assertions live in
 ##       creator_tree_nav_test.gd.)
-##   (5) VISIBLE SHAPE-ON-BODY CONTROL: the shape-on-body toggle is a visible labeled toggle
-##       (not reachable ONLY via a hidden key); toggling it changes the mode.
+##   (5) SHAPE-ON-BODY IS GRAB-HANDLES, NOT A MODE (Phase C, character-creator-ux.md §5.2): the
+##       global shape-on-body toggle is deleted; a focused leaf sprouts present-on-focus
+##       grab-handles instead. (Detailed handle assertions live in creator_phasec_test.gd.)
 ##
 ## Run windowed under xvfb:
 ##   xvfb-run -a godot4 --path . res://tests/creator_phase3b_test.tscn --quit-after 8000
@@ -156,21 +157,24 @@ func _test_tiers_and_sculpt() -> void:
 	_ok("clearing focus hides the dock (no persistent panel)", not (dock as Control).visible,
 		"dock.visible=%s after clear" % (dock as Control).visible)
 
-	# (5) The shape-on-body control is a VISIBLE labeled toggle (not a hidden-key-only mode).
-	var sculpt_btn = cc.get("_sculpt_btn")
-	_ok("shape-on-body is a labeled toggle Button (not a hidden keybind)",
-		sculpt_btn != null and sculpt_btn is Button and (sculpt_btn as Button).toggle_mode
-			and "Shape" in (sculpt_btn as Button).text,
-		"label=%s" % ("'" + (sculpt_btn as Button).text + "'" if sculpt_btn != null else "null"))
-	var state_lbl = cc.get("_sculpt_state_lbl")
-	_ok("the shape-on-body toggle has a visible state indicator", state_lbl != null and state_lbl is Label,
-		"present")
-	cc.call("_set_sculpt_mode", true)
-	_ok("toggling the visible control enables shape-on-body", bool(cc.get("_sculpt_mode")) == true,
-		"mode=%s" % cc.get("_sculpt_mode"))
-	cc.call("_set_sculpt_mode", false)
-	_ok("toggling it off disables shape-on-body", bool(cc.get("_sculpt_mode")) == false,
-		"mode=%s" % cc.get("_sculpt_mode"))
+	# (5) Shape-on-body is NO LONGER a global toggle (Phase C, character-creator-ux.md §5.2): the
+	# global "Shape on the body" mode is deleted and replaced by present-on-focus grab-handles.
+	# (The detailed handle assertions live in creator_phasec_test.gd.) Here we only assert the
+	# migration is COMPLETE: no _set_sculpt_mode method, and handles sprout on a focused leaf.
+	_ok("the global shape-on-body MODE is deleted (no _set_sculpt_mode method)",
+		not cc.has_method("_set_sculpt_mode"), "no sculpt-mode API")
+	# Focus a leaf (Face → Jaw & chin) and confirm grab-handles appear in its place.
+	cc.call("_focus_into", 0)   # Face
+	await get_tree().process_frame
+	cc.call("_focus_into", 0)   # Jaw & chin (first child of Face)
+	await get_tree().process_frame
+	var handles: Array = cc.get("_handles")
+	_ok("a focused leaf sprouts on-body grab-handles (the toggle's replacement)",
+		handles.size() >= 1, "%d handles on Jaw & chin" % handles.size())
+	cc.call("_focus_clear")
+	await get_tree().process_frame
+	_ok("clearing focus removes the handles", (cc.get("_handles") as Array).is_empty(),
+		"%d handles after clear" % (cc.get("_handles") as Array).size())
 
 	cc.queue_free()
 

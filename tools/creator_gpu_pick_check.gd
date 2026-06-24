@@ -22,10 +22,10 @@ func _process(_dt: float) -> void:
 		return
 	match _phase:
 		0:
-			# Enter sculpt mode + select the GPU backend.
-			_creator._set_sculpt_mode(true)
+			# Select the GPU backend (the picker/glow infra is independent of any reshape mode now
+			# that the global sculpt-mode toggle is gone — the hover-glow path still exists).
 			_creator.set_picker_backend(true)
-			print("CHECK: sculpt on, backend = GPU ID-buffer")
+			print("CHECK: backend = GPU ID-buffer")
 			_phase = 1
 		1:
 			await _run()

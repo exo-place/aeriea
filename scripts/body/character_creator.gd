@@ -82,7 +82,35 @@ const CpuAccelPickerScript := preload("res://scripts/util/cpu_accel_picker.gd")
 const GpuIdPickerScript := preload("res://scripts/util/gpu_id_picker.gd")
 
 var _morph                       ## MorphDrag (untyped: the class_name isn't visible at parse)
-var _sculpt_mode: bool = false
+
+# ---------------------------------------------------------------------------
+# ON-BODY GRAB-HANDLES (character-creator-ux.md §5.2 / Phase C). The global "Shape on the body"
+# MODE is GONE — there is no _sculpt_mode. Instead, when a region LEAF is focused, a small set of
+# VISIBLE grab-handles sprout on the body at that region, each mapped to one of the region's
+# PRIMARY value-nodes (its real params). Disambiguation is by WHAT YOU GRABBED, visibly:
+#   - press within ~24 px of a handle (screen-space pick radius) → LATCH a reshape of that param;
+#   - press anywhere else (empty space OR body away from a handle) → orbit.
+# The decision is made ONCE at press (grab-latch hysteresis) and never re-evaluated mid-drag.
+# Hovering inside a handle's pick radius switches the cursor to CURSOR_DRAG before the press.
+# A handle-drag writes the mapped value-node through the SAME _set_modifier_capped choke the
+# slider/type use (modality is plural on one value), keeps the dock slider/spin in sync, and
+# commits ONE history node on release.
+#
+# A handle is { full_name, spec_name, anchor_vertex, display }. The anchor_vertex is the footprint
+# peak (MorphDrag.handle_anchor_vertex); its CURRENT morphed surface position is where the nub is
+# drawn (so handles TRACK the morph), and its surface-motion direction (MorphDrag.motion_dir_at)
+# is the handle's drag axis. Handles are present ONLY while a leaf is focused; absent otherwise.
+# ---------------------------------------------------------------------------
+const HANDLE_PICK_RADIUS_PX := 24.0   ## screen-space pick radius (§5.2) — forgiving on a rotatable body
+const HANDLE_MAX := 3                  ## 1–3 primary handles per region (not all params)
+const HANDLE_DOT_PX := 9.0             ## drawn nub radius (visual; the hit disc is larger)
+var _handles: Array = []               ## [{full_name, spec_name, anchor_vertex, display}, ...]
+var _handle_overlay: Control           ## the 2D Control that draws the handle nubs + axis hints
+var _hover_handle: int = -1            ## index into _handles the cursor is within pick radius of (-1 none)
+## A latched handle reshape in progress (the grab-latch hysteresis): the handle index + its anchor
+## hit position (world, captured at press) + the per-modifier accumulated deltas (one history node
+## on release). -1 = not reshaping. Set ONCE at press; never re-decided mid-drag.
+var _drag_handle: int = -1
 ## MIRROR (contralateral symmetry) toggle — DEFAULT ON (SYNTHESIS §1.3 / decision §2.3). When
 ## ON, a ONE-SIDED edit (a sculpt drag on one arm/leg, or a lateral slider whose resolved name
 ## has an l-/r- twin) ALSO applies the same capped write to the contralateral twin(M) — so the
@@ -99,8 +127,6 @@ var _mirror_btn: CheckBox
 ## androgynous bucket is added to the weighted roll (and the two androgynous archetypes seed it).
 var _allow_androgynous_random: bool = false
 var _androgynous_random_check: CheckBox
-var _sculpt_btn: Button
-var _sculpt_state_lbl: Label     ## live shape-on-body state indicator next to the toggle
 
 ## A morph drag in progress: the picked render-vertex, its world hit position, and the
 ## accumulated modifier value-deltas (so ONE history node is committed on drag-end).
@@ -504,6 +530,11 @@ func _recenter_pivot() -> void:
 func _process(delta: float) -> void:
 	if _camera == null:
 		return
+	# Handles are screen-projected from world anchors, so any camera move (orbit/pan/zoom/fly) or
+	# morph changes their screen position. Redraw each frame while any handle is present so they
+	# stay glued to the body. Cheap (≤3 dots); skipped entirely when no region is focused.
+	if not _handles.is_empty():
+		_update_handle_overlay()
 	var move := Vector3.ZERO
 	var basis := _camera.global_transform.basis
 	if _fly_fwd:
@@ -749,21 +780,165 @@ func _short_modifier_name(full_name: String) -> String:
 	return name.substr(0, bar) if bar >= 0 else name
 
 
-## Toggle sculpt mode (the camera-vs-morph gate). Updates the button + hint label; clears any
-## stale glow when leaving the mode.
-func _set_sculpt_mode(on: bool) -> void:
-	_sculpt_mode = on
-	if _sculpt_btn != null:
-		_sculpt_btn.button_pressed = on
-		_sculpt_btn.text = _sculpt_btn_text(on)
-	if _sculpt_state_lbl != null:
-		_sculpt_state_lbl.text = _sculpt_state_text(on)
-	# Cursor change as a second visible state indicator (§2.3): a cross in sculpt mode, the
-	# default arrow otherwise.
-	Input.set_default_cursor_shape(Input.CURSOR_CROSS if on else Input.CURSOR_ARROW)
-	if not on and _glow_overlay != null:
-		_glow_overlay.visible = false
-		_hover_vertex = -1
+# ---------------------------------------------------------------------------
+# GRAB-HANDLES (§5.2) — derive / draw / hit-test / drag. The handles are a PURE FUNCTION of the
+# focused leaf: rebuilt on every focus change, drawn each frame at their anchor vertices' current
+# morphed surface positions, hit-tested in screen space with a forgiving pick radius.
+# ---------------------------------------------------------------------------
+
+## Rebuild the handle set for the currently-focused node (§5.2). Handles exist ONLY for a focused
+## LEAF region; they map to the leaf's PRIMARY value-nodes — the first up-to-HANDLE_MAX specs whose
+## modifier is drag-editable (has a MorphDrag footprint, so it can be anchored + has a surface-
+## motion axis). This is the handle→param mapping: derived from the region's REAL params, not an
+## arbitrary table. Cleared (no handles) when nothing or an intermediate region is focused.
+func _rebuild_handles() -> void:
+	_handles = []
+	_drag_handle = -1
+	_hover_handle = -1
+	if _morph == null or not _morph.is_built() or _focus_path.is_empty():
+		_update_handle_overlay()
+		return
+	var node := RegionSlidersScript.node_at(_focus_path)
+	if node.is_empty() or not RegionSlidersScript.is_leaf(node):
+		_update_handle_overlay()
+		return
+	for spec in (node["specs"] as Array):
+		if _handles.size() >= HANDLE_MAX:
+			break
+		var spec_name := String(spec[0])
+		var display := String(spec[1])
+		var full_names := RegionSlidersScript.resolve_full_names(spec_name)
+		var fn := String(full_names[0])
+		# Only specs with a drag-editable footprint can carry a handle (the principled mapping —
+		# the handle sits where the modifier acts; a footprint-less spec stays slider-only).
+		if not _morph.has_footprint(fn):
+			continue
+		var anchor := int(_morph.handle_anchor_vertex(fn))
+		if anchor < 0 or anchor >= _glow_base_pos.size():
+			continue
+		_handles.append({
+			"full_name": fn, "spec_name": spec_name,
+			"anchor_vertex": anchor, "display": display,
+		})
+	_update_handle_overlay()
+
+
+## The CURRENT world-space surface position of a handle's anchor vertex (the morphed body surface,
+## so handles TRACK the morph). The glow base positions are rest-space under the scaled skeleton;
+## convert to world via the skeleton transform.
+func _handle_world_pos(handle: Dictionary) -> Vector3:
+	var ri := int(handle["anchor_vertex"])
+	if _rig == null or _rig.skeleton == null or ri < 0 or ri >= _glow_base_pos.size():
+		return Vector3.ZERO
+	return _rig.skeleton.global_transform * _glow_base_pos[ri]
+
+
+## The SCREEN position of a handle's anchor (or a far sentinel when behind the camera so it is
+## never drawn / picked). Used by both the draw overlay and the hit test.
+func _handle_screen_pos(handle: Dictionary) -> Vector2:
+	if _camera == null:
+		return Vector2(-9999, -9999)
+	var wp := _handle_world_pos(handle)
+	if _camera.is_position_behind(wp):
+		return Vector2(-9999, -9999)
+	return _camera.unproject_position(wp)
+
+
+## The handle index whose anchor is within HANDLE_PICK_RADIUS_PX of `screen_pos` (the nearest if
+## several), or -1 if none. The forgiving screen-space pick (§5.2): a small visual nub, a large
+## invisible hit disc, independent of camera distance.
+func _handle_at(screen_pos: Vector2) -> int:
+	var best := -1
+	var best_d := HANDLE_PICK_RADIUS_PX
+	for i in _handles.size():
+		var sp := _handle_screen_pos(_handles[i])
+		var d := sp.distance_to(screen_pos)
+		if d <= best_d:
+			best_d = d
+			best = i
+	return best
+
+
+## Begin a LATCHED handle reshape (§5.2): record the grabbed handle + its anchor world position
+## (captured at press, so the drag scale uses the press-time depth) + open an edit gesture (the
+## held-interval map captures the param's cur_start). Latched until release — never re-decided.
+func _begin_handle_drag(handle_index: int) -> void:
+	_drag_handle = handle_index
+	_dragging_orbit = false
+	_drag_accum = {}
+	_drag_hit_pos = _handle_world_pos(_handles[handle_index])
+	Input.set_default_cursor_shape(Input.CURSOR_DRAG)
+	_caps.start_gesture()
+
+
+## Apply a latched handle-drag step (§5.2 / §5 plural modality): project the screen drag onto the
+## handle's surface-motion AXIS (the +value direction the mapped modifier pushes the surface at the
+## anchor), turn that into a value delta with the same zoom/depth-adaptive scale the slider-less
+## drag used, and write the mapped param (+ its mirror twin) through the SAME _set_modifier_capped
+## choke the slider/type use — so the dock slider/spin stay in sync and caps are enforced. NOT
+## committed per frame; one history node on release. Re-reads the anchor each frame so the handle
+## tracks the morphing surface.
+func _apply_handle_drag(drag_screen: Vector2) -> void:
+	if _drag_handle < 0 or _drag_handle >= _handles.size():
+		return
+	var handle: Dictionary = _handles[_drag_handle]
+	var fn := String(handle["full_name"])
+	var anchor := int(handle["anchor_vertex"])
+	var dir: Vector3 = _morph.motion_dir_at(fn, anchor)
+	if dir == Vector3.ZERO:
+		return
+	# Project the world +value motion to a screen DIRECTION (y flipped: screen-y is DOWN), same
+	# convention as MorphDrag.decompose_drag. |screen_dir|≈0 ⇒ motion is straight toward/away from
+	# the camera (no in-screen handle this frame) → skip until the body is rotated.
+	var cam_basis := _camera.global_transform.basis
+	var screen_dir := Vector2(dir.dot(cam_basis.x), -dir.dot(cam_basis.y))
+	if screen_dir.length() < 1e-9:
+		return
+	var unit := screen_dir.normalized()
+	# Zoom/depth-adaptive sensitivity: same factor MorphDrag uses, so a handle-drag feels like the
+	# slider-less drag and is consistent at any zoom. The along-axis pixels map to a value delta.
+	var world_per_px := _world_per_pixel_at(_drag_hit_pos)
+	var zoom_factor := (world_per_px / MorphDragScript.REFERENCE_WORLD_PER_PX) if world_per_px > 0.0 else 1.0
+	var delta := drag_screen.dot(unit) * zoom_factor / MorphDragScript.DEFAULT_PX_PER_UNIT
+	if absf(delta) < 1e-9:
+		return
+	# Write through the choke (caps enforced, mirror-aware) AND sync the dock slider/spin — exactly
+	# the plural-modality requirement: handle + slider + type all converge on one clamped value.
+	var full_names := RegionSlidersScript.resolve_full_names(String(handle["spec_name"]))
+	var cur := float(_body_state.modifiers.get(fn, 0.0))
+	var req := cur + delta
+	var primary := _set_modifier_capped(full_names, req)
+	_apply_state()
+	# Keep the dock slider + numeric field for this SAME param in sync (plural modality, no desync).
+	# _sync_modifier_slider looks the bound row up by full_name and writes it no-signal; a no-op if
+	# the spec isn't bound to a live dock slider (still fine — the model + handle stay correct).
+	_sync_modifier_slider(fn, primary)
+	_drag_accum[fn] = float(_drag_accum.get(fn, 0.0)) + (primary - cur)
+	# Re-anchor the captured hit to the morphed surface so the next frame's scale uses live depth.
+	_drag_hit_pos = _handle_world_pos(handle)
+	_update_handle_overlay()
+
+
+## End a latched handle reshape: close the gesture (collapse the ratchet, recompute bounds), commit
+## ONE history node labelled by the param + net change, and clear the latch. Mirrors _end_morph_drag.
+func _end_handle_drag() -> void:
+	var idx := _drag_handle
+	_drag_handle = -1
+	_caps.end_gesture()
+	_recompute_modifier_slider_bounds()
+	Input.set_default_cursor_shape(
+		Input.CURSOR_DRAG if _hover_handle >= 0 else Input.CURSOR_ARROW)
+	if _drag_accum.is_empty():
+		return
+	if idx >= 0 and idx < _handles.size() and not _suspend_commit:
+		var handle: Dictionary = _handles[idx]
+		var fn := String(handle["full_name"])
+		var net := float(_drag_accum.get(fn, 0.0))
+		_rebake_tangents_on_commit()
+		_history.commit(_body_state.to_dict(), "%s %+.2f (handle)" % [String(handle["display"]), net])
+		_refresh_history_panel()
+	_drag_accum = {}
+	_update_handle_overlay()
 
 
 ## Set the MIRROR (contralateral symmetry) toggle (decision §2.3). Pure state — it changes only
@@ -910,19 +1085,6 @@ func _set_eye_color(c: Color) -> void:
 		_eye_color_btn.color = c
 
 
-## The Sculpt toggle button's label (a clearly-labeled visible control; M is only an
-## accelerator hint, never the only way in — §2.3).
-func _sculpt_btn_text(on: bool) -> String:
-	return "● Shape on the body: ON" if on else "○ Shape on the body: OFF"
-
-
-## The live state-indicator line under the shape-on-body toggle.
-func _sculpt_state_text(on: bool) -> String:
-	if on:
-		return "drag the body to reshape it · drag empty space to orbit (M toggles)"
-	return "orbit / pan / zoom viewer — enable to drag-shape the body (M toggles)"
-
-
 # ---------------------------------------------------------------------------
 # Input — orbit (left drag), pan (right drag), zoom (scroll wheel)
 # ---------------------------------------------------------------------------
@@ -964,10 +1126,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_history_panel()
 			get_viewport().set_input_as_handled()
 			return
-		# M toggles sculpt mode (the camera-vs-morph gate).
-		if k.pressed and not k.echo and k.keycode == KEY_M and not k.ctrl_pressed:
-			_set_sculpt_mode(not _sculpt_mode)
-			get_viewport().set_input_as_handled()
+		# Esc defocuses the region (handles disappear, the body orbits freely — §5.2 "defocus is
+		# obvious"). No-op when nothing is focused.
+		if k.pressed and not k.echo and k.keycode == KEY_ESCAPE and not k.ctrl_pressed:
+			if not _focus_path.is_empty():
+				_focus_clear()
+				get_viewport().set_input_as_handled()
 			return
 		# P — toggle the picking backend (CPU grid <-> GPU ID-buffer). Dev/debug: the GPU
 		# backend picks the rendered surface (the in-world primitive); CPU is the default.
@@ -1008,25 +1172,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		match mb.button_index:
 			MOUSE_BUTTON_LEFT:
 				if mb.pressed:
-					# In sculpt mode, a left-press ON THE BODY starts a morph drag; a press on
-					# the BACKGROUND (ray misses) falls through to orbit. Outside sculpt mode
-					# the left button always orbits (Slice-A behaviour).
-					if _sculpt_mode:
-						var hit := _pick_body(mb.position)
-						if not hit.is_empty():
-							_dragging_morph = true
-							_drag_vertex = int(hit["vertex"])
-							_drag_hit_pos = hit["pos"]
-							_drag_accum = {}
-							# A sculpt drag IS an active edit gesture (§3.2): the held-interval
-							# map captures each touched modifier's cur_start on first touch.
-							_caps.start_gesture()
-							get_viewport().set_input_as_handled()
-							return
+					# DISAMBIGUATION BY WHAT YOU GRABBED (§5.2): a left-press within a handle's
+					# pick radius LATCHES a reshape of that handle's param; a press anywhere else
+					# (empty space OR body away from a handle) orbits. The decision is made ONCE
+					# here, at press — grab-latch hysteresis — and never re-evaluated mid-drag.
+					var hi := _handle_at(mb.position)
+					if hi >= 0:
+						_begin_handle_drag(hi)
+						get_viewport().set_input_as_handled()
+						return
 					_dragging_orbit = true
 				else:
-					if _dragging_morph:
-						_end_morph_drag()
+					if _drag_handle >= 0:
+						_end_handle_drag()
 					_dragging_orbit = false
 			MOUSE_BUTTON_RIGHT:
 				_dragging_pan = mb.pressed
@@ -1040,8 +1198,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					_update_camera()
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		if _dragging_morph:
-			_apply_morph_drag(mm.relative)
+		if _drag_handle >= 0:
+			# A LATCHED handle reshape: decompose the drag along the handle's surface-motion axis
+			# and write the mapped param through the choke. Stays a reshape until release (§5.2).
+			_apply_handle_drag(mm.relative)
 		elif _dragging_orbit:
 			_yaw = wrapf(_yaw - mm.relative.x * ORBIT_SPEED, -PI, PI)
 			_pitch = clampf(_pitch - mm.relative.y * ORBIT_SPEED, MIN_PITCH, MAX_PITCH)
@@ -1052,9 +1212,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			var up := _camera.global_transform.basis.y
 			_pivot += (-right * mm.relative.x + up * mm.relative.y) * PAN_SPEED * _distance
 			_update_camera()
-		elif _sculpt_mode:
-			# Hover (no button) in sculpt mode -> live region glow under the cursor.
-			_update_hover_glow(mm.position)
+		else:
+			# Pre-press HOVER feedback (§5.2): inside a handle's pick radius → CURSOR_DRAG, so the
+			# forgiving target is visible-by-feedback before the press. Outside → default arrow.
+			var prev := _hover_handle
+			_hover_handle = _handle_at(mm.position)
+			if _hover_handle != prev:
+				Input.set_default_cursor_shape(
+					Input.CURSOR_DRAG if _hover_handle >= 0 else Input.CURSOR_ARROW)
+				if _handle_overlay != null:
+					_handle_overlay.queue_redraw()
 
 
 # ---------------------------------------------------------------------------
@@ -1076,6 +1243,7 @@ func _build_ui() -> void:
 	_build_pinned_strip(canvas)
 	_build_contextual_dock(canvas)
 	_build_gallery(canvas)
+	_build_handle_overlay(canvas)
 	_build_advanced_popup(canvas)
 	# Ambient entry hint on the body (§7.4): one line, no dock at entry.
 	_build_entry_hint(canvas)
@@ -1192,18 +1360,14 @@ func _build_advanced_popup(canvas: CanvasLayer) -> void:
 	vbox.add_child(hdr)
 	vbox.add_child(HSeparator.new())
 
-	# Shape-on-the-body toggle (the camera-vs-morph gate; on-body grab-handles are a later phase,
-	# so the drag-to-shape gate stays as a plainly-labeled toggle here, NOT "sculpt mode").
-	_sculpt_btn = Button.new()
-	_sculpt_btn.toggle_mode = true
-	_sculpt_btn.text = _sculpt_btn_text(false)
-	_sculpt_btn.tooltip_text = "When on, drag the body to reshape it (accelerator: M)"
-	_sculpt_btn.toggled.connect(func(on: bool) -> void: _set_sculpt_mode(on))
-	vbox.add_child(_sculpt_btn)
-	_sculpt_state_lbl = Label.new()
-	_sculpt_state_lbl.add_theme_font_size_override("font_size", 10)
-	_sculpt_state_lbl.text = _sculpt_state_text(false)
-	vbox.add_child(_sculpt_state_lbl)
+	# On-body reshape is no longer a global MODE (Phase C, §5.2): grab-handles sprout on the
+	# focused region and a handle-drag reshapes — there is no "Shape on the body" toggle. A short
+	# explainer line stands in its place so the affordance is discoverable from here.
+	var handles_hint := Label.new()
+	handles_hint.add_theme_font_size_override("font_size", 10)
+	handles_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	handles_hint.text = "Focus a region (pick it in the breadcrumb) and drag its on-body handles to reshape it. Drag empty space to orbit. Esc defocuses."
+	vbox.add_child(handles_hint)
 
 	# Mirror (symmetric edits) — default on.
 	_mirror_btn = CheckBox.new()
@@ -1326,6 +1490,59 @@ func _build_contextual_dock(canvas: CanvasLayer) -> void:
 	_dock_panel.add_child(_dock_body)
 
 
+## Build the full-screen handle OVERLAY (§5.2): a transparent, mouse-ignoring Control over the 3D
+## view whose _draw paints the grab-handle nubs + their drag-axis hints at the focused region's
+## handles' current screen positions. It is redrawn on focus change, on every morph/camera change
+## (driven from _process), and on hover (cursor feedback). Mouse events are NOT consumed by it —
+## picking is done in _unhandled_input against the same screen positions.
+func _build_handle_overlay(canvas: CanvasLayer) -> void:
+	_handle_overlay = Control.new()
+	_handle_overlay.name = "GrabHandleOverlay"
+	_handle_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_handle_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_handle_overlay.draw.connect(_draw_handles)
+	canvas.add_child(_handle_overlay)
+
+
+## Request a redraw of the handle overlay (the handles' screen positions changed). Cheap.
+func _update_handle_overlay() -> void:
+	if _handle_overlay != null:
+		_handle_overlay.queue_redraw()
+
+
+## Paint the grab-handle nubs + their drag-axis hints (§5.2). Each handle is a filled dot at its
+## anchor's current screen position with a thin line along its on-screen drag axis (so the player
+## sees WHICH WAY to pull). The hovered/grabbed handle is brightened + ringed (the forgiving pick
+## disc made visible-by-feedback). Drawn in the overlay Control's local space (= screen space).
+func _draw_handles() -> void:
+	if _handle_overlay == null or _camera == null:
+		return
+	var base := Color(0.35, 0.85, 1.0, 0.9)      # cyan, matches the glow tint
+	var hot := Color(1.0, 0.92, 0.35, 1.0)       # amber for hover/grab
+	for i in _handles.size():
+		var handle: Dictionary = _handles[i]
+		var sp := _handle_screen_pos(handle)
+		if sp.x < -9000.0:
+			continue   # behind the camera
+		var active := (i == _drag_handle) or (i == _hover_handle and _drag_handle < 0)
+		var col := hot if active else base
+		# Drag-axis hint: the on-screen direction raising the param pushes the surface.
+		var dir: Vector3 = _morph.motion_dir_at(String(handle["full_name"]), int(handle["anchor_vertex"]))
+		if dir != Vector3.ZERO:
+			var cb := _camera.global_transform.basis
+			var sd := Vector2(dir.dot(cb.x), -dir.dot(cb.y))
+			if sd.length() > 1e-6:
+				var u := sd.normalized() * 22.0
+				_handle_overlay.draw_line(sp - u, sp + u, Color(col.r, col.g, col.b, 0.5), 2.0)
+				# small arrow ticks at the +value end
+				_handle_overlay.draw_circle(sp + u, 3.0, Color(col.r, col.g, col.b, 0.7))
+		# The nub + (when active) the forgiving pick disc as a faint ring.
+		if active:
+			_handle_overlay.draw_arc(sp, HANDLE_PICK_RADIUS_PX, 0.0, TAU, 32, Color(col.r, col.g, col.b, 0.25), 1.5)
+		_handle_overlay.draw_circle(sp, HANDLE_DOT_PX, col)
+		_handle_overlay.draw_arc(sp, HANDLE_DOT_PX, 0.0, TAU, 24, Color(0, 0, 0, 0.5), 1.5)
+
+
 ## The ambient entry hint on the body (§7.4): one line + a Start-from-a-body button. Hidden once
 ## a region is focused (the dock takes over) and shown again at the no-focus surface.
 var _entry_hint: Control
@@ -1378,6 +1595,9 @@ func _focus_clear() -> void:
 ## the breadcrumb shows the back-edges. This is the active-surface rule made literal.
 func _refresh_dock() -> void:
 	_rebuild_breadcrumb()
+	# Handles are a pure function of focus (§5.2): rebuild them on every focus change. (Called
+	# before the early-return so clearing focus also clears the handles.)
+	_rebuild_handles()
 	if _focus_path.is_empty():
 		if _dock_panel != null:
 			_dock_panel.visible = false
@@ -1656,13 +1876,13 @@ func _build_legend_panel(canvas: CanvasLayer) -> void:
 	vbox.add_child(hdr)
 
 	for line in [
-		"drag: orbit    right-drag: pan    scroll: zoom",
+		"drag handle: reshape    drag empty: orbit",
+		"right-drag: pan    scroll: zoom    Esc: defocus",
 		"WASD: fly    Space: up    Ctrl(+WASD): down",
-		"M: shape on the body (drag body to reshape)",
 		"P: picker backend (CPU grid / GPU id)",
 		"H: toggle history panel",
 		"Ctrl+Z: undo    Ctrl+Shift+Z: redo",
-		"sculpt: hover to glow the region, drag the surface to pull it",
+		"focus a region → its handles appear on the body",
 	]:
 		var l := Label.new()
 		l.text = line
@@ -2620,6 +2840,7 @@ func _apply_imported(res: Dictionary, verb: String) -> void:
 	# in-flight gesture and clear sculpt accumulators BEFORE replacing the model underneath it.
 	_caps.abort_gesture()
 	_dragging_morph = false
+	_drag_handle = -1
 	_drag_accum = {}
 	_drag_vertex = -1
 	# Restore the global extremeness FIRST so the bounds sweep in _restore_current uses the
@@ -2674,6 +2895,7 @@ func _restore_current() -> void:
 	# the model underneath it (also clears the sculpt brackets/accumulators).
 	_caps.abort_gesture()
 	_dragging_morph = false
+	_drag_handle = -1
 	_drag_accum = {}
 	_drag_vertex = -1
 	var bs := BodyState.from_dict(d)

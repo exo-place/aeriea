@@ -9,11 +9,12 @@
 ##       BodyState-shaped dict that from_dict round-trips.
 ##   (3) ARCHETYPE LOAD: picking an archetype yields ITS BodyState (the loaded body equals the
 ##       archetype's to_dict, via the raw load path; gesture aborted).
-##   (4) TIERS EXIST + MONOTONE: the creator has T0 (archetype grid) + T1 (always visible) +
-##       T2 + T3 sections; raising the tier reveals T2/T3 without hiding T1; lowering re-hides
-##       the deeper sections (additive/monotone).
-##   (5) VISIBLE SCULPT CONTROL: sculpt is a visible labeled toggle in the T3 section (not
-##       reachable ONLY via a hidden key); toggling it changes sculpt mode.
+##   (4) PROJECTION SHELL: the creator has NO tier selector; the six whole-body dials are built;
+##       focusing a region shows the contextual dock (the active-surface rule); clearing focus
+##       hides it (no persistent panel). (The detailed tree-projection assertions live in
+##       creator_tree_nav_test.gd.)
+##   (5) VISIBLE SHAPE-ON-BODY CONTROL: the shape-on-body toggle is a visible labeled toggle
+##       (not reachable ONLY via a hidden key); toggling it changes the mode.
 ##
 ## Run windowed under xvfb:
 ##   xvfb-run -a godot4 --path . res://tests/creator_phase3b_test.tscn --quit-after 8000
@@ -124,68 +125,52 @@ func _test_archetype_load() -> void:
 		raw_ok, "%d modifiers preserved + in-cap" % mods.size())
 
 
-# (4) + (5) tiers + visible sculpt — scene-level ------------------------------
+# (4) + (5) projection shell + visible shape-on-body — scene-level --------------
 func _test_tiers_and_sculpt() -> void:
-	print("--- (4) tiers exist + monotone reveal; (5) sculpt is a visible labeled toggle ---")
+	print("--- (4) projection shell (no tier selector; focus-driven dock); (5) shape-on-body toggle ---")
 	var cc := CharacterCreator.new()
 	add_child(cc)
 	# Let the creator build its UI (deferred panels build in _ready).
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	# (4) The tier sections exist.
-	var t2 = cc.get("_t2_section")
-	var t3 = cc.get("_t3_section")
-	var t3_main = cc.get("_t3_main_section")
-	_ok("T2 + T3 region sections exist", t2 != null and t3 != null, "t2=%s t3=%s" % [t2 != null, t3 != null])
-	_ok("the main-panel T3 section (sculpt + extremeness) exists", t3_main != null, "present")
+	# (4) The tier selector is GONE — there is no _set_tier / _tier API anymore.
+	_ok("the tier selector is deleted (no _set_tier method)", not cc.has_method("_set_tier"),
+		"no tier API")
 
-	# T1 (headline axes) is always present — the sliders dict is populated regardless of tier.
+	# The six whole-body dials are built (always present, pinned strip).
 	var sliders: Dictionary = cc.get("_sliders")
-	_ok("T1 headline axes are built (always visible)", sliders.size() == 6,
-		"%d axis sliders" % sliders.size())
+	_ok("the six whole-body dials are built (pinned strip)", sliders.size() == 6,
+		"%d dials" % sliders.size())
 
-	# Default tier is T1: T2/T3 sections hidden.
-	cc.call("_set_tier", 1)
-	_ok("at T1 the T2/T3 sections are hidden (T1 stays visible)",
-		not (t2 as Control).visible and not (t3 as Control).visible and sliders.size() == 6,
-		"t2.visible=%s t3.visible=%s" % [(t2 as Control).visible, (t3 as Control).visible])
+	# The contextual dock is ABSENT at entry (no focus → no dock).
+	var dock = cc.get("_dock_panel")
+	_ok("at entry no contextual dock is shown (active-surface rule)",
+		dock != null and not (dock as Control).visible, "dock.visible=%s" % (dock as Control).visible)
 
-	# Raise to T2: T2 revealed, T3 still hidden, T1 still present (monotone/additive).
-	cc.call("_set_tier", 2)
-	_ok("raising to T2 reveals T2, keeps T3 hidden, T1 unchanged",
-		(t2 as Control).visible and not (t3 as Control).visible and sliders.size() == 6,
-		"t2.visible=%s t3.visible=%s" % [(t2 as Control).visible, (t3 as Control).visible])
+	# Focusing a region shows the dock; clearing focus hides it.
+	cc.call("_focus_into", 0)   # focus the first top-level region (Face)
+	_ok("focusing a region shows the contextual dock", (dock as Control).visible,
+		"dock.visible=%s after focus" % (dock as Control).visible)
+	cc.call("_focus_clear")
+	_ok("clearing focus hides the dock (no persistent panel)", not (dock as Control).visible,
+		"dock.visible=%s after clear" % (dock as Control).visible)
 
-	# Raise to T3: T2 still visible (additive), T3 + main-T3 revealed.
-	cc.call("_set_tier", 3)
-	_ok("raising to T3 keeps T2 visible AND reveals T3 + the main-panel T3 section (additive)",
-		(t2 as Control).visible and (t3 as Control).visible and (t3_main as Control).visible,
-		"t2=%s t3=%s t3main=%s" % [(t2 as Control).visible, (t3 as Control).visible, (t3_main as Control).visible])
-
-	# Lower back to T1: deeper sections re-hide (monotone in both directions).
-	cc.call("_set_tier", 1)
-	_ok("lowering back to T1 re-hides T2/T3",
-		not (t2 as Control).visible and not (t3 as Control).visible,
-		"t2.visible=%s t3.visible=%s" % [(t2 as Control).visible, (t3 as Control).visible])
-
-	# (5) The sculpt control is a VISIBLE labeled toggle (not a hidden-key-only mode).
-	cc.call("_set_tier", 3)
+	# (5) The shape-on-body control is a VISIBLE labeled toggle (not a hidden-key-only mode).
 	var sculpt_btn = cc.get("_sculpt_btn")
-	_ok("sculpt is a labeled toggle Button (not a hidden keybind)",
+	_ok("shape-on-body is a labeled toggle Button (not a hidden keybind)",
 		sculpt_btn != null and sculpt_btn is Button and (sculpt_btn as Button).toggle_mode
-			and "Sculpt" in (sculpt_btn as Button).text,
+			and "Shape" in (sculpt_btn as Button).text,
 		"label=%s" % ("'" + (sculpt_btn as Button).text + "'" if sculpt_btn != null else "null"))
 	var state_lbl = cc.get("_sculpt_state_lbl")
-	_ok("the sculpt toggle has a visible state indicator", state_lbl != null and state_lbl is Label,
+	_ok("the shape-on-body toggle has a visible state indicator", state_lbl != null and state_lbl is Label,
 		"present")
-	# Toggling the control changes sculpt mode.
 	cc.call("_set_sculpt_mode", true)
-	_ok("toggling the visible control enables sculpt mode", bool(cc.get("_sculpt_mode")) == true,
-		"sculpt_mode=%s" % cc.get("_sculpt_mode"))
+	_ok("toggling the visible control enables shape-on-body", bool(cc.get("_sculpt_mode")) == true,
+		"mode=%s" % cc.get("_sculpt_mode"))
 	cc.call("_set_sculpt_mode", false)
-	_ok("toggling it off disables sculpt mode", bool(cc.get("_sculpt_mode")) == false,
-		"sculpt_mode=%s" % cc.get("_sculpt_mode"))
+	_ok("toggling it off disables shape-on-body", bool(cc.get("_sculpt_mode")) == false,
+		"mode=%s" % cc.get("_sculpt_mode"))
 
 	cc.queue_free()
 

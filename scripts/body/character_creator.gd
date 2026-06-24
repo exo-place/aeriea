@@ -94,8 +94,7 @@ var _sculpt_mode: bool = false
 var _mirror: bool = true
 var _mirror_btn: CheckBox
 var _sculpt_btn: Button
-var _sculpt_state_lbl: Label     ## live "Sculpt: ON/OFF" state indicator next to the toggle
-var _t3_main_section: Control    ## main-panel T3 section (sculpt + extremeness; tier-revealed)
+var _sculpt_state_lbl: Label     ## live shape-on-body state indicator next to the toggle
 
 ## A morph drag in progress: the picked render-vertex, its world hit position, and the
 ## accumulated modifier value-deltas (so ONE history node is committed on drag-end).
@@ -148,27 +147,25 @@ var _eye_color_btn: ColorPickerButton
 var _modifier_sliders: Dictionary = {}
 
 # ---------------------------------------------------------------------------
-# PROGRESSIVE-REFINE TIERS (Phase 3b, SYNTHESIS §2.2). The creator surfaces edit depth in
-# four ADDITIVE/MONOTONE tiers — opening a deeper tier REVEALS more, never hides shallower:
-#   T0 Pick    — the archetype pick grid (BodyArchetypes roster), one button per archetype.
-#   T1 Headline— the 6 natural-unit axes (always visible once past T0).
-#   T2 Detail  — a curated subset of the region groups (high-impact, low-footgun).
-#   T3 Full    — the complete region tree + the visible Sculpt control + the extremeness gate.
-# The current tier is the MAX depth revealed; a tier selector raises it. T1 is always shown.
+# PROJECTION SHELL (character-creator-ux.md §4 / §7). The creator is a projection over a typed
+# interaction graph, NOT a set of panels. There is NO detail-tier selector (deleted): depth is
+# reached by NAVIGATING INTO a region (the breadcrumb), and the active contextual surface is a
+# pure function of the focused node — the value-nodes + child regions of the focused node, and
+# nothing else (the active-surface rule). State:
+#   - _focus_path: the path of child-indices into RegionSliders.TREE that is focused. EMPTY =
+#     no focus (entry surface: body + pinned strip + top bar, NO dock). A non-empty path shows
+#     the contextual dock with exactly that node's children (region) or specs (leaf).
+#   - the six whole-body dials live in the always-on pinned strip (§6), not in the tree.
+#   - the archetype roster opens as a TRANSIENT gallery overlay (§4.2), not a persistent grid.
 # ---------------------------------------------------------------------------
-const TIER_T1 := 1
-const TIER_T2 := 2
-const TIER_T3 := 3
-var _tier: int = TIER_T1            ## the deepest tier currently revealed (monotone via UI)
-var _archetypes: Array = []         ## the loaded first-party roster (T0 pick grid source)
-var _tier_buttons: Dictionary = {}  ## tier int -> the selector Button (for pressed-state)
-var _t2_section: Control            ## the T2-curated-detail region panel section
-var _t3_section: Control            ## the T3-full region tree + sculpt section
-## Region groups surfaced at T2 (curated detail); the rest are T3-only (full registry tree).
-## A monotone reveal: T3 shows T2's groups PLUS these. (SYNTHESIS §2.2 — T2 is a curated
-## projection of registry entries; T3 is the complete tree.)
-const T2_GROUPS := ["Breasts", "Glutes & pelvis", "Belly & stomach", "Waist & hips",
-	"Torso & shoulders", "Head & face shape"]
+var _archetypes: Array = []           ## the loaded first-party roster (the gallery source)
+var _focus_path: Array = []           ## child-index path into RegionSliders.TREE; [] = no focus
+var _dock_panel: PanelContainer       ## the contextual dock card (visible only when focused)
+var _dock_body: VBoxContainer         ## the dock's rebuilt contents (children / specs)
+var _breadcrumb_box: HBoxContainer     ## the top-bar breadcrumb (rebuilt on focus change)
+var _gallery_panel: Control           ## the transient archetype gallery overlay (hidden default)
+var _create_menu: PopupMenu           ## the ☰ Create menu (gallery / randomize / open / save)
+var _advanced_popup: PopupPanel       ## plainly-labeled advanced toggles (shape-on-body, mirror, beyond-human)
 
 # ---------------------------------------------------------------------------
 # Edit HISTORY — a branching undo TREE over BodyState dicts (HistoryTree). Every
@@ -818,14 +815,14 @@ func _set_eye_color(c: Color) -> void:
 ## The Sculpt toggle button's label (a clearly-labeled visible control; M is only an
 ## accelerator hint, never the only way in — §2.3).
 func _sculpt_btn_text(on: bool) -> String:
-	return "● Sculpt mode: ON" if on else "○ Sculpt mode: OFF"
+	return "● Shape on the body: ON" if on else "○ Shape on the body: OFF"
 
 
-## The live state-indicator line under the Sculpt toggle.
+## The live state-indicator line under the shape-on-body toggle.
 func _sculpt_state_text(on: bool) -> String:
 	if on:
-		return "drag the body to morph · drag empty space to orbit (M toggles)"
-	return "orbit/pan/zoom viewer — enable to drag-sculpt the body (M toggles)"
+		return "drag the body to reshape it · drag empty space to orbit (M toggles)"
+	return "orbit / pan / zoom viewer — enable to drag-shape the body (M toggles)"
 
 
 # ---------------------------------------------------------------------------
@@ -969,47 +966,209 @@ func _unhandled_input(event: InputEvent) -> void:
 # (body-parameterization.md §2/§7 — natural units on the public surface.)
 # ---------------------------------------------------------------------------
 
+## Build the PROJECTION SHELL (character-creator-ux.md §7): a body-foregrounded layout — the
+## 3D body is the central canvas; a minimal TOP BAR holds global commands; the six whole-body
+## dials sit in an always-on PINNED STRIP; a compact CONTEXTUAL DOCK appears beside the focused
+## region only on focus; the archetype roster opens as a TRANSIENT GALLERY. No side walls, no
+## persistent slabs, no tier selector.
 func _build_ui() -> void:
 	var canvas := CanvasLayer.new()
 	add_child(canvas)
+	_build_top_bar(canvas)
+	_build_pinned_strip(canvas)
+	_build_contextual_dock(canvas)
+	_build_gallery(canvas)
+	_build_advanced_popup(canvas)
+	# Ambient entry hint on the body (§7.4): one line, no dock at entry.
+	_build_entry_hint(canvas)
+	# Corner panels kept from before (undo/redo icons, history overlay, controls legend).
+	_build_undo_redo_corner(canvas)
+	_build_history_panel(canvas)
+	_build_legend_panel(canvas)
+	# Render the initial (no-focus) contextual surface: dock hidden, breadcrumb empty.
+	_refresh_dock()
+	_apply_state()
+	_refresh_history_panel()
 
-	# Main slider panel — TOP-LEFT corner. No persistent controls-legend clutter (that
-	# moved to its own Ctrl-peek panel) and no persistent internal export-path text.
-	var panel := PanelContainer.new()
-	panel.position = Vector2(16, 16)
-	panel.custom_minimum_size = Vector2(430, 0)
-	canvas.add_child(panel)
 
+# ---------------------------------------------------------------------------
+# TOP BAR (§7.2) — a single thin bar of ≤6 GLOBAL commands: ☰ Create (gallery + Randomize +
+# Open + Save), the ‹ breadcrumb ›, ⤺ History, Share, Open. None contextual.
+# ---------------------------------------------------------------------------
+var _share_format_check: CheckBox   ## "also embed editable history" on Share (defaults on)
+
+func _build_top_bar(canvas: CanvasLayer) -> void:
+	var bar := PanelContainer.new()
+	bar.name = "TopBar"
+	bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	canvas.add_child(bar)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	bar.add_child(row)
+
+	# ☰ Create — the start-from / save / load / randomize cluster, one menu (not a wall).
+	var create_btn := MenuButton.new()
+	create_btn.text = "☰ Create"
+	create_btn.flat = false
+	_create_menu = create_btn.get_popup()
+	_create_menu.add_item("Start from a body…", 0)
+	_create_menu.add_item("Randomize", 1)
+	_create_menu.add_separator()
+	_create_menu.add_item("Open character…", 2)
+	_create_menu.add_item("Save image…", 3)
+	_create_menu.add_separator()
+	_create_menu.add_item("Advanced…", 4)
+	_create_menu.add_item("Reset to neutral", 5)
+	_create_menu.id_pressed.connect(_on_create_menu)
+	row.add_child(create_btn)
+
+	# ‹ breadcrumb › — the navigational back-edge through the region tree (always same place).
+	_breadcrumb_box = HBoxContainer.new()
+	_breadcrumb_box.add_theme_constant_override("separation", 2)
+	_breadcrumb_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(_breadcrumb_box)
+
+	# ⤺ History — opens the history overlay.
+	var hist_btn := Button.new()
+	hist_btn.text = "⤺ History"
+	hist_btn.tooltip_text = "Show the edit history (H)"
+	hist_btn.pressed.connect(_toggle_history_panel)
+	row.add_child(hist_btn)
+
+	# Share (export) ↔ Open (import), side by side at the right.
+	var share_btn := Button.new()
+	share_btn.text = "Share"
+	share_btn.tooltip_text = "Save a shareable image of this character (with editable history)"
+	share_btn.pressed.connect(_do_share)
+	row.add_child(share_btn)
+
+	var open_btn := Button.new()
+	open_btn.text = "Open"
+	open_btn.tooltip_text = "Open a saved character (image or JSON; or drag a file onto the window)"
+	open_btn.pressed.connect(_open_import_dialog)
+	row.add_child(open_btn)
+
+	# Wire window file-drop as the drag-and-drop Open affordance.
+	if get_window() != null and not get_window().files_dropped.is_connected(_on_files_dropped):
+		get_window().files_dropped.connect(_on_files_dropped)
+	# Transient status toast (export/import results), bottom-anchored mini-label.
+	if _status_lbl == null:
+		_status_lbl = Label.new()
+		_status_lbl.set_anchors_preset(Control.PRESET_CENTER_TOP)
+		_status_lbl.position = Vector2(0, 44)
+		_status_lbl.add_theme_font_size_override("font_size", 11)
+		canvas.add_child(_status_lbl)
+
+
+## The ☰ Create menu dispatch. The Share format default is image-with-history; a single inline
+## "also embed editable history" choice is offered on Save image (§8.1).
+func _on_create_menu(id: int) -> void:
+	match id:
+		0: _open_gallery()
+		1: _randomize_all()
+		2: _open_import_dialog()
+		3: _export_image(true)
+		4: _open_advanced()
+		5: _reset_all()
+
+
+## Share (§8.1): one click, defaulting to image-with-embedded-history (the gallery thumbnail).
+func _do_share() -> void:
+	_export_image(true)
+
+
+## Build (lazily) the ADVANCED popup — the plainly-labeled power toggles that have no region
+## locus: shape-on-the-body, mirror (symmetric edits), and the beyond-human range opt-in. Kept
+# out of the main surface (not a wall) but reachable; all DE-JARGONED (no "sculpt mode" /
+# "extremeness" nouns on the surface).
+func _build_advanced_popup(canvas: CanvasLayer) -> void:
+	_advanced_popup = PopupPanel.new()
+	canvas.add_child(_advanced_popup)
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 6)
-	panel.add_child(vbox)
+	vbox.add_theme_constant_override("separation", 8)
+	vbox.custom_minimum_size = Vector2(340, 0)
+	_advanced_popup.add_child(vbox)
 
-	var title := Label.new()
-	title.text = "aeriea — character creator"
-	vbox.add_child(title)
-
-	# TIER SELECTOR (Phase 3b, SYNTHESIS §2.2): the progressive-refine depth control. The
-	# tiers are ADDITIVE/MONOTONE — picking a deeper tier reveals more without hiding T1. T1
-	# (the headline axes) is ALWAYS visible; T2 reveals the curated detail region groups; T3
-	# reveals the full registry tree + the visible Sculpt control + the extremeness gate.
-	_build_tier_selector(vbox)
-
+	var hdr := Label.new()
+	hdr.text = "Advanced shaping"
+	vbox.add_child(hdr)
 	vbox.add_child(HSeparator.new())
 
-	# T0 PICK (SYNTHESIS §2.2): the archetype pick grid. Picking an archetype loads its frozen
-	# BodyState via the RAW restore path (Phase-1 raw/restore semantics; aborts any active
-	# gesture). Every shipped archetype is within default caps (gate #11a), so a pick at
-	# extremeness 0 never exceeds default caps.
-	_build_archetype_grid(vbox)
+	# Shape-on-the-body toggle (the camera-vs-morph gate; on-body grab-handles are a later phase,
+	# so the drag-to-shape gate stays as a plainly-labeled toggle here, NOT "sculpt mode").
+	_sculpt_btn = Button.new()
+	_sculpt_btn.toggle_mode = true
+	_sculpt_btn.text = _sculpt_btn_text(false)
+	_sculpt_btn.tooltip_text = "When on, drag the body to reshape it (accelerator: M)"
+	_sculpt_btn.toggled.connect(func(on: bool) -> void: _set_sculpt_mode(on))
+	vbox.add_child(_sculpt_btn)
+	_sculpt_state_lbl = Label.new()
+	_sculpt_state_lbl.add_theme_font_size_override("font_size", 10)
+	_sculpt_state_lbl.text = _sculpt_state_text(false)
+	vbox.add_child(_sculpt_state_lbl)
+
+	# Mirror (symmetric edits) — default on.
+	_mirror_btn = CheckBox.new()
+	_mirror_btn.text = "Mirror (symmetric edits)"
+	_mirror_btn.button_pressed = _mirror
+	_mirror_btn.tooltip_text = "When on, editing one side also shapes the other side symmetrically. Off = edit one side only."
+	_mirror_btn.toggled.connect(func(on: bool) -> void: _set_mirror(on))
+	vbox.add_child(_mirror_btn)
 
 	vbox.add_child(HSeparator.new())
+	# Beyond-human range opt-in (the global cap-widening unlock, plainly named — §8.4). No
+	# "extremeness" / "Realism" noun on the surface. The 0..1 slider stays as the amount.
+	_extreme_check = CheckBox.new()
+	_extreme_check.text = "Allow beyond-human extremes"
+	_extreme_check.button_pressed = _caps.extremeness > 0.0
+	_extreme_check.tooltip_text = "Widen every control's range past its human/tasteful limit. Lowering it never snaps existing values."
+	_extreme_check.toggled.connect(func(on: bool) -> void: _set_extremeness(1.0 if on else 0.0))
+	vbox.add_child(_extreme_check)
+	var ex_row := HBoxContainer.new()
+	ex_row.add_theme_constant_override("separation", 4)
+	_extreme_slider = HSlider.new()
+	_extreme_slider.min_value = 0.0
+	_extreme_slider.max_value = 1.0
+	_extreme_slider.step = 0.01
+	_extreme_slider.value = _caps.extremeness
+	_extreme_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_extreme_slider.value_changed.connect(func(v: float) -> void: _set_extremeness(v))
+	ex_row.add_child(_extreme_slider)
+	_extreme_lbl = Label.new()
+	_extreme_lbl.custom_minimum_size = Vector2(44, 0)
+	_extreme_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_extreme_lbl.text = "%.0f%%" % (_caps.extremeness * 100.0)
+	ex_row.add_child(_extreme_lbl)
+	vbox.add_child(ex_row)
 
-	var t1_hdr := Label.new()
-	t1_hdr.text = "T1 — headline (always visible)"
-	t1_hdr.add_theme_font_size_override("font_size", 10)
-	vbox.add_child(t1_hdr)
 
-	# [field, min, max, step, label, lo_pole, hi_pole] — the BodyState natural-unit
+func _open_advanced() -> void:
+	if _advanced_popup != null:
+		_advanced_popup.popup_centered()
+
+
+# ---------------------------------------------------------------------------
+# PINNED STRIP (§6) — the six whole-body dials in an always-on bottom strip, pinned for muscle
+# memory: Gender presentation, Age, Height, Build, Muscle, Proportions. De-jargoned labels.
+# ---------------------------------------------------------------------------
+func _build_pinned_strip(canvas: CanvasLayer) -> void:
+	var bar := PanelContainer.new()
+	bar.name = "PinnedStrip"
+	bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	bar.grow_vertical = Control.GROW_DIRECTION_BEGIN   # grow UP from the bottom edge (on-screen)
+	canvas.add_child(bar)
+	var vbox := VBoxContainer.new()
+	bar.add_child(vbox)
+	var hdr := Label.new()
+	hdr.text = "Whole body"
+	hdr.add_theme_font_size_override("font_size", 11)
+	vbox.add_child(hdr)
+
+	# [field, min, max, step, label, lo_pole, hi_pole] — the six whole-body macro axes, DE-
+	# JARGONED on the surface (masculinity → Gender presentation; weight → Build; the internal
+	# BodyState field names are UNCHANGED). _lo/_hi feed the numeric field; the slider bounds come
+	# from the live cap interval.
+	# The BodyState natural-unit
 	# headline axes (body-parameterization.md §2). age is in YEARS (the gate reads
 	# >= 18); masculinity is the single macro sex axis 0–100 (0=feminine,
 	# 50=androgynous, 100=masculine); muscle/weight in %; proportions is the
@@ -1021,215 +1180,270 @@ func _build_ui() -> void:
 	# the lean/light half is functional. height is now a METRIC cm axis (§4), driving a
 	# uniform stature scale orthogonal to proportions.
 	var axes := [
-		["age_years",   1.0, 90.0,  0.5,  "age",         "young",    "old"],
-		["masculinity", 0.0, 100.0, 1.0,  "masculinity",  "feminine", "masculine"],
-		["muscle",      0.0, 100.0, 1.0,  "muscle",       "lean",     "muscular"],
-		["weight",      50.0, 150.0, 1.0, "weight",       "light",    "heavy"],
-		["proportions", 0.0, 1.0,   0.01, "proportions",  "uncommon", "idealized"],
-		["height_cm",   50.0, 230.0, 0.5, "height",       "shorter",  "taller"],
+		["age_years",   1.0, 90.0,  0.5,  "Age",                  "young",    "old"],
+		["masculinity", 0.0, 100.0, 1.0,  "Gender presentation",  "feminine", "masculine"],
+		["muscle",      0.0, 100.0, 1.0,  "Muscle",               "lean",     "muscular"],
+		["weight",      50.0, 150.0, 1.0, "Build",                "light",    "heavy"],
+		["proportions", 0.0, 1.0,   0.01, "Proportions",          "natural",  "idealized"],
+		["height_cm",   50.0, 230.0, 0.5, "Height",               "shorter",  "taller"],
 	]
+	# Horizontal strip of compact dials (each a label + slider + numeric cell), one chunk of 6.
+	var strip := HBoxContainer.new()
+	strip.add_theme_constant_override("separation", 14)
+	vbox.add_child(strip)
 	for spec in axes:
-		_build_axis_row(vbox, spec[0], spec[1], spec[2], spec[3], spec[4], spec[5], spec[6])
-
-	# EYE COLOR (decision §6.3 / SYNTHESIS §5.2): the procedural iris color is a SHADER UNIFORM
-	# (eye.gdshader `iris_color`), not a texture — surfaced here as a color picker + preset swatches
-	# that drive BodyRig.set_eye_params({"iris_color": …}). Base-creation identity (ungated, §3).
-	# Gaze is NOT touched (the eyes track via the eye bones; §6.3).
-	_build_eye_color_ui(vbox)
-
-	# T3 MAIN-PANEL SECTION (SYNTHESIS §2.2): the power-user controls — the VISIBLE Sculpt
-	# control and the global extremeness gate. Wrapped in a section the tier selector reveals
-	# at T3 (hidden at T1/T2). T1/T2 stay uncluttered; sculpt is never reachable ONLY via a
-	# hidden key — it is a clearly-labeled toggle in this revealed section (§2.3).
-	var t3_main := VBoxContainer.new()
-	t3_main.add_theme_constant_override("separation", 6)
-	_t3_main_section = t3_main
-	vbox.add_child(t3_main)
-
-	t3_main.add_child(HSeparator.new())
-	var t3_hdr := Label.new()
-	t3_hdr.text = "T3 — full control (sculpt + extremeness)"
-	t3_hdr.add_theme_font_size_override("font_size", 10)
-	t3_main.add_child(t3_hdr)
-
-	# Sculpt-mode toggle (Slice D / §2.3): the camera-vs-morph gate, surfaced as a VISIBLE,
-	# clearly-labeled toggle button with a live state indicator — NOT a hidden keybind (M
-	# remains only an accelerator). ON => left-drag ON the body morphs (drag-to-modify with
-	# region glow); left-drag on the BACKGROUND still orbits, and orbit stays instant (no pick
-	# latency) outside sculpt mode.
-	_sculpt_btn = Button.new()
-	_sculpt_btn.toggle_mode = true
-	_sculpt_btn.text = _sculpt_btn_text(false)
-	_sculpt_btn.tooltip_text = "Toggle sculpt mode — drag the body to morph it (accelerator: M)"
-	_sculpt_btn.toggled.connect(func(on: bool) -> void: _set_sculpt_mode(on))
-	t3_main.add_child(_sculpt_btn)
-
-	_sculpt_state_lbl = Label.new()
-	_sculpt_state_lbl.add_theme_font_size_override("font_size", 10)
-	_sculpt_state_lbl.text = _sculpt_state_text(false)
-	t3_main.add_child(_sculpt_state_lbl)
-
-	# MIRROR toggle (decision §2.3) — DEFAULT ON. Governs whether a one-sided edit (a sculpt drag
-	# on one arm/leg, or a lateral slider with an l-/r- twin) ALSO applies to the contralateral
-	# side, keeping the body symmetric by default. OFF allows asymmetry (edit only the touched
-	# side). It does NOT touch bilateral RESOLUTION (a bare-stem bilateral slider drives both sides
-	# regardless) or midline controls (twin == self → unaffected). A visible labeled CheckBox.
-	_mirror_btn = CheckBox.new()
-	_mirror_btn.text = "Mirror (symmetric edits)"
-	_mirror_btn.button_pressed = _mirror
-	_mirror_btn.tooltip_text = "When on, editing one side (sculpt or a lateral slider) also shapes the other side symmetrically. Off = edit one side only."
-	_mirror_btn.toggled.connect(func(on: bool) -> void: _set_mirror(on))
-	t3_main.add_child(_mirror_btn)
-
-	# EXTREMENESS control (§4 / §6): the single global scalar that widens every control's cap
-	# interval toward its hard range. Non-destructive — lowering it does NOT snap existing
-	# beyond-cap values (Phase-1 ratchet). A checkbox ("Allow extreme proportions") gates the
-	# 0..1 slider; both drive _caps.extremeness through _set_extremeness (a state-replacing op
-	# that aborts any gesture, then sweeps every control's widget bounds).
-	var ex_hdr := Label.new()
-	ex_hdr.text = "extremeness (widens all caps; lowering keeps existing values)"
-	ex_hdr.add_theme_font_size_override("font_size", 10)
-	t3_main.add_child(ex_hdr)
-	var ex_row := HBoxContainer.new()
-	ex_row.add_theme_constant_override("separation", 4)
-	_extreme_check = CheckBox.new()
-	_extreme_check.text = "allow"
-	_extreme_check.button_pressed = _caps.extremeness > 0.0
-	_extreme_check.toggled.connect(func(on: bool) -> void:
-		# Toggling on jumps to full unlock; off returns to 0 (existing beyond-cap persists).
-		_set_extremeness(1.0 if on else 0.0))
-	ex_row.add_child(_extreme_check)
-	_extreme_slider = HSlider.new()
-	_extreme_slider.min_value = 0.0
-	_extreme_slider.max_value = 1.0
-	_extreme_slider.step = 0.01
-	_extreme_slider.value = _caps.extremeness
-	_extreme_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_extreme_slider.value_changed.connect(func(v: float) -> void: _set_extremeness(v))
-	ex_row.add_child(_extreme_slider)
-	_extreme_lbl = Label.new()
-	_extreme_lbl.custom_minimum_size = Vector2(40, 0)
-	_extreme_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_extreme_lbl.text = "%.0f%%" % (_caps.extremeness * 100.0)
-	ex_row.add_child(_extreme_lbl)
-	t3_main.add_child(ex_row)
-
-	vbox.add_child(HSeparator.new())
-
-	var reset := Button.new()
-	reset.text = "Reset to neutral"
-	reset.pressed.connect(_reset_all)
-	vbox.add_child(reset)
-
-	# GLOBAL randomize (§2.3): bounded seeded randomize of every control within the live cap.
-	var rand_all := Button.new()
-	rand_all.text = "Randomize (within extremeness)"
-	rand_all.pressed.connect(_randomize_all)
-	vbox.add_child(rand_all)
-
-	# History-toggle button lives in the main panel; the history nav itself is a SEPARATE
-	# corner panel hidden by default (toggled by this button or the H hotkey).
-	var hist_toggle := Button.new()
-	hist_toggle.text = "History (H)"
-	hist_toggle.pressed.connect(_toggle_history_panel)
-	vbox.add_child(hist_toggle)
-
-	_build_export_ui(vbox)
-
-	# Corner panels (own CanvasLayer-sibling Controls, anchored to other screen corners).
-	_build_undo_redo_corner(canvas)
-	_build_region_sliders_panel(canvas)
-	_build_history_panel(canvas)
-	_build_legend_panel(canvas)
-
-	# Apply the initial tier visibility (T1 only — T2/T3 sections hidden until revealed).
-	_apply_tier()
-	_apply_state()
-	_refresh_history_panel()
+		_build_pinned_dial(strip, spec[0], spec[1], spec[2], spec[3], spec[4], spec[5], spec[6])
 
 
 # ---------------------------------------------------------------------------
-# PROGRESSIVE-REFINE TIERS (Phase 3b, SYNTHESIS §2.2). The tier selector + the T0 pick grid,
-# and the monotone reveal: raising the tier shows more, never hides T1.
+# CONTEXTUAL DOCK (§7.3) — a compact floating card on the right that appears ONLY when a region
+# is focused and renders EXACTLY the focused node's children (child regions + value-nodes), and
+# nothing else (the active-surface rule). Absent when nothing is focused (no empty box).
+# ---------------------------------------------------------------------------
+func _build_contextual_dock(canvas: CanvasLayer) -> void:
+	_dock_panel = PanelContainer.new()
+	_dock_panel.name = "ContextualDock"
+	_dock_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_dock_panel.position = Vector2(-16, 56)   # below the top bar, right edge
+	_dock_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_dock_panel.custom_minimum_size = Vector2(330, 0)
+	_dock_panel.visible = false
+	canvas.add_child(_dock_panel)
+	# The dock body sits DIRECTLY in the panel (no ScrollContainer) so the card SIZES TO CONTENT:
+	# a one-control leaf is a compact card, an 8-control leaf a taller one — never a fixed full-
+	# height side wall, never collapsed to zero. Leaves are ≤8 rows by the tree's ≤7 nav rule, so
+	# the card always fits without scrolling.
+	_dock_body = VBoxContainer.new()
+	_dock_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_dock_body.add_theme_constant_override("separation", 4)
+	_dock_panel.add_child(_dock_body)
+
+
+## The ambient entry hint on the body (§7.4): one line + a Start-from-a-body button. Hidden once
+## a region is focused (the dock takes over) and shown again at the no-focus surface.
+var _entry_hint: Control
+func _build_entry_hint(canvas: CanvasLayer) -> void:
+	_entry_hint = VBoxContainer.new()
+	_entry_hint.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	(_entry_hint as VBoxContainer).alignment = BoxContainer.ALIGNMENT_CENTER
+	_entry_hint.position = Vector2(0, -150)
+	canvas.add_child(_entry_hint)
+	var hint := Label.new()
+	hint.text = "Pick a region to shape it, or start from a body."
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 12)
+	(_entry_hint as VBoxContainer).add_child(hint)
+	var start_btn := Button.new()
+	start_btn.text = "Start from a body"
+	start_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	start_btn.pressed.connect(_open_gallery)
+	(_entry_hint as VBoxContainer).add_child(start_btn)
+
+
+# ---------------------------------------------------------------------------
+# REGION NAVIGATION (§4) — focus_into / focus_to_path / focus_clear, plus _refresh_dock which
+# rebuilds the dock + breadcrumb from the current focus path. The active surface is a PURE
+# FUNCTION of _focus_path: it shows exactly the focused node's children (region) or specs (leaf).
 # ---------------------------------------------------------------------------
 
-## The tier selector — three radio-like buttons (T1 / T2 / T3) that raise the revealed depth.
-## Monotone: the tier IS the max depth shown. T1 (headline) is always visible regardless.
-func _build_tier_selector(parent: VBoxContainer) -> void:
+## Focus into a child of the currently-focused node (append a child-index to the path).
+func _focus_into(child_index: int) -> void:
+	_focus_path = _focus_path.duplicate()
+	_focus_path.append(child_index)
+	_refresh_dock()
+
+
+## Focus a specific full path (used by the breadcrumb back-edges).
+func _focus_to_path(path: Array) -> void:
+	_focus_path = path.duplicate()
+	_refresh_dock()
+
+
+## Clear focus → the no-focus entry surface (dock absent, hint shown).
+func _focus_clear() -> void:
+	_focus_path = []
+	_refresh_dock()
+
+
+## Rebuild the contextual dock + the breadcrumb from the current focus path. Empty path → dock
+## hidden + entry hint shown. A non-empty path → dock shows EXACTLY the focused node's children
+## (an intermediate region: its child regions) or value-nodes (a leaf: its region sliders), and
+## the breadcrumb shows the back-edges. This is the active-surface rule made literal.
+func _refresh_dock() -> void:
+	_rebuild_breadcrumb()
+	if _focus_path.is_empty():
+		if _dock_panel != null:
+			_dock_panel.visible = false
+		if _entry_hint != null:
+			_entry_hint.visible = true
+		return
+	if _entry_hint != null:
+		_entry_hint.visible = false
+	if _dock_panel == null or _dock_body == null:
+		return
+	_dock_panel.visible = true
+	for c in _dock_body.get_children():
+		c.queue_free()
+	# The dock owns the LIVE region value-node widgets; rebuilding it invalidates the prior
+	# leaf's rows (they're freed above), so reset the map — only the focused leaf's sliders are
+	# live. The MODEL (BodyState.modifiers) is unaffected; restore/randomize work off the model.
+	_modifier_sliders.clear()
+	var bc := RegionSlidersScript.breadcrumb(_focus_path)
+	var title := Label.new()
+	title.text = String(bc[bc.size() - 1]) if bc.size() > 0 else "Body"
+	title.add_theme_font_size_override("font_size", 13)
+	_dock_body.add_child(title)
+	_dock_body.add_child(HSeparator.new())
+
+	var node := RegionSlidersScript.node_at(_focus_path)
+	if not node.is_empty() and RegionSlidersScript.is_leaf(node):
+		# A leaf region: render its value-nodes (the region sliders). Eyes & brow ALSO gets the
+		# eye-color value-node (§8.7). An empty leaf shows an honest "nothing yet" line.
+		var specs: Array = node["specs"]
+		if String(node.get("key", "")) == "eyes_brow":
+			_build_eye_color_ui(_dock_body)
+		if specs.is_empty() and String(node.get("key", "")) != "eyes_brow":
+			var none := Label.new()
+			none.text = "No named controls here yet — shape it on the body."
+			none.add_theme_font_size_override("font_size", 10)
+			none.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			_dock_body.add_child(none)
+		for spec in specs:
+			_build_modifier_row(_dock_body, spec[0], spec[1], spec[2], spec[3])
+	else:
+		# An intermediate region: render its child regions as navigation buttons (≤7).
+		var children := RegionSlidersScript.children_at(_focus_path)
+		for ci in children.size():
+			var child: Dictionary = children[ci]
+			var btn := Button.new()
+			var leaf := RegionSlidersScript.is_leaf(child)
+			btn.text = String(child["label"]) + ("" if leaf else "  ›")
+			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			var idx := ci
+			btn.pressed.connect(func() -> void: _focus_into(idx))
+			_dock_body.add_child(btn)
+
+
+## Rebuild the top-bar breadcrumb: a Body root-edge followed by one back-edge per path level.
+## Clicking a crumb focuses that level (the navigational back-edge); Body clears focus.
+func _rebuild_breadcrumb() -> void:
+	if _breadcrumb_box == null:
+		return
+	for c in _breadcrumb_box.get_children():
+		c.queue_free()
+	# Root crumb "Body" — clears focus.
+	var root := Button.new()
+	root.text = "Body"
+	root.flat = true
+	root.pressed.connect(_focus_clear)
+	_breadcrumb_box.add_child(root)
+	var bc := RegionSlidersScript.breadcrumb(_focus_path)
+	for i in bc.size():
+		var sep := Label.new()
+		sep.text = "›"
+		_breadcrumb_box.add_child(sep)
+		var crumb := Button.new()
+		crumb.text = String(bc[i])
+		crumb.flat = i < bc.size() - 1
+		var depth := i + 1
+		crumb.pressed.connect(func() -> void: _focus_to_path(_focus_path.slice(0, depth)))
+		_breadcrumb_box.add_child(crumb)
+	# At the top level (no focus), offer the first-level region entries inline as a quick way in.
+	if _focus_path.is_empty():
+		for ci in RegionSlidersScript.TREE.size():
+			var node: Dictionary = RegionSlidersScript.TREE[ci]
+			var b := Button.new()
+			b.text = String(node["label"])
+			b.flat = true
+			b.add_theme_font_size_override("font_size", 11)
+			var idx := ci
+			b.pressed.connect(func() -> void: _focus_into(idx))
+			_breadcrumb_box.add_child(b)
+
+
+# ---------------------------------------------------------------------------
+# ARCHETYPE GALLERY (§4.2) — the roster opens as a TRANSIENT overlay (thumbnail-style list +
+# search filter), dismissed on pick or escape; never a persistent grid.
+# ---------------------------------------------------------------------------
+var _gallery_list: VBoxContainer
+var _gallery_filter: LineEdit
+func _build_gallery(canvas: CanvasLayer) -> void:
+	_gallery_panel = PanelContainer.new()
+	_gallery_panel.name = "ArchetypeGallery"
+	_gallery_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_gallery_panel.custom_minimum_size = Vector2(420, 460)
+	_gallery_panel.visible = false
+	canvas.add_child(_gallery_panel)
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 6)
+	_gallery_panel.add_child(vbox)
+	var head := HBoxContainer.new()
 	var hdr := Label.new()
-	hdr.text = "detail tier (deeper reveals more; T1 always shown)"
-	hdr.add_theme_font_size_override("font_size", 10)
-	parent.add_child(hdr)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
-	for spec in [[TIER_T1, "T1 headline"], [TIER_T2, "T2 detail"], [TIER_T3, "T3 full"]]:
-		var t := int(spec[0])
-		var btn := Button.new()
-		btn.toggle_mode = true
-		btn.text = String(spec[1])
-		btn.button_pressed = (t == _tier)
-		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.pressed.connect(func() -> void: _set_tier(t))
-		row.add_child(btn)
-		_tier_buttons[t] = btn
-	parent.add_child(row)
+	hdr.text = "Start from a body"
+	hdr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(hdr)
+	var close := Button.new()
+	close.text = "✕"
+	close.pressed.connect(_close_gallery)
+	head.add_child(close)
+	vbox.add_child(head)
+	# Search/filter (a genuine list is scanned with filter + search — the carve-out, §4.2).
+	_gallery_filter = LineEdit.new()
+	_gallery_filter.placeholder_text = "Search bodies…"
+	_gallery_filter.text_changed.connect(func(_t: String) -> void: _refresh_gallery())
+	vbox.add_child(_gallery_filter)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(400, 380)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vbox.add_child(scroll)
+	_gallery_list = VBoxContainer.new()
+	_gallery_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_gallery_list.add_theme_constant_override("separation", 2)
+	scroll.add_child(_gallery_list)
 
 
-## Raise (or set) the revealed tier and re-apply visibility. Additive/monotone reveal.
-func _set_tier(t: int) -> void:
-	_tier = clampi(t, TIER_T1, TIER_T3)
-	_apply_tier()
+func _open_gallery() -> void:
+	if _gallery_panel != null:
+		_refresh_gallery()
+		_gallery_panel.visible = true
 
 
-## Apply the current tier to every tier-gated section's visibility (T1 always on; T2 section
-## shown at tier >= T2; T3 section + the main-panel T3 controls shown at tier == T3). The
-## tier-selector buttons reflect the active tier.
-func _apply_tier() -> void:
-	for t in _tier_buttons:
-		(_tier_buttons[t] as Button).button_pressed = (int(t) == _tier)
-	if _t2_section != null:
-		_t2_section.visible = _tier >= TIER_T2
-	if _t3_section != null:
-		_t3_section.visible = _tier >= TIER_T3
-	if _t3_main_section != null:
-		_t3_main_section.visible = _tier >= TIER_T3
-	# Leaving T3 also leaves sculpt mode (its control is no longer visible — no orphaned mode).
-	if _tier < TIER_T3 and _sculpt_mode:
-		_set_sculpt_mode(false)
+func _close_gallery() -> void:
+	if _gallery_panel != null:
+		_gallery_panel.visible = false
 
 
-## The T0 ARCHETYPE PICK GRID (SYNTHESIS §2.2 / §2.1): one button per first-party archetype,
-## grouped by family. Picking one loads its frozen BodyState via the raw restore path
-## (Phase-1 raw/restore semantics) — every archetype is within default caps (gate #11a), so a
-## pick at extremeness 0 never exceeds default caps. Whether an archetype LOOKS GOOD is
-## USER-taste-gated content; the grid surfaces the system + representative set.
-func _build_archetype_grid(parent: VBoxContainer) -> void:
-	var hdr := Label.new()
-	hdr.text = "T0 — pick an archetype"
-	hdr.add_theme_font_size_override("font_size", 10)
-	parent.add_child(hdr)
+## Rebuild the gallery list filtered by the search box. Each entry is one row (name + family),
+## a navigational edge: picking it loads the body and dismisses the gallery.
+func _refresh_gallery() -> void:
+	if _gallery_list == null:
+		return
+	for c in _gallery_list.get_children():
+		c.queue_free()
+	var q := _gallery_filter.text.to_lower() if _gallery_filter != null else ""
 	if _archetypes.is_empty():
 		var empty := Label.new()
-		empty.text = "(no archetypes installed)"
-		empty.add_theme_font_size_override("font_size", 10)
-		parent.add_child(empty)
+		empty.text = "(no bodies installed)"
+		_gallery_list.add_child(empty)
 		return
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 4)
-	grid.add_theme_constant_override("v_separation", 4)
 	for arch in _archetypes:
+		var name := String(arch["name"])
+		var family := String(arch.get("family", ""))
+		if q != "" and not (name.to_lower().contains(q) or family.to_lower().contains(q)):
+			continue
 		var btn := Button.new()
-		btn.text = String(arch["name"])
-		btn.tooltip_text = "Load the '%s' archetype (raw — replaces the current body)" % arch["name"]
+		btn.text = "%s   —   %s" % [name, family] if family != "" else name
+		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var state: Dictionary = arch["state"]
-		btn.pressed.connect(func() -> void: _pick_archetype(state, String(arch["name"])))
-		grid.add_child(btn)
-	parent.add_child(grid)
+		btn.pressed.connect(func() -> void:
+			_pick_archetype(state, name)
+			_close_gallery())
+		_gallery_list.add_child(btn)
 
 
-## Load an archetype's frozen BodyState (T0 pick). This is the RAW restore path (§2.1 / §4.3
+## Load an archetype's frozen BodyState (gallery pick). This is the RAW restore path (§2.1 / §4.3
 ## path 7a): it commits the archetype state into the history tree as a new node, then restores
 ## it via _restore_current — which aborts any active gesture and writes the model RAW (no
 ## re-clamp). Because the archetype is within default caps by construction (gate #11a), raw ==
@@ -1330,7 +1544,7 @@ func _build_legend_panel(canvas: CanvasLayer) -> void:
 	for line in [
 		"drag: orbit    right-drag: pan    scroll: zoom",
 		"WASD: fly    Space: up    Ctrl(+WASD): down",
-		"M: sculpt mode (drag body to morph)",
+		"M: shape on the body (drag body to reshape)",
 		"P: picker backend (CPU grid / GPU id)",
 		"H: toggle history panel",
 		"Ctrl+Z: undo    Ctrl+Shift+Z: redo",
@@ -1346,82 +1560,6 @@ func _build_legend_panel(canvas: CanvasLayer) -> void:
 func _update_legend_visibility() -> void:
 	if _legend_panel != null:
 		_legend_panel.visible = _legend_pinned or _ctrl_down
-
-
-## INDIVIDUAL export actions (no "export all"): JSON, JSON+history, image, image+history —
-## with a FORMAT picker (PNG / JPG / WEBP). image+history is enabled only for formats that
-## can actually carry the embedded history (all three here); were one unable, it would be
-## honestly disabled, offering image-only. No persistent internal-path text — a transient
-## toast (_status_lbl) reports results.
-var _img_history_btn: Button
-func _build_export_ui(vbox: VBoxContainer) -> void:
-	vbox.add_child(HSeparator.new())
-
-	var hdr := Label.new()
-	hdr.text = "export"
-	vbox.add_child(hdr)
-
-	# Format picker (drives the image / image+history actions).
-	var fmt_row := HBoxContainer.new()
-	fmt_row.add_theme_constant_override("separation", 4)
-	var fmt_lbl := Label.new()
-	fmt_lbl.text = "image format"
-	fmt_lbl.custom_minimum_size = Vector2(96, 0)
-	fmt_row.add_child(fmt_lbl)
-	var fmt := OptionButton.new()
-	fmt.add_item("PNG", 0)
-	fmt.add_item("JPG", 1)
-	fmt.add_item("WEBP", 2)
-	fmt.item_selected.connect(_on_image_format_selected)
-	fmt_row.add_child(fmt)
-	vbox.add_child(fmt_row)
-
-	var json_btn := Button.new()
-	json_btn.text = "Export JSON (current)"
-	json_btn.pressed.connect(func() -> void: _export_json(false))
-	vbox.add_child(json_btn)
-
-	var json_h_btn := Button.new()
-	json_h_btn.text = "Export JSON + history"
-	json_h_btn.pressed.connect(func() -> void: _export_json(true))
-	vbox.add_child(json_h_btn)
-
-	var img_btn := Button.new()
-	img_btn.text = "Export image (current)"
-	img_btn.pressed.connect(func() -> void: _export_image(false))
-	vbox.add_child(img_btn)
-
-	_img_history_btn = Button.new()
-	_img_history_btn.text = "Export image + history"
-	_img_history_btn.pressed.connect(func() -> void: _export_image(true))
-	vbox.add_child(_img_history_btn)
-
-	# IMPORT (Phase 4 / SYNTHESIS §6 slice 1): pair the export actions with an Import affordance
-	# that loads a previously-EXPORTED character — a JSON payload (current or with-history) OR an
-	# image (PNG/JPG/WEBP) carrying the embedded history — via the EXISTING creator_io.gd read
-	# functions (parse_payload / extract_history_from_image). Applied RAW (a beyond-cap value
-	# persists). A FileDialog is the picker; drag-and-drop of a file onto the window is the second
-	# affordance (see _on_files_dropped). No new parser — pure wiring over the read side.
-	vbox.add_child(HSeparator.new())
-	var imp_hdr := Label.new()
-	imp_hdr.text = "import"
-	vbox.add_child(imp_hdr)
-	var imp_btn := Button.new()
-	imp_btn.text = "Import character… (JSON / image)"
-	imp_btn.tooltip_text = "Load a previously-exported character (or drag a saved file onto the window)"
-	imp_btn.pressed.connect(_open_import_dialog)
-	vbox.add_child(imp_btn)
-
-	_status_lbl = Label.new()
-	_status_lbl.add_theme_font_size_override("font_size", 10)
-	_status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status_lbl.text = ""
-	vbox.add_child(_status_lbl)
-
-	_update_image_history_enabled()
-	# Wire window file-drop as the drag-and-drop import affordance (§6 slice 1).
-	if get_window() != null and not get_window().files_dropped.is_connected(_on_files_dropped):
-		get_window().files_dropped.connect(_on_files_dropped)
 
 
 # ---------------------------------------------------------------------------
@@ -1495,21 +1633,6 @@ func _import_file(path: String) -> void:
 		_toast("import failed: not a valid character file")
 		return
 	_apply_imported(res, "imported")
-
-
-func _on_image_format_selected(idx: int) -> void:
-	_image_format = ["png", "jpg", "webp"][idx]
-	_update_image_history_enabled()
-
-
-## Honestly enable/disable "image + history" for the chosen format: disabled (with a hint)
-## if the format genuinely can't carry the metadata. image-only stays available regardless.
-func _update_image_history_enabled() -> void:
-	if _img_history_btn == null:
-		return
-	var ok := CreatorIOScript.supports_image_history(_image_format)
-	_img_history_btn.disabled = not ok
-	_img_history_btn.tooltip_text = "" if ok else "%s cannot carry embedded history — use image-only" % _image_format.to_upper()
 
 
 ## ChatGPT-style pseudo-LINEAR branch nav: render the root→current path top-to-bottom as a
@@ -1591,33 +1714,37 @@ func _switch_branch(junction_id: int, child_index: int) -> void:
 		_restore_current()
 
 
-func _build_axis_row(parent: VBoxContainer, field: String, _lo: float, _hi: float,
+## Build one PINNED whole-body dial (§6) — a compact vertical cell in the bottom strip: the
+## de-jargoned label on top, the slider + its two pole labels, a numeric field, and reset/
+## randomize. Same value-node as before (same _sliders/_axis_spins maps, same apply_capped
+## choke, same commit funnel) — only the layout is compact-vertical instead of a wide row.
+func _build_pinned_dial(parent: HBoxContainer, field: String, _lo: float, _hi: float,
 		step: float, label: String, lo_pole: String, hi_pole: String) -> void:
-	# _lo/_hi (the old hard min/max from the axes table) are no longer the slider bounds —
-	# the slider's min/max come from the LIVE cap interval (§3.2), set after registration.
-	# Row layout (per axis):
-	#   [label (110)] [lo-pole (54)] [slider (expand)] [hi-pole (54)] [value (46)]
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
+	var cell := VBoxContainer.new()
+	cell.add_theme_constant_override("separation", 1)
+	cell.custom_minimum_size = Vector2(150, 0)
+	parent.add_child(cell)
 
 	var name_lbl := Label.new()
 	name_lbl.text = label
-	name_lbl.custom_minimum_size = Vector2(110, 0)
-	row.add_child(name_lbl)
+	name_lbl.add_theme_font_size_override("font_size", 11)
+	cell.add_child(name_lbl)
+
+	var srow := HBoxContainer.new()
+	srow.add_theme_constant_override("separation", 3)
+	cell.add_child(srow)
 
 	var lo_lbl := Label.new()
 	lo_lbl.text = lo_pole
-	lo_lbl.custom_minimum_size = Vector2(54, 0)
-	lo_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	lo_lbl.add_theme_font_size_override("font_size", 10)
-	row.add_child(lo_lbl)
+	lo_lbl.add_theme_font_size_override("font_size", 9)
+	srow.add_child(lo_lbl)
 
 	var slider := HSlider.new()
 	# Slider bounds reflect the LIVE cap interval (§3.2), not the hard registry range. The
 	# step is kept; the cap interval is set after the slider is registered (below).
 	slider.step = step
 	slider.value = float(_body_state.get(field))
-	slider.custom_minimum_size = Vector2(100, 0)
+	slider.custom_minimum_size = Vector2(80, 0)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# value_changed fires continuously during a drag: update the live morph each
 	# frame (so the body tracks the slider) but DEBOUNCE the history commit. We
@@ -1654,7 +1781,7 @@ func _build_axis_row(parent: VBoxContainer, field: String, _lo: float, _hi: floa
 		if value_changed and not _suspend_commit:
 			_commit_axis(field, float(_sliders[field].value))
 	)
-	row.add_child(slider)
+	srow.add_child(slider)
 	_sliders[field] = slider
 	# Drive the slider's min/max from the live cap interval (held-aware, but at build time
 	# there is no active gesture, so this is the settled-value interval). Widened to contain
@@ -1663,25 +1790,28 @@ func _build_axis_row(parent: VBoxContainer, field: String, _lo: float, _hi: floa
 
 	var hi_lbl := Label.new()
 	hi_lbl.text = hi_pole
-	hi_lbl.custom_minimum_size = Vector2(54, 0)
-	hi_lbl.add_theme_font_size_override("font_size", 10)
-	row.add_child(hi_lbl)
+	hi_lbl.add_theme_font_size_override("font_size", 9)
+	srow.add_child(hi_lbl)
+
+	# Numeric value row: a readout label + a SpinBox (NATURAL UNITS: age yr / height cm / %) +
+	# reset/randomize. Drag and type are co-equal on the same value-node (§5); editing routes
+	# the request through the apply_capped choke and re-displays the CLAMPED stored value.
+	var vrow := HBoxContainer.new()
+	vrow.add_theme_constant_override("separation", 2)
+	cell.add_child(vrow)
 
 	var value_lbl := Label.new()
-	value_lbl.custom_minimum_size = Vector2(46, 0)
-	value_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	value_lbl.custom_minimum_size = Vector2(40, 0)
+	value_lbl.add_theme_font_size_override("font_size", 10)
 	value_lbl.text = _format_value(field)
-	row.add_child(value_lbl)
+	vrow.add_child(value_lbl)
 	_value_labels[field] = value_lbl
 
-	# NUMERIC ENTRY (§2.3 / §4.3): a SpinBox in NATURAL UNITS (age yr / height cm / %; the same
-	# units _format_value shows). Editing routes the request through the apply_capped choke and
-	# re-displays the CLAMPED stored value, so an out-of-cap entry visibly clamps at the field.
 	var spin := SpinBox.new()
 	spin.min_value = _lo
 	spin.max_value = _hi
 	spin.step = step
-	spin.custom_minimum_size = Vector2(64, 0)
+	spin.custom_minimum_size = Vector2(58, 0)
 	spin.add_theme_font_size_override("font_size", 10)
 	spin.set_value_no_signal(float(_body_state.get(field)))
 	spin.value_changed.connect(func(v: float) -> void:
@@ -1697,110 +1827,36 @@ func _build_axis_row(parent: VBoxContainer, field: String, _lo: float, _hi: floa
 		_apply_axis_slider_bounds(field, slider)
 		if not _suspend_commit:
 			_commit_axis(field, nv))
-	row.add_child(spin)
+	vrow.add_child(spin)
 	_axis_spins[field] = spin
 
-	# Per-axis RESET (↺) + RANDOMIZE (⚄) (§2.3).
+	# Per-dial RESET (↺) + RANDOMIZE (⚄) (§5 nudge-adjacent; the small step lives on the slider).
 	var rst := Button.new()
 	rst.text = "↺"
 	rst.tooltip_text = "Reset %s to neutral" % label
-	rst.custom_minimum_size = Vector2(22, 0)
+	rst.custom_minimum_size = Vector2(20, 0)
 	rst.add_theme_font_size_override("font_size", 10)
 	rst.pressed.connect(func() -> void: _reset_axis(field))
-	row.add_child(rst)
+	vrow.add_child(rst)
 
 	var rnd := Button.new()
 	rnd.text = "⚄"
-	rnd.tooltip_text = "Randomize %s (within current extremeness)" % label
-	rnd.custom_minimum_size = Vector2(22, 0)
+	rnd.tooltip_text = "Randomize %s" % label
+	rnd.custom_minimum_size = Vector2(20, 0)
 	rnd.add_theme_font_size_override("font_size", 10)
 	rnd.pressed.connect(func() -> void: _randomize_axis(field))
-	row.add_child(rnd)
-
-	parent.add_child(row)
+	vrow.add_child(rnd)
 
 
 # ---------------------------------------------------------------------------
-# DATA-DRIVEN per-region detail sliders (RegionSliders). A scrollable corner panel
-# (TOP-RIGHT, under the undo/redo icons) with one collapsible group per body region and
-# one slider per RegionSliders spec. Each slider writes BodyState.modifiers[<full_name>]
-# (signed [-1,1] for bidirectional axes, [0,1] for unipolar) and re-bakes the morph LIVE
-# through the SAME BodyState→registry→DetailLibrary path the macro axes and drag-to-modify
-# use. Pure DATA: the panel is generated from the RegionSliders table, never hand-listed.
+# DATA-DRIVEN per-region value-nodes (RegionSliders). Each is one row bound to a RegionSliders
+# spec, built INTO THE CONTEXTUAL DOCK on focus (the active-surface rule, §4) — NOT a persistent
+# corner panel. Each slider writes BodyState.modifiers[<full_name>] (signed [-1,1] bidirectional,
+# [0,1] unipolar) and re-bakes the morph LIVE through the SAME BodyState→registry→DetailLibrary
+# path the whole-body dials + drag-to-modify use. Pure DATA: generated from the tree, never hand-
+# listed. NOTE: the dock rebuilds on every focus change, so the _modifier_sliders map is reset
+# first (only the FOCUSED leaf's value-nodes are live), and restore/randomize iterate that subset.
 # ---------------------------------------------------------------------------
-func _build_region_sliders_panel(canvas: CanvasLayer) -> void:
-	var panel := PanelContainer.new()
-	panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	panel.position = Vector2(-16, 64)   # below the undo/redo corner icons
-	panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	panel.custom_minimum_size = Vector2(320, 0)
-	canvas.add_child(panel)
-
-	var outer := VBoxContainer.new()
-	outer.add_theme_constant_override("separation", 4)
-	panel.add_child(outer)
-
-	var hdr := Label.new()
-	hdr.text = "body regions — detail sliders"
-	outer.add_child(hdr)
-
-	# Scroll so the deep table never overruns the screen.
-	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(300, 460)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	outer.add_child(scroll)
-	var list := VBoxContainer.new()
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 2)
-	scroll.add_child(list)
-
-	# T2 CURATED DETAIL (SYNTHESIS §2.2): a curated subset of the region groups (high-impact,
-	# low-footgun). Revealed at tier >= T2. The remaining groups (the full registry tree) live
-	# in the T3 section below — a monotone reveal: T3 shows T2's groups PLUS the rest.
-	var t2 := VBoxContainer.new()
-	t2.add_theme_constant_override("separation", 2)
-	_t2_section = t2
-	list.add_child(t2)
-	var t2_hdr := Label.new()
-	t2_hdr.text = "T2 — curated detail"
-	t2_hdr.add_theme_font_size_override("font_size", 10)
-	t2.add_child(t2_hdr)
-
-	# T3 FULL REGISTRY TREE (SYNTHESIS §2.2): every remaining region group (the long tail of
-	# the registry). Revealed at tier == T3. Sculpt + extremeness live in the main-panel T3
-	# section; this is the full slider tree.
-	var t3 := VBoxContainer.new()
-	t3.add_theme_constant_override("separation", 2)
-	_t3_section = t3
-	list.add_child(t3)
-	var t3_hdr := Label.new()
-	t3_hdr.text = "T3 — full registry tree"
-	t3_hdr.add_theme_font_size_override("font_size", 10)
-	t3.add_child(t3_hdr)
-
-	for grp in RegionSlidersScript.GROUPS:
-		var group_label: String = grp[0]
-		var dest: VBoxContainer = t2 if T2_GROUPS.has(group_label) else t3
-		# Collapsible region group: a header button that toggles its contents.
-		var group_box := VBoxContainer.new()
-		group_box.add_theme_constant_override("separation", 1)
-		var contents := VBoxContainer.new()
-		contents.add_theme_constant_override("separation", 1)
-		var toggle := Button.new()
-		toggle.toggle_mode = true
-		toggle.button_pressed = true
-		toggle.text = "▾ %s" % group_label
-		toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		toggle.toggled.connect(func(on: bool) -> void:
-			contents.visible = on
-			toggle.text = "%s %s" % ["▾" if on else "▸", group_label])
-		group_box.add_child(toggle)
-		for spec in grp[1]:
-			_build_modifier_row(contents, spec[0], spec[1], spec[2], spec[3])
-		group_box.add_child(contents)
-		dest.add_child(group_box)
-		dest.add_child(HSeparator.new())
-
 
 ## One detail-slider row, bound to a RegionSliders spec. The slider's range/default come from
 ## the modifier KIND (bidirectional → [-1,1] @ 0; unipolar → [0,1] @ 0). value_changed writes
@@ -1913,7 +1969,7 @@ func _build_modifier_row(parent: VBoxContainer, spec_name: String, display: Stri
 
 	var rnd := Button.new()
 	rnd.text = "⚄"
-	rnd.tooltip_text = "Randomize %s (within current extremeness)" % display
+	rnd.tooltip_text = "Randomize %s" % display
 	rnd.custom_minimum_size = Vector2(22, 0)
 	rnd.add_theme_font_size_override("font_size", 10)
 	rnd.pressed.connect(func() -> void: _randomize_modifier(spec_name, display))
@@ -2291,12 +2347,26 @@ func _randomize_all() -> void:
 	_suspend_commit = true
 	for field in _sliders:
 		_randomize_axis(field)
-	for spec_name in _modifier_sliders:
-		var e = _modifier_sliders[spec_name]
-		_randomize_modifier(spec_name, String(e["display"]))
+	# Randomize EVERY region value-node from the tree (not just the dock-built ones) — the dock
+	# now holds only the focused leaf's widgets, but the whole body must randomize. Each spec is
+	# sampled within its primary side's cap and written through the choke (model-level); a built
+	# widget (if its leaf is focused) is synced too.
+	for spec in RegionSlidersScript.all_specs():
+		var spec_name := String(spec["name"])
+		var full_names := RegionSlidersScript.resolve_full_names(spec_name)
+		var rng := _seeded_rng_for(spec_name)
+		_caps.start_gesture()
+		var ci: Array = _caps.cap(full_names[0])
+		var req := rng.randf_range(float(ci[0]), float(ci[1]))
+		var primary := _set_modifier_capped(full_names, req)
+		_caps.end_gesture()
+		# Sync the bound dock widget if this leaf is the focused one.
+		if _modifier_sliders.has(spec_name):
+			_write_back_modifier_widget(spec_name, _modifier_sliders[spec_name]["slider"] as HSlider, primary)
+	_apply_state()
 	_suspend_commit = false
 	_rebake_tangents_on_commit()
-	_history.commit(_body_state.to_dict(), "randomize all")
+	_history.commit(_body_state.to_dict(), "randomized")
 	_refresh_history_panel()
 
 

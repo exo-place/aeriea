@@ -30,8 +30,12 @@ func _process(_dt: float) -> void:
 	if _done or _frame < 12:
 		return
 	_done = true
-	# Raise to T3 so the mirror toggle (and the sculpt/extremeness controls) are visible.
-	_creator.call("_set_tier", 3)
+	# Projection shell: open the Advanced popup (mirror toggle lives there now) and focus
+	# Face → Eyes & brow so the eye-color control is built into the dock.
+	_creator.call("_open_advanced")
+	_creator.call("_focus_into", 0)   # Face
+	await get_tree().process_frame
+	_creator.call("_focus_into", 3)   # Eyes & brow (index 3 under Face)
 	await get_tree().process_frame
 
 	# (1) The UI with the mirror toggle + the eye-color control visible, default (brown) eyes.

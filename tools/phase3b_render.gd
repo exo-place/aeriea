@@ -38,7 +38,7 @@ func _process(_dt: float) -> void:
 	if _mode == "before":
 		# BEFORE: the creator as it opens — T1 (default tier), the T0 archetype grid visible,
 		# no archetype applied yet, T2/T3 sections hidden.
-		_creator.call("_set_tier", 1)
+		if _creator.has_method("_set_tier"): _creator.call("_set_tier", 1)
 		await _shoot("creator_t0_t1")
 	else:
 		# AFTER: tier raised to T3 (every section revealed, additive), an archetype applied.
@@ -51,7 +51,7 @@ func _process(_dt: float) -> void:
 					chosen = e
 					break
 			_creator.call("_pick_archetype", chosen["state"], String(chosen["name"]))
-		_creator.call("_set_tier", 3)
+		if _creator.has_method("_set_tier"): _creator.call("_set_tier", 3)
 		await get_tree().process_frame
 		await _shoot("creator_t3_archetype")
 	get_tree().quit(0)

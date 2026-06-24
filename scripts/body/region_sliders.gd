@@ -29,63 +29,105 @@ extends RefCounted
 const KIND_BIDIRECTIONAL := "bidirectional"
 const KIND_UNIPOLAR := "unipolar"
 
-## The region groups, in display order. Each is [group_label, [slider_spec, ...]] where a
-## slider_spec is [full_name, display, lo_pole, hi_pole]. lo/hi poles label the slider ends:
-## for a bidirectional axis lo = the decr/min direction (negative), hi = the incr/max
-## (positive); for a unipolar axis lo = "none"/neutral (0), hi = the effect at full (1).
+## The NAVIGABLE REGION TREE (character-creator-ux.md §3). The creator navigates this tree
+## one level at a time (breadcrumb), never a flat wall — Miller-compliant (≤~7 children) at
+## every node. Two node shapes:
+##   - an INTERMEDIATE node: { "label": String, "children": [node, ...] } — a navigation step
+##     with no sliders of its own (e.g. Face, Torso).
+##   - a LEAF group: { "label": String, "key": String, "specs": [slider_spec, ...] } — the
+##     body part you actually edit; "key" is a stable id; specs are [full_name, display,
+##     lo_pole, hi_pole] (poles: bidirectional lo = decr/min/negative, hi = incr/max/positive;
+##     unipolar lo = neutral 0, hi = the effect at full 1). A leaf may have EMPTY specs (Mouth,
+##     Eyes & brow today) — an honest home awaiting named sliders (§3 honest-edges).
 ##
 ## CURATED, not exhaustive: the registry has 291 modifiers (incl. dense per-finger / per-AU
-## micro-targets). This is the MEANINGFUL set — the regions a player customizes — chosen so
-## the panel is deep but navigable. The long tail stays reachable via drag-to-modify.
-const GROUPS := [
-	["Breasts", [
-		# NOTE (Phase 3a, breast-size guard): "breast/breast-volume-vert-down|up" was
-		# proposed as the "size" control (SYNTHESIS §5), but a render probe proved it is a
-		# PURELY VERTICAL redistribution axis (net displacement is ±y; forward/projection z
-		# ≈ 0 at both poles) — driving it does NOT change apparent size. Shipping it as "size"
-		# would be a size slider that doesn't change size (the guard's stop condition). It is
-		# therefore labeled HONESTLY as breast height/lift, not size. The real size fix is the
-		# DEFERRED cup-cube import (a decision item). The genuine size axes already ship below:
-		# "fullness" (bust circumference) and "projection" (breast point).
-		["breast/breast-volume-vert-down|up", "height / lift", "low", "high"],
-		["breast/breast-dist-decr|incr", "spacing", "close", "wide"],
-		["breast/breast-point-decr|incr", "projection", "flat", "pointed"],
-		["breast/breast-trans-down|up", "position", "low", "high"],
-		["breast/nipple-size-decr|incr", "nipple size", "small", "large"],
-		["breast/nipple-point-decr|incr", "nipple out", "in", "out"],
-		["measure/measure-bust-circ-decr|incr", "fullness", "narrow", "full"],
-		["measure/measure-underbust-circ-decr|incr", "underbust", "narrow", "full"],
-	]],
-	["Glutes & pelvis", [
-		["buttocks/buttocks-volume-decr|incr", "butt size", "flat", "full"],
-		["pelvis/pelvis-tone-decr|incr", "pelvis tone", "soft", "toned"],
-		["pelvis/bulge-decr|incr", "bulge", "less", "more"],
-	]],
-	# Belly group (SYNTHESIS §3): the pregnancy "belly" slider is RETIRED — the gravid
-	# stomach-pregnant morph leaves base creation (it belongs to the future pregnancy
-	# simulation). The persistent-identity belly shape is the soft/tone axis + belly-forward
-	# depth; girth is the existing single waist slider (NOT re-added here — no modifier driven
-	# by two controls); whole-body fat is the Weight headline axis. Navel/love-handle fine
-	# detail moves to the T3 "Fine detail" group below.
-	["Belly & stomach", [
-		["stomach/stomach-tone-decr|incr", "belly softness / tone", "soft", "defined"],
-		["torso/torso-scale-depth-decr|incr", "belly forward", "flat", "deep"],
-	]],
-	["Waist & hips", [
-		["measure/measure-waist-circ-decr|incr", "waist", "narrow", "wide"],
-		["measure/measure-hips-circ-decr|incr", "hips circumference", "narrow", "wide"],
-		["hip/hip-scale-horiz-decr|incr", "hip width", "narrow", "wide"],
-		["hip/hip-waist-down|up", "hip line", "low", "high"],
-		["measure/measure-waisttohip-dist-decr|incr", "torso-to-hip", "short", "long"],
-	]],
-	["Torso & shoulders", [
-		["torso/torso-vshape-decr|incr", "V-taper", "straight", "tapered"],
-		["measure/measure-shoulder-dist-decr|incr", "shoulder width", "narrow", "broad"],
-		["torso/torso-muscle-pectoral-decr|incr", "pectorals", "soft", "defined"],
-		["torso/torso-muscle-dorsi-decr|incr", "back muscle", "soft", "defined"],
-		["measure/measure-frontchest-dist-decr|incr", "chest depth", "shallow", "deep"],
-	]],
-	["Arms", [
+## micro-targets). This is the MEANINGFUL set — the regions a player customizes. The long tail
+## stays reachable via drag-to-modify. (The legacy flat GROUPS / all_specs() / count() derive
+## from this tree's leaves, so the morph-wiring + tests are unchanged by the reshape.)
+const TREE := [
+	{"label": "Face", "children": [
+		{"label": "Jaw & chin", "key": "jaw_chin", "specs": [
+			["chin/chin-jaw-drop-decr|incr", "jaw drop", "less", "more"],
+		]},
+		{"label": "Nose", "key": "nose", "specs": [
+			["nose/nose-scale-vert-decr|incr", "nose size", "small", "large"],
+		]},
+		# Mouth: the registry mouth family is reachable by on-body grab; no NAMED flat-table
+		# sliders today. An honest home awaiting named sliders (§3).
+		{"label": "Mouth", "key": "mouth", "specs": []},
+		# Eyes & brow: eye COLOR is a value-node surfaced here in code (§8.7); the brow family
+		# populates as named sliders land. No region sliders yet (honest, §3).
+		{"label": "Eyes & brow", "key": "eyes_brow", "specs": []},
+		{"label": "Skull", "key": "skull", "specs": [
+			["head/head-scale-horiz-decr|incr", "face width", "narrow", "wide"],
+			["head/head-scale-vert-decr|incr", "face height", "short", "tall"],
+			["head/head-scale-depth-decr|incr", "face depth", "flat", "deep"],
+			["head/head-fat-decr|incr", "face fullness", "gaunt", "full"],
+			["head/head-age-decr|incr", "face age", "young", "old"],
+		]},
+		# Cheeks: the genuine bilateral cheek family (§3.1) — 4 stems × L/R paired into 4
+		# midline-symmetric sliders via the generalized resolve_full_names (the /-prefixed form).
+		{"label": "Cheeks", "key": "cheeks", "specs": [
+			["cheek/l-cheek-bones-decr|incr", "cheekbones", "soft", "high"],
+			["cheek/l-cheek-volume-decr|incr", "cheek fullness", "gaunt", "full"],
+			["cheek/l-cheek-trans-down|up", "cheek height", "low", "high"],
+			["cheek/l-cheek-inner-decr|incr", "inner cheek", "hollow", "full"],
+		]},
+		{"label": "Face shape", "key": "face_shape", "specs": [
+			["head/head-oval", "oval", "none", "oval"],
+			["head/head-round", "round", "none", "round"],
+			["head/head-square", "square", "none", "square"],
+			["head/head-rectangular", "rectangular", "none", "rectangular"],
+			["head/head-triangular", "triangular", "none", "triangular"],
+		]},
+	]},
+	{"label": "Torso", "children": [
+		{"label": "Chest & breasts", "key": "chest_breasts", "specs": [
+			# NOTE (breast-size guard): "breast/breast-volume-vert-down|up" is a PURELY VERTICAL
+			# redistribution axis (a render probe proved it does NOT change apparent size) — so it
+			# is labeled HONESTLY as Lift, not size. The real Cup size axis is a later phase
+			# (cup-cube import). The genuine shape axes ("fullness", "projection") ship here.
+			["breast/breast-volume-vert-down|up", "lift", "low", "high"],
+			["breast/breast-dist-decr|incr", "spacing", "close", "wide"],
+			["breast/breast-point-decr|incr", "projection", "flat", "pointed"],
+			["breast/breast-trans-down|up", "position", "low", "high"],
+			["breast/nipple-size-decr|incr", "nipple size", "small", "large"],
+			["breast/nipple-point-decr|incr", "nipple out", "in", "out"],
+			["measure/measure-bust-circ-decr|incr", "fullness", "narrow", "full"],
+			["measure/measure-underbust-circ-decr|incr", "underbust", "narrow", "full"],
+		]},
+		# Belly: soft/tone + belly-forward depth, PLUS the navel power-detail (no junk-drawer —
+		# power detail lives under the part it shapes, §3 honest-edges).
+		{"label": "Belly", "key": "belly", "specs": [
+			["stomach/stomach-tone-decr|incr", "belly softness", "soft", "toned"],
+			["torso/torso-scale-depth-decr|incr", "belly forward", "flat", "deep"],
+			["stomach/stomach-navel-in|out", "navel depth", "in", "out"],
+			["stomach/stomach-navel-down|up", "navel height", "low", "high"],
+		]},
+		# Waist & hips: the waist/hip axes PLUS the love-handle power-detail (under the part).
+		{"label": "Waist & hips", "key": "waist_hips", "specs": [
+			["measure/measure-waist-circ-decr|incr", "waist", "narrow", "wide"],
+			["measure/measure-hips-circ-decr|incr", "hips circumference", "narrow", "wide"],
+			["hip/hip-scale-horiz-decr|incr", "hip width", "narrow", "wide"],
+			["hip/hip-waist-down|up", "hip line", "low", "high"],
+			["measure/measure-waisttohip-dist-decr|incr", "torso-to-hip", "short", "long"],
+			["hip/hip-scale-depth-decr|incr", "love-handle depth", "less", "more"],
+			["hip/hip-trans-in|out", "love-handle out", "in", "out"],
+		]},
+		{"label": "Back & shoulders", "key": "back_shoulders", "specs": [
+			["torso/torso-vshape-decr|incr", "V-taper", "straight", "tapered"],
+			["measure/measure-shoulder-dist-decr|incr", "shoulder width", "narrow", "broad"],
+			["torso/torso-muscle-pectoral-decr|incr", "pectorals", "soft", "defined"],
+			["torso/torso-muscle-dorsi-decr|incr", "back muscle", "soft", "defined"],
+			["measure/measure-frontchest-dist-decr|incr", "chest depth", "shallow", "deep"],
+		]},
+		{"label": "Glutes & pelvis", "key": "glutes_pelvis", "specs": [
+			["buttocks/buttocks-volume-decr|incr", "butt size", "flat", "full"],
+			["pelvis/pelvis-tone-decr|incr", "pelvis tone", "soft", "toned"],
+			["pelvis/bulge-decr|incr", "bulge", "less", "more"],
+		]},
+	]},
+	{"label": "Arms", "key": "arms", "specs": [
 		["measure/measure-upperarm-circ-decr|incr", "upper-arm size", "thin", "thick"],
 		["l-upperarm-muscle", "upper-arm muscle", "soft", "muscular"],
 		["l-upperarm-fat", "upper-arm fat", "lean", "soft"],
@@ -93,46 +135,54 @@ const GROUPS := [
 		["measure/measure-upperarm-length-decr|incr", "upper-arm length", "short", "long"],
 		["measure/measure-lowerarm-length-decr|incr", "forearm length", "short", "long"],
 		["measure/measure-wrist-circ-decr|incr", "wrist", "thin", "thick"],
-	]],
-	["Legs", [
+	]},
+	# Legs split into Thighs (4) + Lower legs (5) — no 9-item wall (§3).
+	{"label": "Thighs", "key": "thighs", "specs": [
 		["measure/measure-thigh-circ-decr|incr", "thigh size", "thin", "thick"],
 		["l-upperleg-muscle", "thigh muscle", "soft", "muscular"],
 		["l-upperleg-fat", "thigh fat", "lean", "soft"],
+		["armslegs/upperlegs-height-decr|incr", "thigh length", "short", "long"],
+	]},
+	{"label": "Lower legs", "key": "lower_legs", "specs": [
 		["measure/measure-calf-circ-decr|incr", "calf size", "thin", "thick"],
 		["l-lowerleg-muscle", "calf muscle", "soft", "muscular"],
-		["armslegs/upperlegs-height-decr|incr", "thigh length", "short", "long"],
 		["armslegs/lowerlegs-height-decr|incr", "shin length", "short", "long"],
 		["measure/measure-knee-circ-decr|incr", "knee", "thin", "thick"],
 		["measure/measure-ankle-circ-decr|incr", "ankle", "thin", "thick"],
-	]],
-	["Neck", [
+	]},
+	{"label": "Neck", "key": "neck", "specs": [
 		["measure/measure-neck-circ-decr|incr", "neck thickness", "thin", "thick"],
 		["measure/measure-neck-height-decr|incr", "neck length", "short", "long"],
 		["neck/neck-double-decr|incr", "double chin", "less", "more"],
-	]],
-	["Head & face shape", [
-		["head/head-scale-horiz-decr|incr", "face width", "narrow", "wide"],
-		["head/head-scale-vert-decr|incr", "face height", "short", "tall"],
-		["head/head-scale-depth-decr|incr", "face depth", "flat", "deep"],
-		["head/head-fat-decr|incr", "face fullness", "gaunt", "full"],
-		["head/head-age-decr|incr", "face age", "young", "old"],
-		["head/head-oval", "oval shape", "none", "oval"],
-		["head/head-round", "round shape", "none", "round"],
-		["head/head-square", "square shape", "none", "square"],
-		["head/head-rectangular", "rectangular shape", "none", "rectangular"],
-		["head/head-triangular", "triangular shape", "none", "triangular"],
-		["chin/chin-jaw-drop-decr|incr", "jaw drop", "less", "more"],
-		["nose/nose-scale-vert-decr|incr", "nose size", "small", "large"],
-	]],
-	# T3 fine detail (SYNTHESIS §3): the navel rows and love-handle axes, demoted from the
-	# headline belly/hip groups to a fine-detail group for power users.
-	["Fine detail", [
-		["stomach/stomach-navel-in|out", "navel depth", "in", "out"],
-		["stomach/stomach-navel-down|up", "navel height", "low", "high"],
-		["hip/hip-scale-depth-decr|incr", "love-handle depth", "less", "more"],
-		["hip/hip-trans-in|out", "love-handle out", "in", "out"],
-	]],
+	]},
 ]
+
+
+## A node is a LEAF group iff it carries "specs" (intermediate nodes carry "children").
+static func is_leaf(node: Dictionary) -> bool:
+	return node.has("specs")
+
+
+## The flat list of LEAF groups (depth-first, display order) as [group_label, [spec, ...]] —
+## the legacy GROUPS shape, DERIVED from the tree's leaves so all_specs()/count()/the morph
+## wiring + tests see exactly the same specs the tree presents. Computed once (a const can't
+## hold a derived value, so this is the canonical accessor; GROUPS mirrors it for callers).
+static func leaf_groups() -> Array:
+	var out := []
+	_collect_leaves(TREE, out)
+	return out
+
+static func _collect_leaves(nodes: Array, out: Array) -> void:
+	for node in nodes:
+		if is_leaf(node):
+			out.append([node["label"], node["specs"]])
+		else:
+			_collect_leaves(node["children"], out)
+
+
+## GROUPS — the flat leaf list (legacy shape: [label, [spec,...]]), derived from TREE. Kept so
+## existing callers (all_specs / count / morph-wiring / tests) are unchanged by the tree reshape.
+static var GROUPS: Array = leaf_groups()
 
 ## Per-slider value clamps by kind.
 const BIDIR_MIN := -1.0
@@ -143,25 +193,38 @@ const STEP := 0.02
 
 ## Some bilateral measure modifiers exist only as left/right pairs (e.g. arm/leg muscle is
 ## `l-...` and `r-...`, NOT a single midline modifier). To present ONE intuitive slider that
-## shapes BOTH sides symmetrically, a spec whose first token is "l-..." is expanded to the L
-## AND R modifier full_names. This map gives the registry-prefix each bare bilateral stem lives
-## under, so the lookup resolves the real full_names. (Both sides verified present in the
-## registry as `armslegs/l-...` and `armslegs/r-...`.)
+## shapes BOTH sides symmetrically, a bilateral spec is expanded to the L AND R modifier
+## full_names. Two spec forms are accepted (the prefix is GENERALIZED, not hardcoded to one
+## registry group — the design's cheek-prefix generalization, §3.1):
+##   1. A BARE bilateral stem ("l-upperarm-muscle") — no "/" — defaults to the armslegs/ group
+##      (where the limb-muscle/fat pairs live) and gets the "-decr|incr" suffix appended.
+##   2. An ALREADY-`<group>/`-PREFIXED left full_name ("cheek/l-cheek-bones-decr|incr") — its
+##      r- twin is paired within the SAME group via twin(). This reaches the cheek/ family (and
+##      any future /-prefixed bilateral family) without a hardcoded group constant.
 const BILATERAL_PREFIX := "armslegs/"
 
 ## Resolve a slider spec's full_name(s) to the ACTUAL registry modifier full_name(s) it drives.
-## Most specs are a single literal full_name. A bilateral stem ("l-upperarm-muscle") expands to
-## BOTH "armslegs/l-upperarm-muscle-decr|incr" and the "r-" twin, so one slider shapes both
-## arms/legs symmetrically. Returns a PackedStringArray (1 or 2 entries).
+## Most specs are a single literal full_name. A bilateral spec expands to BOTH the L and R
+## modifier full_names, so one slider shapes both sides symmetrically:
+##   - a bare stem ("l-upperarm-muscle") → "armslegs/l-…-decr|incr" + its r- twin;
+##   - a /-prefixed left full_name ("cheek/l-cheek-bones-decr|incr") → that name + twin() of it.
+## Returns a PackedStringArray (1 or 2 entries). A right-only or midline name returns as-is.
 static func resolve_full_names(spec_name: String) -> PackedStringArray:
 	var out := PackedStringArray()
 	if spec_name.begins_with("l-") and not spec_name.contains("/"):
-		# bilateral stem: drive left + right symmetric modifiers.
+		# bare bilateral stem: drive left + right symmetric modifiers under armslegs/.
 		var stem := spec_name.substr(2)   # drop the "l-"
 		out.append("%sl-%s-decr|incr" % [BILATERAL_PREFIX, stem])
 		out.append("%sr-%s-decr|incr" % [BILATERAL_PREFIX, stem])
-	else:
+		return out
+	# A /-prefixed LEFT full_name (e.g. "cheek/l-cheek-bones-decr|incr"): pair its r- twin within
+	# the SAME group. twin() flips l-↔r- at the path-segment boundary, generalizing past armslegs/.
+	var tw := twin(spec_name)
+	if tw != spec_name and spec_name.contains("/l-"):
 		out.append(spec_name)
+		out.append(tw)
+		return out
+	out.append(spec_name)
 	return out
 
 ## The contralateral MIRROR-application map (SYNTHESIS §1.3 / decision §2.3): given a registry
@@ -215,3 +278,58 @@ static func count() -> int:
 	for grp in GROUPS:
 		n += (grp[1] as Array).size()
 	return n
+
+
+# ---------------------------------------------------------------------------
+# TREE NAVIGATION (character-creator-ux.md §3 / §4). The contextual dock renders ONE level at
+# a time, addressed by a PATH of child indices from the root. These helpers resolve a path to
+# its node + child list so the dock never sees more than one level's children at once.
+# ---------------------------------------------------------------------------
+
+## The child nodes at a given PATH (a list of child-indices from the root). An empty path = the
+## top-level region list (the tree itself). A leaf node has no children → returns []. Returns the
+## raw node Array so the dock can read each child's "label", "key"/"specs" or "children".
+static func children_at(path: Array) -> Array:
+	var nodes: Array = TREE
+	for idx in path:
+		var i := int(idx)
+		if i < 0 or i >= nodes.size():
+			return []
+		var node: Dictionary = nodes[i]
+		if is_leaf(node):
+			return []   # a leaf has no child regions
+		nodes = node["children"]
+	return nodes
+
+
+## The node AT a path (the focused node), or {} for the root (empty path). Used for the
+## breadcrumb label + to decide whether the focused node is a leaf (show its specs) or an
+## intermediate (show its child regions).
+static func node_at(path: Array) -> Dictionary:
+	var nodes: Array = TREE
+	var node := {}
+	for idx in path:
+		var i := int(idx)
+		if i < 0 or i >= nodes.size():
+			return {}
+		node = nodes[i]
+		if is_leaf(node):
+			return node if idx == path[path.size() - 1] else {}
+		nodes = node["children"]
+	return node
+
+
+## The breadcrumb labels along a path (["Face", "Jaw & chin"] for the path into Jaw & chin).
+static func breadcrumb(path: Array) -> PackedStringArray:
+	var out := PackedStringArray()
+	var nodes: Array = TREE
+	for idx in path:
+		var i := int(idx)
+		if i < 0 or i >= nodes.size():
+			break
+		var node: Dictionary = nodes[i]
+		out.append(String(node["label"]))
+		if is_leaf(node):
+			break
+		nodes = node["children"]
+	return out

@@ -72,6 +72,7 @@ SUITES=(
   creator_glow_test
   creator_phase3a_test
   creator_phase3b_test
+  creator_tree_nav_test
   creator_phase5a_test
   creator_persistence_test
   morph_drag_test

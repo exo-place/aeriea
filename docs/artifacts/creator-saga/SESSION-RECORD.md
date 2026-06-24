@@ -69,6 +69,12 @@ unless the creator is un-shelved).
 
 ## The rage-list — the ACTUAL state per the user running the real app
 
+> This rage-list is the **final-day creator state only**. The complete, cross-session
+> set of every user-reported defect (creator, UI, text sandbox, movement/parkour, and
+> process), mined verbatim from the raw transcripts, lives in
+> [`DEFECT-COMPENDIUM.md`](DEFECT-COMPENDIUM.md). Do not mistake the list below for
+> complete.
+
 Despite green tests and the adversarial design rounds, the user ran the built app
 and found it still obviously broken. Recorded verbatim as the real state:
 

@@ -30,9 +30,8 @@ func _process(_dt: float) -> void:
 	if _done or _frame < 12:
 		return
 	_done = true
-	# Projection shell: open the Advanced popup (mirror toggle lives there now) and focus
-	# Face → Eyes & brow so the eye-color control is built into the dock.
-	_creator.call("_open_advanced")
+	# Projection shell: the mirror toggle is now a top-bar control (Phase E; the Advanced popup is
+	# dissolved). Focus Face → Eyes & brow so the eye-color control is built into the dock.
 	_creator.call("_focus_into", 0)   # Face
 	await get_tree().process_frame
 	_creator.call("_focus_into", 3)   # Eyes & brow (index 3 under Face)
@@ -40,7 +39,7 @@ func _process(_dt: float) -> void:
 
 	# (1) The UI with the mirror toggle + the eye-color control visible, default (brown) eyes.
 	var mirror_on: bool = bool(_creator.get("_mirror"))
-	var mirror_btn = _creator.get("_mirror_btn")
+	var mirror_btn = _creator.get("_mirror_check")
 	var eye_btn = _creator.get("_eye_color_btn")
 	print("phase5a_render: mirror default ON = %s; mirror_btn present = %s; eye_color_btn present = %s"
 		% [mirror_on, mirror_btn != null, eye_btn != null])

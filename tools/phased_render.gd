@@ -75,12 +75,17 @@ func _run() -> void:
 	await get_tree().process_frame
 	await _shoot("creator_history_human_labels")
 
-	# (d) The ADVANCED popup — the plain beyond-human toggle (no slider / %).
+	# (d) The beyond-human opt-in is now INLINE at the value (§8.4; the Advanced popup is dissolved
+	# — Phase E). Push a dial to its human edge so its inline "Allow beyond-human extremes" toggle
+	# appears under it.
 	_creator.call("_toggle_history_panel")   # close history
-	_creator.call("_open_advanced")
+	var bs = _creator.get("_body_state")
+	var caps = _creator.get("_caps")
+	bs.masculinity = float(caps.cap("masculinity", 0.0)[1])
+	_creator.call("_apply_state")
 	await get_tree().process_frame
 	await get_tree().process_frame
-	await _shoot("creator_advanced_plain_limit")
+	await _shoot("creator_inline_plain_limit")
 
 
 func _collect_text(n: Node, out: Array) -> void:

@@ -120,13 +120,11 @@ var _drag_handle: int = -1
 ## slider always drives both). The midline guard (twin(M) == M) suppresses a double-apply on
 ## midline modifiers, which are unaffected by the toggle.
 var _mirror: bool = true
-var _mirror_btn: CheckBox
 ## Androgynous-in-randomize opt-in (character-creator-ux.md §8.3). DEFAULT OFF: a random roll
 ## lands on a COHERENT feminine OR masculine presentation, never the androgynous 40–60 middle —
 ## androgynous-by-design is a deliberate pick, not mush to land on by accident. When ON, the
 ## androgynous bucket is added to the weighted roll (and the two androgynous archetypes seed it).
 var _allow_androgynous_random: bool = false
-var _androgynous_random_check: CheckBox
 
 ## A morph drag in progress: the picked render-vertex, its world hit position, and the
 ## accumulated modifier value-deltas (so ONE history node is committed on drag-end).
@@ -164,9 +162,14 @@ var _use_gpu_picker: bool = false
 var _value_labels: Dictionary = {}   ## field -> Label showing current value
 var _sliders: Dictionary = {}        ## field -> HSlider
 var _axis_spins: Dictionary = {}     ## field -> SpinBox (headline numeric entry, natural units)
-## The single "Allow beyond-human extremes" opt-in (§8.4) — a plain toggle, no amount slider and
-## no % readout (those were removed: the limit is one act, not a dial). Drives _set_extremeness(0/1).
-var _extreme_check: CheckBox
+## The "Allow beyond-human extremes" opt-in (§8.4) is surfaced INLINE AT THE VALUE, not as a
+## global popup checkbox: when a control's value reaches its human (extremeness-0) cap edge, a
+## small inline toggle appears ON THAT CONTROL. Each such toggle drives the SAME _set_extremeness
+## unlock (the mechanic is the one global scalar; only the placement is contextual). field ->
+## CheckButton for the pinned dials; modifier spec_name -> CheckButton for the dock rows. Hidden
+## until the value is at the edge; non-destructive (lowering never snaps — _set_extremeness).
+var _edge_optin_dials: Dictionary = {}     ## field -> inline CheckButton (pinned strip)
+var _edge_optin_rows: Dictionary = {}      ## spec_name -> inline CheckButton (dock)
 ## EYE COLOR (procedural iris_color uniform, §6.3): the live color + its picker widget. Drives
 ## BodyRig.set_eye_params({"iris_color": …}); no texture, no gaze change.
 var _eye_color: Color = BodyRig.EYE_PARAMS_DEFAULT["iris_color"]
@@ -197,7 +200,8 @@ var _dock_body: VBoxContainer         ## the dock's rebuilt contents (children /
 var _breadcrumb_box: HBoxContainer     ## the top-bar breadcrumb (rebuilt on focus change)
 var _gallery_panel: Control           ## the transient archetype gallery overlay (hidden default)
 var _create_menu: PopupMenu           ## the ☰ Create menu (gallery / randomize / open / save)
-var _advanced_popup: PopupPanel       ## plainly-labeled advanced toggles (shape-on-body, mirror, beyond-human)
+var _mirror_check: CheckButton        ## the top-bar Mirror toggle (symmetric edits; default on)
+var _androgynous_random_idx := -1     ## ☰ Create menu index of the checkable androgynous-random item
 
 # ---------------------------------------------------------------------------
 # Edit HISTORY — a branching undo TREE over BodyState dicts (HistoryTree). Every
@@ -247,8 +251,6 @@ var _restoring: bool = false
 
 var _history_list: VBoxContainer     ## the linear branch-nav node list (rebuilt on change)
 var _history_panel: Control          ## the whole history panel (hidden by default; toggled)
-var _undo_btn: Button                ## corner icon button
-var _redo_btn: Button                ## corner icon button
 var _status_lbl: Label               ## transient export/import toast (no persistent path text)
 var _legend_panel: Control           ## the controls legend (Ctrl hold-to-peek / tap-to-pin)
 var _legend_pinned: bool = false     ## tap-Ctrl pin state
@@ -951,8 +953,8 @@ func _end_handle_drag() -> void:
 ## CheckBox in sync without re-firing.
 func _set_mirror(on: bool) -> void:
 	_mirror = on
-	if _mirror_btn != null:
-		_mirror_btn.set_pressed_no_signal(on)
+	if _mirror_check != null:
+		_mirror_check.set_pressed_no_signal(on)
 
 
 ## Build the EYE-COLOR control (§6.3): a ColorPickerButton bound to the procedural `iris_color`
@@ -1249,16 +1251,17 @@ func _build_ui() -> void:
 	_build_contextual_dock(canvas)
 	_build_gallery(canvas)
 	_build_handle_overlay(canvas)
-	_build_advanced_popup(canvas)
 	# Ambient entry hint on the body (§7.4): one line, no dock at entry.
 	_build_entry_hint(canvas)
-	# Corner panels kept from before (undo/redo icons, history overlay, controls legend).
-	_build_undo_redo_corner(canvas)
+	# History overlay + controls legend. (The Advanced popup is DISSOLVED — Mirror is a top-bar
+	# toggle and the beyond-human opt-in is inline at the value, §8.4. The redundant top-right
+	# undo/redo icons are REMOVED — the single ⤺ History affordance + Ctrl-Z/Ctrl-Shift-Z cover it.)
 	_build_history_panel(canvas)
 	_build_legend_panel(canvas)
 	# Render the initial (no-focus) contextual surface: dock hidden, breadcrumb empty.
 	_refresh_dock()
 	_apply_state()
+	_refresh_all_edge_optins()
 	_refresh_history_panel()
 
 
@@ -1283,11 +1286,17 @@ func _build_top_bar(canvas: CanvasLayer) -> void:
 	_create_menu = create_btn.get_popup()
 	_create_menu.add_item("Start from a body…", 0)
 	_create_menu.add_item("Randomize", 1)
+	# Androgynous-in-randomize opt-in (§8.3) — a checkable item BESIDE Randomize (its natural home),
+	# default OFF. Was a row in the dissolved Advanced popup. CHECK_BUTTON so the on/off state reads.
+	_create_menu.add_check_item("Include androgynous in Randomize", 6)
+	_androgynous_random_idx = _create_menu.get_item_index(6)
+	_create_menu.set_item_checked(_androgynous_random_idx, _allow_androgynous_random)
+	_create_menu.set_item_tooltip(_androgynous_random_idx,
+		"Off (default): Randomize lands on a definite feminine or masculine body. On: it may also land androgynous.")
 	_create_menu.add_separator()
 	_create_menu.add_item("Open character…", 2)
 	_create_menu.add_item("Save image…", 3)
 	_create_menu.add_separator()
-	_create_menu.add_item("Advanced…", 4)
 	_create_menu.add_item("Reset to neutral", 5)
 	_create_menu.id_pressed.connect(_on_create_menu)
 	row.add_child(create_btn)
@@ -1304,6 +1313,15 @@ func _build_top_bar(canvas: CanvasLayer) -> void:
 	hist_btn.tooltip_text = "Show the edit history (H)"
 	hist_btn.pressed.connect(_toggle_history_panel)
 	row.add_child(hist_btn)
+
+	# Mirror (symmetric edits) — a plain, always-reachable top-bar toggle (§5.1), default ON. Was a
+	# row in the dissolved Advanced popup; it is a real labeled control, not buried behind a popup.
+	_mirror_check = CheckButton.new()
+	_mirror_check.text = "Mirror"
+	_mirror_check.button_pressed = _mirror
+	_mirror_check.tooltip_text = "When on, editing one side also shapes the other side symmetrically. Off = edit one side only."
+	_mirror_check.toggled.connect(func(on: bool) -> void: _set_mirror(on))
+	row.add_child(_mirror_check)
 
 	# Share (export) ↔ Open (import), side by side at the right.
 	var share_btn := Button.new()
@@ -1338,8 +1356,15 @@ func _on_create_menu(id: int) -> void:
 		1: _randomize_all()
 		2: _open_import_dialog()
 		3: _export_image(true)
-		4: _open_advanced()
 		5: _reset_all()
+		6: _toggle_androgynous_random()
+
+
+## Toggle the androgynous-in-randomize opt-in (§8.3) + reflect it in the checkable menu item.
+func _toggle_androgynous_random() -> void:
+	_allow_androgynous_random = not _allow_androgynous_random
+	if _create_menu != null and _androgynous_random_idx >= 0:
+		_create_menu.set_item_checked(_androgynous_random_idx, _allow_androgynous_random)
 
 
 ## Share (§8.1): one click, defaulting to image-with-embedded-history (the gallery thumbnail).
@@ -1347,70 +1372,78 @@ func _do_share() -> void:
 	_export_image(true)
 
 
-## Build (lazily) the ADVANCED popup — the plainly-labeled power toggles that have no region
-## locus: shape-on-the-body, mirror (symmetric edits), and the beyond-human range opt-in. Kept
-# out of the main surface (not a wall) but reachable; all DE-JARGONED (no "sculpt mode" /
-# "extremeness" nouns on the surface).
-func _build_advanced_popup(canvas: CanvasLayer) -> void:
-	_advanced_popup = PopupPanel.new()
-	canvas.add_child(_advanced_popup)
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 8)
-	vbox.custom_minimum_size = Vector2(340, 0)
-	_advanced_popup.add_child(vbox)
+# ---------------------------------------------------------------------------
+# INLINE BEYOND-HUMAN OPT-IN (§8.4). The single global extremeness/allow-extreme unlock is
+# surfaced AT THE VALUE, not as a global popup checkbox: a small CheckButton sits inline on every
+# headline dial + region row, HIDDEN until that control's value reaches its human (extremeness-0)
+# cap edge. Flipping it drives the SAME _set_extremeness unlock (the mechanic is the one global
+# scalar; only the placement is contextual). Non-destructive — lowering never snaps a value
+# (_set_extremeness). The string shares no noun with "Proportions" and never says "extremeness".
+# ---------------------------------------------------------------------------
 
-	var hdr := Label.new()
-	hdr.text = "Advanced shaping"
-	vbox.add_child(hdr)
-	vbox.add_child(HSeparator.new())
-
-	# On-body reshape is no longer a global MODE (Phase C, §5.2): grab-handles sprout on the
-	# focused region and a handle-drag reshapes — there is no "Shape on the body" toggle. A short
-	# explainer line stands in its place so the affordance is discoverable from here.
-	var handles_hint := Label.new()
-	handles_hint.add_theme_font_size_override("font_size", 10)
-	handles_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	handles_hint.text = "Focus a region (pick it in the breadcrumb) and drag its on-body handles to reshape it. Drag empty space to orbit. Esc defocuses."
-	vbox.add_child(handles_hint)
-
-	# Mirror (symmetric edits) — default on.
-	_mirror_btn = CheckBox.new()
-	_mirror_btn.text = "Mirror (symmetric edits)"
-	_mirror_btn.button_pressed = _mirror
-	_mirror_btn.tooltip_text = "When on, editing one side also shapes the other side symmetrically. Off = edit one side only."
-	_mirror_btn.toggled.connect(func(on: bool) -> void: _set_mirror(on))
-	vbox.add_child(_mirror_btn)
-
-	# Allow androgynous bodies from Randomize (§8.3) — DEFAULT OFF, so a roll lands on a definite
-	# feminine/masculine presentation. Opt in for androgynous-by-random.
-	_androgynous_random_check = CheckBox.new()
-	_androgynous_random_check.text = "Include androgynous in Randomize"
-	_androgynous_random_check.button_pressed = _allow_androgynous_random
-	_androgynous_random_check.tooltip_text = "Off (default): Randomize lands on a definite feminine or masculine body. On: it may also land androgynous."
-	_androgynous_random_check.toggled.connect(func(on: bool) -> void: _allow_androgynous_random = on)
-	vbox.add_child(_androgynous_random_check)
-
-	vbox.add_child(HSeparator.new())
-	# Beyond-human range opt-in (§8.4) — ONE plain toggle, no "extremeness" / "%" / "Realism" noun
-	# on the surface. ON widens every control toward its hard limit; OFF returns to human ranges.
-	# Non-destructive: lowering it never snaps existing values (the ratchet, _set_extremeness).
-	# There is NO amount slider and NO percent readout — the opt-in is a single act, not a dial.
-	_extreme_check = CheckBox.new()
-	_extreme_check.text = "Allow beyond-human extremes"
-	_extreme_check.button_pressed = _caps.extremeness > 0.0
-	_extreme_check.tooltip_text = "Widen every control's range past its human/tasteful limit. Lowering it never snaps existing values."
-	_extreme_check.toggled.connect(func(on: bool) -> void: _set_extremeness(1.0 if on else 0.0))
-	vbox.add_child(_extreme_check)
-	var ex_hint := Label.new()
-	ex_hint.add_theme_font_size_override("font_size", 10)
-	ex_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	ex_hint.text = "Lets a control go past its human range. Turning it back off never changes what you already made."
-	vbox.add_child(ex_hint)
+## True when `value` is at/pushing the control's HUMAN (extremeness-0) cap edge — within a small
+## tolerance of either default-interval endpoint. This is what makes the inline opt-in appear.
+func _at_human_edge(control: String, value: float) -> bool:
+	var di: Array = _caps.cap(control, 0.0)   # the default (human) interval, extremeness 0
+	var lo := float(di[0])
+	var hi := float(di[1])
+	var span := maxf(hi - lo, 1e-6)
+	var tol := maxf(span * 0.02, 1e-4)        # within 2% of an endpoint counts as "at the edge"
+	return value <= lo + tol or value >= hi - tol
 
 
-func _open_advanced() -> void:
-	if _advanced_popup != null:
-		_advanced_popup.popup_centered()
+## Make a fresh inline beyond-human opt-in toggle (§8.4). Hidden by default; shown by
+## _refresh_edge_optin when the bound value reaches its human edge. Flipping it ON unlocks the
+## global widening; flipping it OFF returns to human ranges (non-destructive). Stays checked while
+## the unlock is on (so it reads the live state, not just this control).
+func _make_edge_optin() -> CheckButton:
+	var t := CheckButton.new()
+	t.text = "Allow beyond-human extremes"
+	t.add_theme_font_size_override("font_size", 9)
+	t.tooltip_text = "This value is at its human limit. Allow it to go further. Turning it back off never changes what you already made."
+	t.button_pressed = _caps.extremeness > 0.0
+	t.visible = false
+	t.toggled.connect(func(on: bool) -> void: _set_extremeness(1.0 if on else 0.0))
+	return t
+
+
+## Show/hide a headline dial's inline opt-in based on whether its value is at the human edge. The
+## toggle's checked state always mirrors the live global unlock.
+func _refresh_dial_edge_optin(field: String) -> void:
+	var t = _edge_optin_dials.get(field, null)
+	if t == null:
+		return
+	(t as CheckButton).set_pressed_no_signal(_caps.extremeness > 0.0)
+	(t as CheckButton).visible = _caps.extremeness > 0.0 \
+		or _at_human_edge(field, float(_body_state.get(field)))
+
+
+## Show/hide a region row's inline opt-in based on whether any of its bound modifiers is at the
+## human edge. Checked state mirrors the live global unlock.
+func _refresh_row_edge_optin(spec_name: String) -> void:
+	var t = _edge_optin_rows.get(spec_name, null)
+	if t == null:
+		return
+	var e = _modifier_sliders.get(spec_name, null)
+	if e == null:
+		(t as CheckButton).visible = false
+		return
+	(t as CheckButton).set_pressed_no_signal(_caps.extremeness > 0.0)
+	var at_edge := false
+	for fn in (e["full_names"] as PackedStringArray):
+		if _at_human_edge(fn, float(_body_state.modifiers.get(fn, 0.0))):
+			at_edge = true
+			break
+	(t as CheckButton).visible = _caps.extremeness > 0.0 or at_edge
+
+
+## Refresh EVERY inline opt-in (dials + currently-built rows) — called after any state change so an
+## at-edge value reveals its opt-in and an away-from-edge one hides it.
+func _refresh_all_edge_optins() -> void:
+	for field in _edge_optin_dials:
+		_refresh_dial_edge_optin(field)
+	for spec_name in _edge_optin_rows:
+		_refresh_row_edge_optin(spec_name)
 
 
 # ---------------------------------------------------------------------------
@@ -1610,6 +1643,8 @@ func _refresh_dock() -> void:
 	# leaf's rows (they're freed above), so reset the map — only the focused leaf's sliders are
 	# live. The MODEL (BodyState.modifiers) is unaffected; restore/randomize work off the model.
 	_modifier_sliders.clear()
+	# The inline beyond-human opt-ins for the prior leaf's rows were freed above too; drop refs.
+	_edge_optin_rows.clear()
 	# The Breast size widgets live in the dock too; freed above, so drop the stale refs.
 	_breast_size_slider = null
 	_breast_size_spin = null
@@ -1785,41 +1820,17 @@ func _pick_archetype(state: Dictionary, name: String) -> void:
 	_refresh_history_panel()
 
 
-## UNDO / REDO as compact ICON buttons in the TOP-RIGHT corner (a different corner from
-## the sliders), out of the main panel. Glyph arrows keep them small; tooltips name the
-## hotkeys. (Ctrl-Z / Ctrl-Shift-Z still drive them — see _unhandled_input.)
-func _build_undo_redo_corner(canvas: CanvasLayer) -> void:
-	var box := HBoxContainer.new()
-	box.add_theme_constant_override("separation", 4)
-	box.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	box.position = Vector2(-96, 16)
-	box.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	canvas.add_child(box)
-
-	_undo_btn = Button.new()
-	_undo_btn.text = "↶"   # ↶ undo glyph
-	_undo_btn.tooltip_text = "Undo (Ctrl+Z)"
-	_undo_btn.custom_minimum_size = Vector2(40, 40)
-	_undo_btn.pressed.connect(_do_undo)
-	box.add_child(_undo_btn)
-
-	_redo_btn = Button.new()
-	_redo_btn.text = "↷"   # ↷ redo glyph
-	_redo_btn.tooltip_text = "Redo (Ctrl+Shift+Z)"
-	_redo_btn.custom_minimum_size = Vector2(40, 40)
-	_redo_btn.pressed.connect(_do_redo)
-	box.add_child(_redo_btn)
-
-
-## The history panel — its OWN corner panel (BOTTOM-LEFT), HIDDEN by default, toggled by the
-## main-panel button or the H hotkey. The body is a ChatGPT-style pseudo-linear branch nav
-## (see _refresh_history_panel): the root→current spine rendered LINEARLY top-to-bottom, with
-## a `‹ i/n ›` branch selector at any junction. No indentation, no diagonal tree.
+## The history panel — a transient overlay anchored TOP-LEFT (below the top bar), HIDDEN by
+## default, toggled by the ⤺ History top-bar affordance or the H hotkey. Anchored top-left and
+## GROWING DOWN with a bounded inner scroll so it never reaches — and so never overlaps — the
+## bottom "Whole body" pinned strip (the de-overlap fix; the strip owns the bottom edge). The
+## body is a ChatGPT-style pseudo-linear branch nav (see _refresh_history_panel): the root→current
+## spine rendered LINEARLY top-to-bottom, with a `‹ i/n ›` branch selector at any junction.
 func _build_history_panel(canvas: CanvasLayer) -> void:
 	_history_panel = PanelContainer.new()
-	_history_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_history_panel.position = Vector2(16, -16)
-	_history_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_history_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_history_panel.position = Vector2(16, 56)   # below the top bar; grows DOWN, away from the strip
+	_history_panel.grow_vertical = Control.GROW_DIRECTION_END
 	_history_panel.custom_minimum_size = Vector2(360, 0)
 	_history_panel.visible = false   # HIDDEN by default
 	canvas.add_child(_history_panel)
@@ -1974,10 +1985,6 @@ func _refresh_history_panel() -> void:
 	# the autosave always reflects the live character. Guarded by _persistence_armed so the
 	# build-time + restore-time calls don't clobber a saved character before it loads.
 	_autosave()
-	if _undo_btn != null:
-		_undo_btn.disabled = not _history.can_undo()
-	if _redo_btn != null:
-		_redo_btn.disabled = not _history.can_redo()
 	if _history_list == null:
 		return
 	for c in _history_list.get_children():
@@ -2176,6 +2183,12 @@ func _build_pinned_dial(parent: HBoxContainer, field: String, _lo: float, _hi: f
 	rnd.pressed.connect(func() -> void: _randomize_axis(field))
 	vrow.add_child(rnd)
 
+	# Inline beyond-human opt-in (§8.4): hidden until this dial's value reaches its human edge.
+	var optin := _make_edge_optin()
+	cell.add_child(optin)
+	_edge_optin_dials[field] = optin
+	_refresh_dial_edge_optin(field)
+
 
 # ---------------------------------------------------------------------------
 # DATA-DRIVEN per-region value-nodes (RegionSliders). Each is one row bound to a RegionSliders
@@ -2309,9 +2322,15 @@ func _build_modifier_row(parent: VBoxContainer, spec_name: String, display: Stri
 		"full_names": full_names, "kind": kind, "display": display,
 	}
 	parent.add_child(row)
+	# Inline beyond-human opt-in (§8.4): a thin line under the row, hidden until one of this
+	# control's modifiers reaches its human edge. Drives the same global unlock.
+	var optin := _make_edge_optin()
+	parent.add_child(optin)
+	_edge_optin_rows[spec_name] = optin
 	# Drive the slider's min/max from the live cap interval (conservative intersection of
 	# the resolved sides). No active gesture at build time → settled-value interval.
 	_apply_modifier_slider_bounds(spec_name)
+	_refresh_row_edge_optin(spec_name)
 
 
 ## Write `v` into BodyState.modifiers for every resolved full_name (clearing near-zero so a
@@ -2409,6 +2428,7 @@ func _write_back_modifier_widget(spec_name: String, slider: HSlider, new_value: 
 	var e = _modifier_sliders.get(spec_name, null)
 	if e != null:
 		(e["spin"] as SpinBox).set_value_no_signal(_modifier_to_display(new_value, bool(e["is_bidir"])))
+	_refresh_row_edge_optin(spec_name)
 
 
 ## Set a headline-axis slider's bounds to its live cap interval (held during a gesture,
@@ -2437,6 +2457,7 @@ func _write_back_axis_widget(field: String, slider: HSlider, new_value: float) -
 	var spin = _axis_spins.get(field, null)
 	if spin != null:
 		(spin as SpinBox).set_value_no_signal(new_value)
+	_refresh_dial_edge_optin(field)
 
 
 ## Sync a single modifier's bound region slider to a clamped sculpt-driven value WITHOUT
@@ -2609,6 +2630,7 @@ func _apply_state() -> void:
 		(_value_labels[field] as Label).text = _format_value(field)
 	for field in _axis_spins:
 		(_axis_spins[field] as SpinBox).set_value_no_signal(float(_body_state.get(field)))
+	_refresh_all_edge_optins()
 
 
 ## RESET-TO-NEUTRAL: branch from the ROOT (HistoryTree.reset_to), and be IDEMPOTENT — a
@@ -2669,14 +2691,13 @@ func _randomize_axis(field: String) -> void:
 func _set_extremeness(e: float) -> void:
 	_caps.abort_gesture()
 	_caps.extremeness = clampf(e, 0.0, 1.0)
-	# Keep the opt-in toggle in sync without re-firing. (No amount slider / % readout — §8.4.)
-	if _extreme_check != null:
-		_extreme_check.set_pressed_no_signal(_caps.extremeness > 0.0)
 	# All-controls bounds sweep: every slider's reachable range now reflects the new extremeness
 	# (widened to still contain the current stored value, so nothing snaps).
 	for field in _sliders:
 		_apply_axis_slider_bounds(field, _sliders[field] as HSlider)
 	_recompute_modifier_slider_bounds()
+	# The inline opt-ins (§8.4) reflect the live unlock: checked = on; visible while at edge OR on.
+	_refresh_all_edge_optins()
 
 
 ## Presentation buckets for coherent randomize (§8.3). Each bucket clamps the `masculinity` axis
@@ -2915,8 +2936,8 @@ func _apply_imported(res: Dictionary, verb: String) -> void:
 	# loaded cap envelope. Set the scalar directly (not via _set_extremeness, which aborts the
 	# gesture again + sweeps before the body is loaded); the widgets sync below.
 	_caps.extremeness = clampf(float(res.get("extremeness", 0.0)), 0.0, 1.0)
-	if _extreme_check != null:
-		_extreme_check.set_pressed_no_signal(_caps.extremeness > 0.0)
+	# The inline beyond-human opt-ins (§8.4) reflect the loaded unlock; refresh after the body
+	# restores below (the at-edge test reads the restored values) — done via _apply_state there.
 	# Replace the history tree: a with-history payload carries the whole branching tree; a
 	# current-only payload seeds a fresh single-node tree from the body (so undo still works).
 	var tree = res.get("tree", null)

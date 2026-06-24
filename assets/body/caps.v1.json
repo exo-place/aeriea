@@ -294,6 +294,13 @@
 			"hard_min": 50.0,
 			"hard_max": 230.0,
 			"neutral": 166.6
+		},
+		"breast_size": {
+			"a": 0.0,
+			"b": 1.0,
+			"hard_min": 0.0,
+			"hard_max": 1.0,
+			"neutral": 0.5
 		}
 	}
 }

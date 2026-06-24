@@ -98,6 +98,18 @@ var proportions: float = 0.5
 ## (≈166.6 cm), read from the detail-library index. Default = base_height_cm if the library
 ## is present, else DEFAULT_HEIGHT_CM. Clamped to [MIN_HEIGHT_CM, MAX_HEIGHT_CM].
 var height_cm: float = 166.589
+## Breast CUP SIZE, 0 … 1 (default 0.5 = average / the neutral base cup), the GENUINE apparent-
+## size axis (character-creator-ux.md §8.2; -and-body §5 upgrade — overturns "size via the volume
+## axis", which is lift). Drives the MakeHuman BreastSize macrovar: the breast cup factor-cube
+## (`breast/female-…-{min,average,max}cup-…firmness.target`, 216 targets) by the §1.3 factor
+## PRODUCT — gender(female) × age × muscle × weight × cup × firmness. 0 = full mincup, 0.5 =
+## average (base, no morph), 1 = full maxcup. The cube is FEMALE-only (no male cup targets exist),
+## so the gender factor fades cup size out on masculine bodies — anatomically correct. Firmness is
+## held at neutral (averagefirmness → 0 weight) until/unless a firmness axis is exposed.
+var breast_size: float = 0.5
+## Breast FIRMNESS, 0 … 1 (default 0.5 = average / neutral). The MakeHuman BreastFirmness macrovar
+## (the same 216-cube's firmness factor). Held neutral by default; reserved for a future axis.
+var breast_firmness: float = 0.5
 
 ## The DETAIL ENVELOPE (body-parameterization.md §3, Slice B): a SPARSE generic map,
 ## modifier `fullName` -> value. An absent key means NEUTRAL (the base mesh). Keys are the
@@ -227,6 +239,12 @@ const WEIGHT_TOKENS := {"minweight": true, "averageweight": true, "maxweight": t
 ## proportions cube targets carry one of {ideal,uncommon}proportions (there is NO
 ## regularproportions target — that anchor IS the base mesh, contributing no morph).
 const PROPORTIONS_TOKENS := {"idealproportions": true, "uncommonproportions": true}
+## Breast cup-size + firmness factor tokens (verified lib/targets.py `_cat_data`: breastsize ->
+## {min,average,max}cup, breastfirmness -> {min,average,max}firmness). Like the other macro axes
+## the `average*` anchor carries no dedicated target combination (avg/avg has no file), so at
+## neutral (cup=firmness=0.5) the cube contributes nothing — the base mesh IS the average cup.
+const BREASTSIZE_TOKENS := {"mincup": true, "averagecup": true, "maxcup": true}
+const BREASTFIRMNESS_TOKENS := {"minfirmness": true, "averagefirmness": true, "maxfirmness": true}
 ## Race is pinned to caucasian (the base mesh ethnicity; race axis is out of scope), so the
 ## caucasian race-cube targets carry race factor val 1.0; asian/african cubes are not
 ## imported. The `universal-` cube targets carry NO race token (universal across race).
@@ -396,6 +414,22 @@ func _proportions_vals() -> Dictionary:
 		"uncommonproportions": maxf(0.0, 1.0 - p * 2.0),
 	}
 
+## Breast cup-size anchor vals: {min,average,max}cup from the 2× split about the midpoint
+## (verbatim apps/human.py _setBreastSizeVals). breast_size 0..1: 0=full mincup, 0.5=base
+## (averagecup, no morph), 1=full maxcup.
+func _breastsize_vals() -> Dictionary:
+	var s := clampf(breast_size, 0.0, 1.0)
+	var mx := maxf(0.0, s * 2.0 - 1.0)
+	var mn := maxf(0.0, 1.0 - s * 2.0)
+	return {"maxcup": mx, "mincup": mn, "averagecup": 1.0 - (mx + mn)}
+
+## Breast firmness anchor vals: {min,average,max}firmness (verbatim _setBreastFirmnessVals).
+func _breastfirmness_vals() -> Dictionary:
+	var fv := clampf(breast_firmness, 0.0, 1.0)
+	var mx := maxf(0.0, fv * 2.0 - 1.0)
+	var mn := maxf(0.0, 1.0 - fv * 2.0)
+	return {"maxfirmness": mx, "minfirmness": mn, "averagefirmness": 1.0 - (mx + mn)}
+
 ## Decode a macro-cube target filename (universal muscle/weight cube, caucasian race cube,
 ## OR proportions cube), e.g. "macrodetails/universal-male-old-maxmuscle-maxweight.target",
 ## "macrodetails/caucasian-female-child.target", or
@@ -412,6 +446,8 @@ static func _decode_macro_factors(rel_path: String) -> Dictionary:
 		elif MUSCLE_TOKENS.has(tok): out["muscle"] = tok
 		elif WEIGHT_TOKENS.has(tok): out["weight"] = tok
 		elif PROPORTIONS_TOKENS.has(tok): out["proportions"] = tok
+		elif BREASTSIZE_TOKENS.has(tok): out["breastsize"] = tok
+		elif BREASTFIRMNESS_TOKENS.has(tok): out["breastfirmness"] = tok
 	return out
 
 ## The factor-PRODUCT weight for one macro-cube target, given the anchor-val maps. weight =
@@ -420,7 +456,7 @@ static func _decode_macro_factors(rel_path: String) -> Dictionary:
 ## (caucasian=1, asian/african=0) — a non-caucasian race target gets weight 0 (not imported
 ## anyway). A category absent from the filename contributes 1 (e.g. the caucasian race cube
 ## omits muscle/weight; the universal cube omits race).
-func _universal_target_weight(rel_path: String, gv: Dictionary, av: Dictionary, mv: Dictionary, wv: Dictionary, pv: Dictionary) -> float:
+func _universal_target_weight(rel_path: String, gv: Dictionary, av: Dictionary, mv: Dictionary, wv: Dictionary, pv: Dictionary, bsv: Dictionary, bfv: Dictionary) -> float:
 	var f := _decode_macro_factors(rel_path)
 	var prod := 1.0
 	if f.has("race"): prod *= (CAUCASIAN_VAL if f["race"] == "caucasian" else 0.0)
@@ -429,6 +465,8 @@ func _universal_target_weight(rel_path: String, gv: Dictionary, av: Dictionary, 
 	if f.has("muscle"): prod *= float(mv[f["muscle"]])
 	if f.has("weight"): prod *= float(wv[f["weight"]])
 	if f.has("proportions"): prod *= float(pv[f["proportions"]])
+	if f.has("breastsize"): prod *= float(bsv[f["breastsize"]])
+	if f.has("breastfirmness"): prod *= float(bfv[f["breastfirmness"]])
 	return prod
 
 # ---------------------------------------------------------------------------
@@ -478,6 +516,8 @@ func to_blend_weights() -> Dictionary:
 	var mv := _muscle_vals()
 	var wv := _weight_vals()
 	var pv := _proportions_vals()
+	var bsv := _breastsize_vals()
+	var bfv := _breastfirmness_vals()
 	# Every macro-cube target (universal muscle/weight cube + caucasian race cube + the FULL
 	# proportions cube gender×age×muscle×weight×{ideal,uncommon}) is weighted by the SAME
 	# §1.3 factor PRODUCT. The proportions cube targets simply carry one extra proportions
@@ -486,7 +526,7 @@ func to_blend_weights() -> Dictionary:
 	# heavy old male combines the OLD/MAX-WEIGHT/MALE proportions targets, not a female-young
 	# stand-in.
 	for rel in DetailLibrary.paths_of_kind("macro"):
-		var tw := _universal_target_weight(rel, gv, av, mv, wv, pv)
+		var tw := _universal_target_weight(rel, gv, av, mv, wv, pv, bsv, bfv)
 		if tw > 1e-6:
 			w[rel] = tw
 
@@ -849,6 +889,8 @@ func to_dict() -> Dictionary:
 		"weight": weight,
 		"proportions": proportions,
 		"height_cm": height_cm,
+		"breast_size": breast_size,
+		"breast_firmness": breast_firmness,
 	}
 	# The detail envelope (Slice B): only serialized when NON-EMPTY, so a neutral body
 	# stays a tiny dict. Sorted-key copy for byte-stable diffs / replay.
@@ -869,6 +911,8 @@ static func from_dict(d: Dictionary) -> BodyState:
 	bs.weight = float(d.get("weight", 100.0))
 	bs.proportions = float(d.get("proportions", 0.5))
 	bs.height_cm = float(d.get("height_cm", DEFAULT_HEIGHT_CM))
+	bs.breast_size = float(d.get("breast_size", 0.5))
+	bs.breast_firmness = float(d.get("breast_firmness", 0.5))
 	var m = d.get("modifiers", {})
 	if typeof(m) == TYPE_DICTIONARY:
 		for k in m:

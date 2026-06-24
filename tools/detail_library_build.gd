@@ -69,6 +69,14 @@ const OUT_INDEX := "res://assets/body/base_body_detail.index.json"
 ## is retired). Height/race cubes stay excluded (see header / §4).
 const MACRO_UNIVERSAL_DIR := "macrodetails"
 const MACRO_PROPORTIONS_DIR := "macrodetails/proportions"
+## The BREAST CUP-SIZE factor-cube (character-creator-ux.md §8.2 / -and-body §5 upgrade): the
+## 216-target macro cube `breast/female-<age>-<muscle>-<weight>-<cup>-<firmness>.target`, the
+## ACTUAL apparent-size control (overturning the prior "drive size via the volume axis" deferral
+## — the volume axis is lift, not size). Composed by the SAME §1.3 factor PRODUCT as the other
+## macro cubes (gender female × age × muscle × weight × breastsize{cup} × breastfirmness). The 8
+## breast-SHAPE targets (breast-dist/point/trans/volume-vert, nipple-*) are NOT here — they are
+## imported by the detail-target path (registry-referenced bidirectional modifiers).
+const MACRO_BREAST_DIR := "breast"
 
 
 func _ready() -> void:
@@ -268,6 +276,19 @@ func _collect_macro_cube(data_root: String) -> Array:
 				out.append("%s/%s" % [MACRO_PROPORTIONS_DIR, pname])
 			pname = pd.get_next()
 		pd.list_dir_end()
+	# the BREAST CUP-SIZE factor-cube: every female-<…>cup<…>firmness target in targets/breast/.
+	# Only the cup-cube files (which carry a cup token); the 8 shape targets have no cup token and
+	# are imported via the detail-target path, so the cup-token guard cleanly separates them.
+	var bdir := data_root.path_join("targets").path_join(MACRO_BREAST_DIR)
+	var bd := DirAccess.open(bdir)
+	if bd != null:
+		bd.list_dir_begin()
+		var bname := bd.get_next()
+		while bname != "":
+			if not bd.current_is_dir() and bname.ends_with(".target") and bname.contains("cup"):
+				out.append("%s/%s" % [MACRO_BREAST_DIR, bname])
+			bname = bd.get_next()
+		bd.list_dir_end()
 	return out
 
 

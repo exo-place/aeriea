@@ -93,6 +93,12 @@ var _sculpt_mode: bool = false
 ## midline modifiers, which are unaffected by the toggle.
 var _mirror: bool = true
 var _mirror_btn: CheckBox
+## Androgynous-in-randomize opt-in (character-creator-ux.md §8.3). DEFAULT OFF: a random roll
+## lands on a COHERENT feminine OR masculine presentation, never the androgynous 40–60 middle —
+## androgynous-by-design is a deliberate pick, not mush to land on by accident. When ON, the
+## androgynous bucket is added to the weighted roll (and the two androgynous archetypes seed it).
+var _allow_androgynous_random: bool = false
+var _androgynous_random_check: CheckBox
 var _sculpt_btn: Button
 var _sculpt_state_lbl: Label     ## live shape-on-body state indicator next to the toggle
 
@@ -198,6 +204,12 @@ var _history: HistoryTree
 ## record ONE node per settled change, not one per pixel.
 var _drag_pending: Dictionary = {}   ## field -> bool (a drag is in progress)
 var _suspend_commit: bool = false    ## true while applying a restored state (no commit)
+## True while a BULK value-set is in progress (global randomize): _apply_state() — the full
+## 14,517-vert CPU morph bake + picker/glow refresh, the interactive hot path — is SKIPPED so a
+## whole-body randomize sets every value-node in one shot and bakes ONCE at the end, instead of
+## re-baking per sampled axis (the per-axis bake was the seconds-long randomize FREEZE). The
+## bulk op clears this flag and calls _apply_state() exactly once before committing.
+var _suspend_apply: bool = false
 ## True while a RAW restore/load is rewriting widgets (§3.2 paths 6/7). Setting a slider's
 ## min/max while tightening the cap interval below the prior value makes Godot's Range
 ## clamp-and-EMIT value_changed; the live capped callback would then WRITE a stepped value into
@@ -802,6 +814,92 @@ func _build_eye_color_ui(parent: VBoxContainer) -> void:
 	parent.add_child(row)
 
 
+## The live Breast size widgets (rebuilt with the dock; nil when Chest & breasts is not focused).
+var _breast_size_slider: HSlider
+var _breast_size_spin: SpinBox
+
+## Build the genuine "Breast size" value-node (§8.2 — the imported MakeHuman cup cube). This is a
+## BodyState FIELD (`breast_size`, 0..1), driven through the same apply_capped choke as the headline
+## axes — NOT a registry modifier (the cup cube is a macrovar, like muscle/weight). Displayed
+## 0..100 small→large. Distinct from "lift" (the volume-vert axis) which stays a shape control.
+func _build_breast_size_row(parent: VBoxContainer) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 3)
+	var name_lbl := Label.new()
+	name_lbl.text = "breast size"
+	name_lbl.custom_minimum_size = Vector2(94, 0)
+	name_lbl.add_theme_font_size_override("font_size", 11)
+	row.add_child(name_lbl)
+	var lo_lbl := Label.new()
+	lo_lbl.text = "small"
+	lo_lbl.custom_minimum_size = Vector2(44, 0)
+	lo_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lo_lbl.add_theme_font_size_override("font_size", 9)
+	row.add_child(lo_lbl)
+	var slider := HSlider.new()
+	slider.min_value = 0.0
+	slider.max_value = 1.0
+	slider.step = 0.01
+	slider.value = _body_state.breast_size
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.custom_minimum_size = Vector2(70, 0)
+	slider.value_changed.connect(func(v: float) -> void:
+		if _restoring:
+			return
+		var one_write := not bool(_drag_pending.get("__breast_size__", false))
+		if one_write:
+			_caps.start_gesture()
+		var cur := _body_state.breast_size
+		var nv: float = _caps.apply_capped("breast_size", v, cur)
+		_body_state.breast_size = nv
+		_apply_state()
+		slider.set_value_no_signal(nv)
+		if _breast_size_spin != null:
+			_breast_size_spin.set_value_no_signal(nv * 100.0)
+		if one_write:
+			_caps.end_gesture()
+		if one_write and not _suspend_commit:
+			_commit_axis("breast_size", nv, "breast size = %d" % int(round(nv * 100.0))))
+	slider.drag_started.connect(func() -> void:
+		_drag_pending["__breast_size__"] = true
+		_caps.start_gesture())
+	slider.drag_ended.connect(func(changed: bool) -> void:
+		_drag_pending["__breast_size__"] = false
+		_caps.end_gesture()
+		if changed and not _suspend_commit:
+			_commit_axis("breast_size", _body_state.breast_size, "breast size = %d" % int(round(_body_state.breast_size * 100.0))))
+	row.add_child(slider)
+	var hi_lbl := Label.new()
+	hi_lbl.text = "large"
+	hi_lbl.custom_minimum_size = Vector2(44, 0)
+	hi_lbl.add_theme_font_size_override("font_size", 9)
+	row.add_child(hi_lbl)
+	var spin := SpinBox.new()
+	spin.min_value = 0.0
+	spin.max_value = 100.0
+	spin.step = 1.0
+	spin.custom_minimum_size = Vector2(56, 0)
+	spin.add_theme_font_size_override("font_size", 10)
+	spin.set_value_no_signal(_body_state.breast_size * 100.0)
+	spin.value_changed.connect(func(disp: float) -> void:
+		if _restoring:
+			return
+		_caps.start_gesture()
+		var cur := _body_state.breast_size
+		var nv: float = _caps.apply_capped("breast_size", disp / 100.0, cur)
+		_body_state.breast_size = nv
+		_apply_state()
+		spin.set_value_no_signal(nv * 100.0)
+		slider.set_value_no_signal(nv)
+		_caps.end_gesture()
+		if not _suspend_commit:
+			_commit_axis("breast_size", nv, "breast size = %d" % int(round(nv * 100.0))))
+	row.add_child(spin)
+	parent.add_child(row)
+	_breast_size_slider = slider
+	_breast_size_spin = spin
+
+
 ## Set the procedural iris color (§6.3): drive the eye shader's `iris_color` uniform via the
 ## BodyRig API and keep the picker widget in sync without re-firing. Gaze is left alone.
 func _set_eye_color(c: Color) -> void:
@@ -1115,6 +1213,15 @@ func _build_advanced_popup(canvas: CanvasLayer) -> void:
 	_mirror_btn.toggled.connect(func(on: bool) -> void: _set_mirror(on))
 	vbox.add_child(_mirror_btn)
 
+	# Allow androgynous bodies from Randomize (§8.3) — DEFAULT OFF, so a roll lands on a definite
+	# feminine/masculine presentation. Opt in for androgynous-by-random.
+	_androgynous_random_check = CheckBox.new()
+	_androgynous_random_check.text = "Include androgynous in Randomize"
+	_androgynous_random_check.button_pressed = _allow_androgynous_random
+	_androgynous_random_check.tooltip_text = "Off (default): Randomize lands on a definite feminine or masculine body. On: it may also land androgynous."
+	_androgynous_random_check.toggled.connect(func(on: bool) -> void: _allow_androgynous_random = on)
+	vbox.add_child(_androgynous_random_check)
+
 	vbox.add_child(HSeparator.new())
 	# Beyond-human range opt-in (the global cap-widening unlock, plainly named — §8.4). No
 	# "extremeness" / "Realism" noun on the surface. The 0..1 slider stays as the amount.
@@ -1288,6 +1395,9 @@ func _refresh_dock() -> void:
 	# leaf's rows (they're freed above), so reset the map — only the focused leaf's sliders are
 	# live. The MODEL (BodyState.modifiers) is unaffected; restore/randomize work off the model.
 	_modifier_sliders.clear()
+	# The Breast size widgets live in the dock too; freed above, so drop the stale refs.
+	_breast_size_slider = null
+	_breast_size_spin = null
 	var bc := RegionSlidersScript.breadcrumb(_focus_path)
 	var title := Label.new()
 	title.text = String(bc[bc.size() - 1]) if bc.size() > 0 else "Body"
@@ -1302,6 +1412,10 @@ func _refresh_dock() -> void:
 		var specs: Array = node["specs"]
 		if String(node.get("key", "")) == "eyes_brow":
 			_build_eye_color_ui(_dock_body)
+		# Chest & breasts gets the GENUINE Breast size axis (§8.2, the imported cup cube) — a
+		# field-backed value-node (BodyState.breast_size), distinct from the honest "lift" axis.
+		if String(node.get("key", "")) == "chest_breasts":
+			_build_breast_size_row(_dock_body)
 		if specs.is_empty() and String(node.get("key", "")) != "eyes_brow":
 			var none := Label.new()
 			none.text = "No named controls here yet — shape it on the body."
@@ -2250,6 +2364,11 @@ func _format_value(field: String) -> String:
 ## light the morphed surface wrongly (blotches / inside-out). The CPU bake fixes that
 ## (BodyState.bake_morphed_normals). Only runs on slider changes, so it's cheap.
 func _apply_state() -> void:
+	# A bulk value-set (global randomize) suppresses the per-value bake: every sampled axis would
+	# otherwise re-run the full CPU morph bake + picker/glow refresh (the interactive hot path),
+	# which is what made randomize FREEZE for seconds. The bulk op bakes ONCE on completion.
+	if _suspend_apply:
+		return
 	if _rig != null and _rig.mesh_instance != null:
 		# Route through the rig's correct-normals CPU morph bake (the same path the
 		# in-game skinned body uses). Godot's octahedral blendshape-normal storage can't
@@ -2340,34 +2459,122 @@ func _set_extremeness(e: float) -> void:
 	_recompute_modifier_slider_bounds()
 
 
-## GLOBAL randomize (§2.3): randomize every headline axis and region control within the live
-## cap, deterministically. Suspends per-control commits and records ONE history node for the
-## whole gesture, so a global randomize is a single undoable step.
+## Presentation buckets for coherent randomize (§8.3). Each bucket clamps the `masculinity` axis
+## to its BAND so a roll lands on a DEFINITE presentation, never the androgynous 40–60 middle by
+## accident. feminine ≤ FEM_MAX; masculine ≥ MASC_MIN; androgynous = the [FEM_MAX, MASC_MIN] band
+## (reachable only when explicitly opted in). The `families` are the archetype families a bucket
+## seeds from (BodyArchetypes family field). Band edges + weighting are taste-tuning inputs (§10).
+const RANDOM_FEM_MAX := 40.0
+const RANDOM_MASC_MIN := 60.0
+const RANDOM_BUCKETS := {
+	"feminine":    {"masc_lo": 0.0,            "masc_hi": RANDOM_FEM_MAX, "families": ["feminine"]},
+	"masculine":   {"masc_lo": RANDOM_MASC_MIN, "masc_hi": 100.0,         "families": ["masculine"]},
+	"androgynous": {"masc_lo": RANDOM_FEM_MAX,  "masc_hi": RANDOM_MASC_MIN, "families": ["androgynous"]},
+}
+
+## Pick a presentation bucket by a seeded weighted roll (§8.3 step 1): feminine / masculine by
+## default (50/50), androgynous only when opted in (then 1/3 each). Deterministic for a given
+## seed + counter. Returns the bucket key.
+func _pick_random_bucket(rng: RandomNumberGenerator) -> String:
+	var keys := ["feminine", "masculine"]
+	if _allow_androgynous_random:
+		keys.append("androgynous")
+	return keys[rng.randi() % keys.size()]
+
+
+## GLOBAL randomize (§8.3): land on a COHERENT, DEFINITE-presentation person, INSTANTLY.
+## INSTANT: every value-node is sampled and set in ONE pass with the bake SUPPRESSED, then the
+## body bakes EXACTLY ONCE at the end (was: a full 14,517-vert bake per axis = the seconds-long
+## freeze). COHERENT: pick a presentation bucket (feminine/masculine; androgynous only if opted
+## in), seed from an archetype in that bucket, then walk every axis within its cap — with the
+## `masculinity` axis CLAMPED to the bucket band so it never drifts into the 40–60 middle.
+## Deterministic for a given seed + counter. Records ONE history node for the whole gesture.
 func _randomize_all() -> void:
 	_suspend_commit = true
+	_suspend_apply = true   # bake ONCE at the end, not per sampled value (the anti-freeze fix)
+
+	# (1) Pick a presentation bucket + (2) seed from an archetype in it (§8.3). The bucket band
+	# clamps masculinity; the archetype seeds the rest so the body reads as a plausible person.
+	var bucket_rng := _seeded_rng_for("__bucket__")
+	var bucket := _pick_random_bucket(bucket_rng)
+	var band: Dictionary = RANDOM_BUCKETS[bucket]
+	var seed_state := _seed_state_for_bucket(bucket, _seeded_rng_for("__seed__"))
+
+	# (3) Walk every HEADLINE axis within its cap around the seed; masculinity stays IN-BAND.
 	for field in _sliders:
-		_randomize_axis(field)
-	# Randomize EVERY region value-node from the tree (not just the dock-built ones) — the dock
-	# now holds only the focused leaf's widgets, but the whole body must randomize. Each spec is
-	# sampled within its primary side's cap and written through the choke (model-level); a built
-	# widget (if its leaf is focused) is synced too.
+		var rng := _seeded_rng_for(field)
+		var ci: Array = _caps.cap(field)
+		var lo := float(ci[0])
+		var hi := float(ci[1])
+		if field == "masculinity":
+			# Clamp the sampling window to the bucket band ∩ the cap interval (never the middle).
+			lo = maxf(lo, float(band["masc_lo"]))
+			hi = minf(hi, float(band["masc_hi"]))
+		var req := rng.randf_range(lo, hi)
+		_body_state.set(field, clampf(req, float(ci[0]), float(ci[1])))
+
+	# (3b) Walk every REGION value-node within its cap, biased toward the seed archetype's value
+	# (so the result reads as a variant of a coherent body, not noise). Each write goes through the
+	# choke so it can never exceed the live interval; the bake is suppressed (one bake at the end).
+	var seed_mods: Dictionary = seed_state.get("modifiers", {})
 	for spec in RegionSlidersScript.all_specs():
 		var spec_name := String(spec["name"])
 		var full_names := RegionSlidersScript.resolve_full_names(spec_name)
 		var rng := _seeded_rng_for(spec_name)
 		_caps.start_gesture()
 		var ci: Array = _caps.cap(full_names[0])
-		var req := rng.randf_range(float(ci[0]), float(ci[1]))
+		var seed_v := float(seed_mods.get(full_names[0], 0.0))
+		# Sample around the seed value within ± half the cap span, clamped to the cap — a bounded
+		# walk near the archetype rather than uniform across the whole interval.
+		var span := (float(ci[1]) - float(ci[0])) * 0.5
+		var req := clampf(seed_v + rng.randf_range(-span, span), float(ci[0]), float(ci[1]))
 		var primary := _set_modifier_capped(full_names, req)
 		_caps.end_gesture()
-		# Sync the bound dock widget if this leaf is the focused one.
 		if _modifier_sliders.has(spec_name):
 			_write_back_modifier_widget(spec_name, _modifier_sliders[spec_name]["slider"] as HSlider, primary)
+
+	# Breast size (the cup cube, §8.2) — a BodyState field, not a _slider. Sample within its cap.
+	# It's female-weighted (fades on masculine bodies), so a roll on any bucket is anatomically fine.
+	var bsz_rng := _seeded_rng_for("breast_size")
+	var bsz_ci: Array = _caps.cap("breast_size")
+	_body_state.breast_size = clampf(bsz_rng.randf_range(float(bsz_ci[0]), float(bsz_ci[1])), 0.0, 1.0)
+	if _breast_size_slider != null and is_instance_valid(_breast_size_slider):
+		_breast_size_slider.set_value_no_signal(_body_state.breast_size)
+	if _breast_size_spin != null and is_instance_valid(_breast_size_spin):
+		_breast_size_spin.set_value_no_signal(_body_state.breast_size * 100.0)
+
+	# Sync the headline widgets (the dials) to the new model values without re-firing callbacks.
+	for field in _sliders:
+		var nv := float(_body_state.get(field))
+		var slider := _sliders[field] as HSlider
+		slider.min_value = minf(slider.min_value, nv)
+		slider.max_value = maxf(slider.max_value, nv)
+		slider.set_value_no_signal(nv)
+
+	# ONE bake for the whole roll (the instant path).
+	_suspend_apply = false
 	_apply_state()
+	for field in _sliders:
+		_apply_axis_slider_bounds(field, _sliders[field] as HSlider)
 	_suspend_commit = false
 	_rebake_tangents_on_commit()
-	_history.commit(_body_state.to_dict(), "randomized")
+	_history.commit(_body_state.to_dict(), "randomized (%s)" % bucket)
 	_refresh_history_panel()
+
+
+## The seed BodyState dict for a bucket: a randomly-chosen archetype from one of the bucket's
+## families, or {} if the roster has none in that bucket (then the walk seeds from neutral). The
+## archetype's frozen BodyState (headline + modifiers) anchors the bounded walk so the result is a
+## plausible variant. Deterministic for a given rng.
+func _seed_state_for_bucket(bucket: String, rng: RandomNumberGenerator) -> Dictionary:
+	var families: Array = RANDOM_BUCKETS[bucket]["families"]
+	var candidates := []
+	for e in _archetypes:
+		if families.has(String(e.get("family", ""))):
+			candidates.append(e["state"])
+	if candidates.is_empty():
+		return {}
+	return candidates[rng.randi() % candidates.size()]
 
 
 # ---------------------------------------------------------------------------
@@ -2488,6 +2695,14 @@ func _restore_current() -> void:
 		var lbl = _value_labels.get(field, null)
 		if lbl != null:
 			(lbl as Label).text = _format_value(field)
+	# Breast size/firmness are BodyState fields (the cup cube macrovar, §8.2) — restore them too,
+	# and re-sync the Breast size widget if Chest & breasts is currently focused.
+	_body_state.breast_size = bs.breast_size
+	_body_state.breast_firmness = bs.breast_firmness
+	if _breast_size_slider != null and is_instance_valid(_breast_size_slider):
+		_breast_size_slider.set_value_no_signal(_body_state.breast_size)
+	if _breast_size_spin != null and is_instance_valid(_breast_size_spin):
+		_breast_size_spin.set_value_no_signal(_body_state.breast_size * 100.0)
 	# The detail envelope is a whole-map replacement (restored dict's modifiers), then the
 	# region sliders re-sync to it. Replace the live map so cleared modifiers actually clear.
 	_body_state.modifiers = bs.modifiers.duplicate()

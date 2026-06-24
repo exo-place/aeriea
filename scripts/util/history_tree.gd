@@ -45,7 +45,7 @@ func _alloc_id() -> int:
 	return id
 
 
-static func _make_node(id: int, parent_id: int, state: Variant, label: String) -> Dictionary:
+static func _make_node(id: int, parent_id: int, state: Variant, label: String, collapse_key: String = "") -> Dictionary:
 	return {
 		"id": id,
 		"parent_id": parent_id,
@@ -53,6 +53,12 @@ static func _make_node(id: int, parent_id: int, state: Variant, label: String) -
 		"state": state,
 		"label": label,
 		"preferred_child": -1,
+		# COLLAPSE KEY (character-creator-ux.md §8.0): the identity of the value this node edits
+		# (e.g. "axis:masculinity", "mod:jaw-drop", "sculpt:nose"). A subsequent commit carrying
+		# the SAME non-empty key collapses INTO this node (state + label overwritten in place)
+		# instead of accreting a sibling — so ten refining grabs of one value are ONE node, not ten.
+		# Empty key = never collapses (the default; non-edit ops, loads, branches).
+		"collapse_key": collapse_key,
 	}
 
 
@@ -70,12 +76,26 @@ static func _make_node(id: int, parent_id: int, state: Variant, label: String) -
 ## no node is created and current is unchanged; the existing current id is returned. This
 ## catches re-settling a slider to the same value and re-applying an identical state
 ## (repeating the same step must NOT accrete duplicate entries).
-func commit(state: Variant, label: String = "") -> int:
+##
+## COLLAPSE (character-creator-ux.md §8.0): when `collapse_key` is non-empty AND the current
+## node carries the SAME key AND is a LEAF (no children — collapsing into a node that has been
+## branched off would silently rewrite a shared ancestor), the commit COLLAPSES into the current
+## node: its `state` and `label` are overwritten in place and NO new node is created (the existing
+## id is returned). So consecutive edits to the SAME value (the same key) — ten grabs refining the
+## jaw, re-dragging one slider — are ONE history node carrying the net result, not N. A different
+## key, an empty key, or an intervening non-edit op opens a fresh node as usual.
+func commit(state: Variant, label: String = "", collapse_key: String = "") -> int:
 	if _current_id >= 0 and states_equal((_nodes[_current_id] as Dictionary)["state"], state):
 		return _current_id
+	if _current_id >= 0 and collapse_key != "":
+		var cur: Dictionary = _nodes[_current_id]
+		if str(cur.get("collapse_key", "")) == collapse_key and (cur["children_ids"] as Array).is_empty():
+			cur["state"] = state
+			cur["label"] = label
+			return _current_id
 	var parent_id := _current_id
 	var nid := _alloc_id()
-	_nodes[nid] = _make_node(nid, parent_id, state, label)
+	_nodes[nid] = _make_node(nid, parent_id, state, label, collapse_key)
 	var parent: Dictionary = _nodes[parent_id]
 	(parent["children_ids"] as Array).append(nid)
 	parent["preferred_child"] = nid
@@ -353,6 +373,7 @@ func to_dict() -> Dictionary:
 			"state": n["state"],
 			"label": n["label"],
 			"preferred_child": n["preferred_child"],
+			"collapse_key": n.get("collapse_key", ""),
 		})
 	return {
 		"version": 1,
@@ -382,5 +403,6 @@ static func from_dict(d: Dictionary) -> HistoryTree:
 			"label": str(n.get("label", "")),
 			"state": n.get("state", null),
 			"preferred_child": int(n.get("preferred_child", -1)),
+			"collapse_key": str(n.get("collapse_key", "")),
 		}
 	return t

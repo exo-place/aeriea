@@ -164,9 +164,9 @@ var _use_gpu_picker: bool = false
 var _value_labels: Dictionary = {}   ## field -> Label showing current value
 var _sliders: Dictionary = {}        ## field -> HSlider
 var _axis_spins: Dictionary = {}     ## field -> SpinBox (headline numeric entry, natural units)
-var _extreme_slider: HSlider         ## the global extremeness 0..1 slider
-var _extreme_check: CheckBox         ## "allow extreme proportions" gate
-var _extreme_lbl: Label              ## extremeness % readout
+## The single "Allow beyond-human extremes" opt-in (§8.4) — a plain toggle, no amount slider and
+## no % readout (those were removed: the limit is one act, not a dial). Drives _set_extremeness(0/1).
+var _extreme_check: CheckBox
 ## EYE COLOR (procedural iris_color uniform, §6.3): the live color + its picker widget. Drives
 ## BodyRig.set_eye_params({"iris_color": …}); no texture, no gaze change.
 var _eye_color: Color = BodyRig.EYE_PARAMS_DEFAULT["iris_color"]
@@ -748,16 +748,17 @@ func _end_morph_drag() -> void:
 	if _drag_accum.is_empty():
 		_drag_vertex = -1
 		return
-	# Dominant modifier(s): the largest |accumulated delta|. Label with the top 1–2.
+	# Dominant modifier: the largest |accumulated delta|. The HUMAN label reads "more/less <part>"
+	# off that dominant modifier's plain name; the collapse key is that modifier so refining the
+	# SAME region by repeated grabs coalesces into one node (§8.0).
 	var names := _drag_accum.keys()
 	names.sort_custom(func(a, b): return absf(_drag_accum[a]) > absf(_drag_accum[b]))
-	var top := []
-	for i in mini(2, names.size()):
-		top.append("%s %+.2f" % [_short_modifier_name(String(names[i])), float(_drag_accum[names[i]])])
-	var label := "sculpt: " + ", ".join(top)
+	var dom := String(names[0])
+	var net := float(_drag_accum[dom])
+	var label := _human_shape_label(_short_modifier_name(dom), net)
 	if not _suspend_commit:
 		_rebake_tangents_on_commit()
-		_history.commit(_body_state.to_dict(), label)
+		_history.commit(_body_state.to_dict(), label, "sculpt:" + dom)
 		_refresh_history_panel()
 	_drag_accum = {}
 	_drag_vertex = -1
@@ -935,7 +936,11 @@ func _end_handle_drag() -> void:
 		var fn := String(handle["full_name"])
 		var net := float(_drag_accum.get(fn, 0.0))
 		_rebake_tangents_on_commit()
-		_history.commit(_body_state.to_dict(), "%s %+.2f (handle)" % [String(handle["display"]), net])
+		# Human label + collapse key keyed on the handle's modifier — a handle-drag and a slider
+		# drag of the SAME value collapse together (same key prefix space "mod:"/"sculpt:" differ,
+		# but consecutive handle drags of one handle coalesce).
+		_history.commit(_body_state.to_dict(),
+			_human_shape_label(String(handle["display"]), net), "sculpt:" + fn)
 		_refresh_history_panel()
 	_drag_accum = {}
 	_update_handle_overlay()
@@ -1034,7 +1039,7 @@ func _build_breast_size_row(parent: VBoxContainer) -> void:
 		if one_write:
 			_caps.end_gesture()
 		if one_write and not _suspend_commit:
-			_commit_axis("breast_size", nv, "breast size = %d" % int(round(nv * 100.0))))
+			_commit_axis("breast_size", nv))
 	slider.drag_started.connect(func() -> void:
 		_drag_pending["__breast_size__"] = true
 		_caps.start_gesture())
@@ -1042,7 +1047,7 @@ func _build_breast_size_row(parent: VBoxContainer) -> void:
 		_drag_pending["__breast_size__"] = false
 		_caps.end_gesture()
 		if changed and not _suspend_commit:
-			_commit_axis("breast_size", _body_state.breast_size, "breast size = %d" % int(round(_body_state.breast_size * 100.0))))
+			_commit_axis("breast_size", _body_state.breast_size))
 	row.add_child(slider)
 	var hi_lbl := Label.new()
 	hi_lbl.text = "large"
@@ -1068,7 +1073,7 @@ func _build_breast_size_row(parent: VBoxContainer) -> void:
 		slider.set_value_no_signal(nv)
 		_caps.end_gesture()
 		if not _suspend_commit:
-			_commit_axis("breast_size", nv, "breast size = %d" % int(round(nv * 100.0))))
+			_commit_axis("breast_size", nv))
 	row.add_child(spin)
 	parent.add_child(row)
 	_breast_size_slider = slider
@@ -1261,7 +1266,6 @@ func _build_ui() -> void:
 # TOP BAR (§7.2) — a single thin bar of ≤6 GLOBAL commands: ☰ Create (gallery + Randomize +
 # Open + Save), the ‹ breadcrumb ›, ⤺ History, Share, Open. None contextual.
 # ---------------------------------------------------------------------------
-var _share_format_check: CheckBox   ## "also embed editable history" on Share (defaults on)
 
 func _build_top_bar(canvas: CanvasLayer) -> void:
 	var bar := PanelContainer.new()
@@ -1387,30 +1391,21 @@ func _build_advanced_popup(canvas: CanvasLayer) -> void:
 	vbox.add_child(_androgynous_random_check)
 
 	vbox.add_child(HSeparator.new())
-	# Beyond-human range opt-in (the global cap-widening unlock, plainly named — §8.4). No
-	# "extremeness" / "Realism" noun on the surface. The 0..1 slider stays as the amount.
+	# Beyond-human range opt-in (§8.4) — ONE plain toggle, no "extremeness" / "%" / "Realism" noun
+	# on the surface. ON widens every control toward its hard limit; OFF returns to human ranges.
+	# Non-destructive: lowering it never snaps existing values (the ratchet, _set_extremeness).
+	# There is NO amount slider and NO percent readout — the opt-in is a single act, not a dial.
 	_extreme_check = CheckBox.new()
 	_extreme_check.text = "Allow beyond-human extremes"
 	_extreme_check.button_pressed = _caps.extremeness > 0.0
 	_extreme_check.tooltip_text = "Widen every control's range past its human/tasteful limit. Lowering it never snaps existing values."
 	_extreme_check.toggled.connect(func(on: bool) -> void: _set_extremeness(1.0 if on else 0.0))
 	vbox.add_child(_extreme_check)
-	var ex_row := HBoxContainer.new()
-	ex_row.add_theme_constant_override("separation", 4)
-	_extreme_slider = HSlider.new()
-	_extreme_slider.min_value = 0.0
-	_extreme_slider.max_value = 1.0
-	_extreme_slider.step = 0.01
-	_extreme_slider.value = _caps.extremeness
-	_extreme_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_extreme_slider.value_changed.connect(func(v: float) -> void: _set_extremeness(v))
-	ex_row.add_child(_extreme_slider)
-	_extreme_lbl = Label.new()
-	_extreme_lbl.custom_minimum_size = Vector2(44, 0)
-	_extreme_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_extreme_lbl.text = "%.0f%%" % (_caps.extremeness * 100.0)
-	ex_row.add_child(_extreme_lbl)
-	vbox.add_child(ex_row)
+	var ex_hint := Label.new()
+	ex_hint.add_theme_font_size_override("font_size", 10)
+	ex_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ex_hint.text = "Lets a control go past its human range. Turning it back off never changes what you already made."
+	vbox.add_child(ex_hint)
 
 
 func _open_advanced() -> void:
@@ -1785,7 +1780,7 @@ func _refresh_gallery() -> void:
 func _pick_archetype(state: Dictionary, name: String) -> void:
 	# Commit the archetype as a history node so the pick is undoable + recorded, then restore.
 	_caps.abort_gesture()
-	_history.commit(state.duplicate(true), "archetype: %s" % name)
+	_history.commit(state.duplicate(true), "started from %s" % name)
 	_restore_current()
 	_refresh_history_panel()
 
@@ -2537,10 +2532,17 @@ func _seeded_rng_for(key: String) -> RandomNumberGenerator:
 	return rng
 
 
-## Commit one settled region-slider change as a history node.
+## Commit one settled region-slider change as a history node — HUMAN label (display name + a
+## direction word) keyed for collapse so re-dragging the SAME slider coalesces (§8.0). Direction
+## is the sign of (new − previous) on the spec's primary modifier, read from the current node.
 func _commit_modifier(spec_name: String, display: String, value: float) -> void:
+	var prev := 0.0
+	var st: Variant = _history.current_state() if _history != null else null
+	var full := RegionSlidersScript.resolve_full_names(spec_name)
+	if typeof(st) == TYPE_DICTIONARY and (st as Dictionary).has("modifiers") and not full.is_empty():
+		prev = float(((st as Dictionary)["modifiers"] as Dictionary).get(String(full[0]), 0.0))
 	_rebake_tangents_on_commit()
-	_history.commit(_body_state.to_dict(), "%s = %+.2f" % [display, value])
+	_history.commit(_body_state.to_dict(), _human_shape_label(display, value - prev), "mod:" + spec_name)
 	_refresh_history_panel()
 
 
@@ -2572,6 +2574,8 @@ func _format_value(field: String) -> String:
 			return "%dcm" % int(round(v))
 		"masculinity", "muscle", "weight":
 			return "%.0f%%" % v
+		"breast_size":
+			return "%.0f%%" % (v * 100.0)
 		_:
 			return "%.2f" % v
 
@@ -2665,13 +2669,9 @@ func _randomize_axis(field: String) -> void:
 func _set_extremeness(e: float) -> void:
 	_caps.abort_gesture()
 	_caps.extremeness = clampf(e, 0.0, 1.0)
-	# Keep the two widgets + readout in sync without re-firing each other.
-	if _extreme_slider != null:
-		_extreme_slider.set_value_no_signal(_caps.extremeness)
+	# Keep the opt-in toggle in sync without re-firing. (No amount slider / % readout — §8.4.)
 	if _extreme_check != null:
 		_extreme_check.set_pressed_no_signal(_caps.extremeness > 0.0)
-	if _extreme_lbl != null:
-		_extreme_lbl.text = "%.0f%%" % (_caps.extremeness * 100.0)
 	# All-controls bounds sweep: every slider's reachable range now reflects the new extremeness
 	# (widened to still contain the current stored value, so nothing snaps).
 	for field in _sliders:
@@ -2798,16 +2798,84 @@ func _seed_state_for_bucket(bucket: String, rng: RandomNumberGenerator) -> Dicti
 
 
 # ---------------------------------------------------------------------------
+# HUMAN HISTORY LABELS (character-creator-ux.md §8.0). A node reads in human terms — the value's
+# display name + a direction word ("wider jaw", "taller +6 cm", "Gender → more feminine") — NEVER
+# modifier-space ("jaw-drop +0.20", "age_years = 25"). Direction is found by comparing the new
+# value against the value in the CURRENT history node (the about-to-be parent), keyed by field, so
+# "more/less" is honest. The collapse key (§8.0 / HistoryTree.commit) is the value's identity, so
+# consecutive edits to the SAME value coalesce into one node carrying the net result.
+# ---------------------------------------------------------------------------
+
+## Per-axis display name + the [low, high] direction words for the human label. The low word is
+## used when the value DECREASED, the high word when it INCREASED (matching the pole labels on the
+## pinned strip). Keyed by the BodyState field.
+const AXIS_LABEL := {
+	"age_years":   ["Age",                 "younger",       "older"],
+	"masculinity": ["Gender",              "more feminine", "more masculine"],
+	"muscle":      ["Muscle",              "leaner",        "more muscular"],
+	"weight":      ["Build",               "lighter",       "heavier"],
+	"proportions": ["Proportions",         "more natural",  "more idealized"],
+	"height_cm":   ["Height",              "shorter",       "taller"],
+	"breast_size": ["Chest",               "smaller chest", "fuller chest"],
+}
+
+## The value of `field` in the CURRENT history node (the parent-to-be), or NAN if absent —
+## used to pick the direction word for a human label.
+func _prev_axis_value(field: String) -> float:
+	if _history == null:
+		return NAN
+	var st: Variant = _history.current_state()
+	if typeof(st) != TYPE_DICTIONARY or not (st as Dictionary).has(field):
+		return NAN
+	return float((st as Dictionary)[field])
+
+## A human label for a settled axis change: "Gender → more feminine", "taller (+6 cm)",
+## "Age → 24", etc. Display name + direction word; never the raw field name or modifier value.
+func _human_axis_label(field: String, value: float) -> String:
+	var spec: Variant = AXIS_LABEL.get(field, null)
+	if spec == null:
+		return "%s → %s" % [field, _format_value(field)]
+	var name := String((spec as Array)[0])
+	var prev := _prev_axis_value(field)
+	var dir := ""
+	if not is_nan(prev) and absf(value - prev) > 1e-6:
+		dir = String((spec as Array)[1]) if value < prev else String((spec as Array)[2])
+	# Height/age read most naturally with the absolute too; gender/build read as a direction.
+	match field:
+		"height_cm":
+			return "Height → %d cm" % int(round(value)) if dir == "" else "%s (%d cm)" % [dir, int(round(value))]
+		"age_years":
+			return "Age → %d" % int(floor(value)) if dir == "" else "%s (age %d)" % [dir, int(floor(value))]
+		_:
+			return "%s → %s" % [name, dir] if dir != "" else "%s → %s" % [name, _format_value(field)]
+
+## A human label for a settled region-slider / sculpt / handle reshape: the value's DISPLAY name
+## prefixed by a direction word ("wider jaw", "fuller chest"). `display` is the spec's plain name
+## (e.g. "jaw drop", "nose width"); `signed_delta` is the net applied change this gesture. With no
+## net change it falls back to "shaped <display>".
+func _human_shape_label(display: String, signed_delta: float) -> String:
+	var d := display.strip_edges()
+	if absf(signed_delta) < 1e-6:
+		return "shaped %s" % d
+	return ("more %s" % d) if signed_delta > 0.0 else ("less %s" % d)
+
+
+# ---------------------------------------------------------------------------
 # History actions
 # ---------------------------------------------------------------------------
 
-## Commit the current BodyState as a new history node, labelled by the axis change.
+## Commit the current BodyState as a new history node, labelled by the axis change in HUMAN terms
+## and keyed for collapse so consecutive edits to the SAME axis coalesce (§8.0). An override_label
+## (used by archetype pick / randomize, which are not single-axis edits) bypasses the human-axis
+## formatter and is given an empty collapse key (never collapses).
 func _commit_axis(field: String, value: float, override_label: String = "") -> void:
 	var label := override_label
+	var key := ""
 	if label == "":
-		label = "%s = %s" % [field, _format_value(field)]
+		label = _human_axis_label(field, value)
+		key = "axis:" + field
 	_rebake_tangents_on_commit()
-	_history.commit(_body_state.to_dict(), label)
+	_history.commit(_body_state.to_dict(), label, key)
 	_refresh_history_panel()
 
 
@@ -2847,12 +2915,8 @@ func _apply_imported(res: Dictionary, verb: String) -> void:
 	# loaded cap envelope. Set the scalar directly (not via _set_extremeness, which aborts the
 	# gesture again + sweeps before the body is loaded); the widgets sync below.
 	_caps.extremeness = clampf(float(res.get("extremeness", 0.0)), 0.0, 1.0)
-	if _extreme_slider != null:
-		_extreme_slider.set_value_no_signal(_caps.extremeness)
 	if _extreme_check != null:
 		_extreme_check.set_pressed_no_signal(_caps.extremeness > 0.0)
-	if _extreme_lbl != null:
-		_extreme_lbl.text = "%.0f%%" % (_caps.extremeness * 100.0)
 	# Replace the history tree: a with-history payload carries the whole branching tree; a
 	# current-only payload seeds a fresh single-node tree from the body (so undo still works).
 	var tree = res.get("tree", null)

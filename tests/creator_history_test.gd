@@ -36,6 +36,7 @@ func _ready() -> void:
 	_test_json_history_roundtrip()
 	_test_determinism()
 	_test_noop_commit_hygiene()
+	_test_collapse_consecutive_same_value()
 	_test_reset_to_neutral_idempotent()
 	_test_linear_nav_helpers()
 	_test_image_metadata_roundtrip()
@@ -238,6 +239,55 @@ func _test_noop_commit_hygiene() -> void:
 	var rid2 := t.commit({"v": 1}, "structurally equal")
 	_assert("structurally-equal (not identity-equal) commit is also a no-op",
 		rid2 == cur and t.node_count() == before + 1, "count=%d" % t.node_count())
+
+
+func _test_collapse_consecutive_same_value() -> void:
+	print("--- COLLAPSE: consecutive edits to the SAME value coalesce to ONE node (§8.0) ---")
+	var t := HistoryTreeScript.new({"v": 0}, "root")
+	# Ten edits to the SAME keyed value (e.g. dragging one slider): ONE node, carrying the net.
+	var first := -1
+	for i in range(1, 11):
+		var id := t.commit({"v": i}, "shaped jaw", "axis:jaw")
+		if first < 0:
+			first = id
+	_assert("ten same-key commits make exactly ONE node above root", t.node_count() == 2,
+		"count=%d" % t.node_count())
+	_assert("the collapsed node carries the NET (latest) value", int(t.current_state()["v"]) == 10,
+		str(t.current_state()))
+	_assert("the collapsed node reuses the same id (in-place update)", t.current_id() == first,
+		"first=%d cur=%d" % [first, t.current_id()])
+	_assert("the collapsed node label is the latest human label", t.label_of(first) == "shaped jaw",
+		t.label_of(first))
+	# A DIFFERENT key opens a fresh node (editing a different value).
+	t.commit({"v": 10, "w": 1}, "taller", "axis:height")
+	_assert("a different-key edit opens a NEW node", t.node_count() == 3, "count=%d" % t.node_count())
+	# Returning to the FIRST key after the second does NOT collapse into the old node (not current).
+	t.commit({"v": 20, "w": 1}, "shaped jaw", "axis:jaw")
+	_assert("re-editing the first value after another edit opens a new node (current changed)",
+		t.node_count() == 4, "count=%d" % t.node_count())
+	# An EMPTY key never collapses (non-edit ops / loads).
+	var c1 := t.commit({"v": 21, "w": 1}, "loaded", "")
+	var c2 := t.commit({"v": 22, "w": 1}, "loaded again", "")
+	_assert("empty-key commits never collapse (distinct nodes)", c1 != c2 and t.node_count() == 6,
+		"count=%d" % t.node_count())
+	# Collapse must NOT rewrite a node that has been BRANCHED off (a shared ancestor): edit a key,
+	# undo to it from a child would make it non-leaf — verify a keyed commit into a node with
+	# children opens a sibling instead of corrupting the branched-from node.
+	var t2 := HistoryTreeScript.new({"v": 0}, "root")
+	var a := t2.commit({"v": 1}, "shaped jaw", "axis:jaw")   # node A, key jaw
+	t2.commit({"v": 2}, "taller", "axis:height")             # child of A
+	t2.jump_to(a)                                            # back on A (now has a child)
+	var before := t2.node_count()
+	t2.commit({"v": 5}, "shaped jaw", "axis:jaw")            # same key, but A is NOT a leaf
+	_assert("a keyed commit into a branched (non-leaf) node opens a sibling, not an in-place rewrite",
+		t2.node_count() == before + 1, "count=%d" % t2.node_count())
+	_assert("the branched-from node KEEPS its original value (not corrupted)",
+		int(t2.state_of(a)["v"]) == 1, str(t2.state_of(a)))
+	# Collapse survives serialization round-trip (collapse_key persisted).
+	var d := t.to_dict()
+	var back: HistoryTree = HistoryTreeScript.from_dict(d)
+	_assert("collapse_key round-trips (identical to_dict after from_dict)",
+		JSON.stringify(back.to_dict()) == JSON.stringify(t.to_dict()), "")
 
 
 func _test_reset_to_neutral_idempotent() -> void:

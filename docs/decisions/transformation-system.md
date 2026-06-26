@@ -35,8 +35,14 @@ In scope — a transformation system with four parts:
 4. **state-derived description** — prose re-derived by traversing the graph (including the
    in-progress middle of a staged TF).
 
-TF is **causal**: items/events trigger TFs (drink pill / step in a field / an event fires,
-and it unfolds over in-game time). That is expected and correct.
+TF is **causal**: items/events trigger TFs and they unfold over in-game time. That is
+expected and correct. But the **pure TF system carries no worldbuilding / setting flavor**.
+The worked examples and the MVP content are **setting-neutral mechanism demos** — "graft a
+quadruped-lower subtree", "set a subtree's covering to fur", "grow a tail subtree", "set a
+region's material to chitin" — with **no** aeriea-modern-life framing and **no** fantasy
+framing. What an item or event *is* in a setting (a pill, a field, a spell), and the lore /
+register around it, is a **separate layer for another time** and is **explicitly out of
+scope** here.
 
 **Out of scope — and be honest about the hard part.** The 3D embodiment of an
 arbitrary-topology body — the **rig, mesh, and animation** for a graph that can be a biped,
@@ -89,7 +95,8 @@ each attached at a named **attachment point** on the parent. Limbs are just **su
 limb you can graft, remove, or reparent anywhere a compatible attachment point exists.
 
 Configurations like biped / taur / quadruped / naga / hexapod are **configurations of the
-graph, NOT named types**. A taur, concretely, is a from-scratch quadruped-lower subtree
+graph, NOT named types** — a name like `taur` is only an optional alias bound to such a
+configuration (§3.6). A taur, concretely, is a from-scratch quadruped-lower subtree
 (a second spine plus four legs, each built from generic segments) grafted onto the upper
 structure's hip region and tagged `lower_body` by convention.
 
@@ -111,9 +118,9 @@ Segment = {
   the body model itself bakes in **no** part vocabulary. Conventional tags (`torso`, `arm`,
   `hand`, `lower_body`, …) are a **shared agreement content uses to grab structure** — a
   lingua franca like CSS classes or file extensions, **not** a schema the engine polices
-  (see §3.6).
+  (see §3.7).
 - `at` names an attachment point. Attachment points are just named docking sites a segment
-  exposes; the model permits **any** graft (coherence is unenforced — see §3.7).
+  exposes; the model permits **any** graft (coherence is unenforced — see §3.8).
 - A limb/region is the subtree rooted at a segment; grafting = adding a child entry,
   removing = dropping one, reparenting = moving one.
 
@@ -153,10 +160,11 @@ a body so TF ops and undo can target a segment stably.
 
 ### 3.5 Worked example — a taur (skin upper / fur lower)
 
-A taur with a flesh+skin human upper half grafted onto a flesh+fur quadruped lower half. The
-graft is a from-scratch subtree (a second spine + four legs) docked at the upper structure's
-hip and tagged `lower_body`. Every segment is generic — only the `tags` mark conventional
-roles:
+A flesh+skin humanoid upper half grafted onto a flesh+fur quadruped lower half (the
+configuration that carries the optional alias `taur`, §3.6 — the structure below is the
+canonical thing). The graft is a from-scratch subtree (a second spine + four legs) docked at
+the upper structure's hip and tagged `lower_body`. Every segment is generic — only the `tags`
+mark conventional roles:
 
 ```
 { "root": {
@@ -192,7 +200,27 @@ Variants are just different per-segment material/covering on the **same** form:
 - **slime-centaur** — the lower subtree has `material:"slime"`, `covering:null`; the form is
   a *held shape* (see §8 open question on amorphous-material/form interaction).
 
-### 3.6 Naming / targeting is convention, not enforcement
+### 3.6 Names are optional aliases bound to configurations
+
+A **name** (`taur`, `holstaur`, `naga`, …) is an **optional alias** bound to a *configuration*
+— a structural pattern / tag-set (e.g. `taur` ↔ a humanoid-upper structure grafted on a
+quadruped-lower subtree). The **structure is canonical**; the alias is shorthand on top,
+conventional and unenforced, in the same spirit as the tag convention (§3.7). The engine
+bakes in no enum of names.
+
+Consequences:
+- A **novel / unnamed configuration** simply has no alias → it is described **structurally**
+  from the graph (§6). Structural description is **always available**; there is no closed set
+  of names to fall outside of, so every configuration — named or not — is fully describable.
+- Aliases **compose**: `holstaur` = `taur` + bovine features. An alias is just a label over a
+  configuration, so a configuration that extends another extends its alias too.
+- Aliases are **audience-dependent**. Whether to *surface* an alias (say "taur") or *expand*
+  it to a structural description (a taur may pass unremarked; a holstaur may need unpacking)
+  is a **description-layer** concern — downstream of the pure TF system and **deferred** (same
+  bucket as setting flavor; see §8). The pure system needs only this: aliases are optional
+  labels bound to configurations, and the structure is the ground truth.
+
+### 3.7 Naming / targeting is convention, not enforcement
 
 Tags are arbitrary strings and the engine bakes in **nothing**. There is, separately, a
 **conventional shared vocabulary** — `lower_body`, `upper_body`, `arm`, `hand`, `head`, … —
@@ -215,7 +243,7 @@ subtree past the waist joint"). That is **correct behavior, not a bug**: the eng
 guesses at a body's anatomy, so a TF written against a convention does nothing to a body that
 opted out of it. If you want it to always hit, target structurally.
 
-### 3.7 Coherence is unenforced
+### 3.8 Coherence is unenforced
 
 The core model permits **any** graft and has **no** notion of a "valid" or "coherent" body.
 Two heads on one neck, a leg docked to a fingertip, a free-floating subtree — all are
@@ -241,7 +269,7 @@ and **target regions** (a segment or a subtree by id), never global slots.
 
 ```
 TF = {
-  "id": "taur_graft",
+  "id": "graft_quadruped_lower",
   "name": "...",
   "gate":   <Predicate>,     # read body -> bool (data tree, no closures)
   "staged": true,            # false = instant; true = progress on sim_clock
@@ -256,7 +284,7 @@ A **Predicate** is a small data tree, e.g.
 `{"op":"material_is","node":"barrel","v":"flesh"}`,
 `{"op":"lt","path":"#tail.props.length_cm","v":15}`,
 `{"op":"and","of":[ ... ]}`. The applier evaluates it; `#id` selects a segment by id, and
-`tag`/structural selectors resolve node sets by convention or structure (§3.6).
+`tag`/structural selectors resolve node sets by convention or structure (§3.7).
 
 ### 4.2 Op vocabulary (small and closed — operates over the three axes)
 
@@ -274,15 +302,21 @@ There is **no `set_kind`** op (there is no `kind`); retagging is just `tag` add/
 op carries a **region target** resolved by node id, by **tag (convention)**, or by
 **structural query** (e.g. `subtree` to fan an op across every segment under a root), plus an
 optional `when` Predicate (skip unless true). No op touches a global slot or a fixed
-part-kind; everything is addressed by id, tag, or structure (§3.6).
+part-kind; everything is addressed by id, tag, or structure (§3.7).
 
 ### 4.3 Worked TF records
 
-**(a) biped → taur — a FORM graft (instant).** Dock a furred quadruped lower structure at
-the upper body's hip:
+These are **pure mechanism demos**, deliberately setting-neutral (§2): each one exercises one
+op category against the graph with no lore attached. What *triggers* one in a given setting
+is a separate layer (§2, §8).
+
+**(a) graft a quadruped-lower subtree — a FORM graft (instant).** Dock a furred quadruped
+lower structure (a from-scratch second spine + four legs) at the upper body's hip. (This
+configuration carries the optional alias `taur`, §3.6 — the alias is shorthand; the structure
+below is the canonical thing.)
 
 ```
-{ "id":"taur_graft", "name":"...", "staged":false,
+{ "id":"graft_quadruped_lower", "name":"...", "staged":false,
   "gate":{"op":"not","of":{"op":"has_tag","tag":"lower_body","under":"hip"}},
   "ops":[ {"effect":"graft_subtree","target_node":"torso_upper","at":"hip",
            "subtree":{ "id":"barrel","material":"flesh","covering":"fur",
@@ -298,22 +332,24 @@ the upper body's hip:
              ] } } ] }
 ```
 
-**(b) flesh → chitin on the lower subtree — a MATERIAL set (staged, fans over a subtree).**
-Hardens the lower body into an exoskeleton over 3 stages; setting chitin nulls the covering:
+**(b) set a subtree's material to chitin — a MATERIAL set (staged, fans over a subtree).**
+Converts the lower-body subtree to exoskeleton over 3 stages; setting chitin nulls the
+covering:
 
 ```
-{ "id":"carapace_creep", "name":"...", "staged":true, "stage_seconds":1200, "max_stages":3,
+{ "id":"set_lower_material_chitin", "name":"...", "staged":true, "stage_seconds":1200, "max_stages":3,
   "gate":{"op":"has_tag","tag":"lower_body"},
   "ops":[ {"effect":"set_material","subtree_tag":"lower_body","value":"chitin",
            "when":{"op":"ne","path":"#barrel.material","v":"chitin"}} ] }
 ```
 
-**(c) fur creeping up a subtree — a COVERING set (staged over several clock stages).** Each
-stage advances fur one segment further up the lower structure (ordered ops, one fires per
-stage via `when` guards — the lowest still-skin segment converts first):
+**(c) set a subtree's covering to fur, segment by segment — a COVERING set (staged over
+several clock stages).** Each stage advances fur one segment further up the lower structure
+(ordered ops, one fires per stage via `when` guards — the lowest still-skin segment converts
+first):
 
 ```
-{ "id":"fur_creep", "name":"...", "staged":true, "stage_seconds":900, "max_stages":4,
+{ "id":"set_covering_fur_upward", "name":"...", "staged":true, "stage_seconds":900, "max_stages":4,
   "gate":{"op":"material_is","node":"barrel","v":"flesh"},
   "ops":[
     {"effect":"set_covering","target_node":"leg_bl","value":"fur",
@@ -329,11 +365,11 @@ stage via `when` guards — the lowest still-skin segment converts first):
 One covering converts per stage, lowest-first, so the fur visibly creeps upward; the
 skin↔fur boundary at the current joint is a describable transition zone (§6).
 
-**(d) size grower — a PROPERTY delta (staged, seeded).** Rolls length onto the tail each
-stage:
+**(d) grow a segment's length — a PROPERTY delta (staged, seeded).** Rolls length onto a
+tail-tagged segment each stage (any scalar prop on any tagged segment works the same way):
 
 ```
-{ "id":"tail_tonic", "name":"...", "staged":true, "stage_seconds":900, "max_stages":5,
+{ "id":"grow_tail_length", "name":"...", "staged":true, "stage_seconds":900, "max_stages":5,
   "gate":{"op":"has_tag","tag":"tail"},
   "ops":[ {"effect":"prop_delta","target_node":"tail","prop":"length_cm",
            "amount":{"roll":"uniform","lo":2,"hi":5}, "clamp":[0,120]} ] }
@@ -413,7 +449,7 @@ captured `before` of each applied op.
 
 Prose is **re-derived by traversing the graph on every read**, never stored. The traversal
 visits each segment and, per region, reads its **covering** (or material, where material is
-the visible surface — chitin, slime), its **tags** (for naming in prose — convention, §3.6)
+the visible surface — chitin, slime), its **tags** (for naming in prose — convention, §3.7)
 and **form** context, and its scalar **props**, emitting a phrase.
 
 ```
@@ -436,7 +472,8 @@ segment with no conventional tag is described purely compositionally from its st
   fur"). This reads directly off the parent/child material+covering pair at each attachment.
 - **In-progress staged TF.** Because each `apply_stage` mutates the graph in place, the body
   is **always** in a coherent describable state between stages — the half-furred lower body
-  mid-`fur_creep` describes cleanly, and the current skin↔fur joint is the transition zone.
+  mid-`set_covering_fur_upward` describes cleanly, and the current skin↔fur joint is the
+  transition zone.
 - **Commitment / faithfulness gate.** A region may be described as having a feature **only if
   the structure commits it**: a phrase asserting a tail/leg/material is licensed only when
   that segment actually exists in the graph with that property. No phantom parts; mention a
@@ -450,17 +487,17 @@ The deep prose-quality engine is **out of scope**; this is simple descriptor tra
 
 The smallest thing that is a *real* working TF system over the compositional graph:
 
-- **A handful of convention tags** (shared vocabulary, §3.6): e.g. head, torso, arm, leg,
+- **A handful of convention tags** (shared vocabulary, §3.7): e.g. head, torso, arm, leg,
   hip, spine, tail, upper_body, lower_body — enough to build a biped from generic segments
-  and graft a from-scratch taur lower structure. **Open vocabulary, few values**, not a
+  and graft a from-scratch quadruped-lower structure. **Open vocabulary, few values**, not a
   closed enum and not a part-kind type.
 - **A few materials** (flesh, chitin, slime) and **a few coverings** (skin, fur, scales),
   per-segment. Again: open property, few shipped values.
 - **~4–5 TF records** spanning all op categories:
-  1. `taur_graft` — FORM graft (instant);
-  2. `carapace_creep` — MATERIAL set, staged, fans over a subtree;
-  3. `fur_creep` — COVERING set, staged, creeps up a subtree;
-  4. `tail_tonic` — PROPERTY delta, staged + seeded;
+  1. `graft_quadruped_lower` — FORM graft (instant);
+  2. `set_lower_material_chitin` — MATERIAL set, staged, fans over a subtree;
+  3. `set_covering_fur_upward` — COVERING set, staged, creeps up a subtree;
+  4. `grow_tail_length` — PROPERTY delta, staged + seeded;
   5. a revert that invokes the holder's **undo** (proves reversibility end-to-end).
 - **The deterministic applier** (§5) + **TFHolder** on `sim_clock` + seeded RNG.
 - **State-derived description** (§6): graph traversal + transition-zone joints + the
@@ -472,7 +509,7 @@ The smallest thing that is a *real* working TF system over the compositional gra
 - **A test suite** (added to `tests/run.sh`): determinism (same seed+log → identical graph),
   staged progression on the clock, **region-targeting** by tag/convention and by structural
   query (an op hits only the targeted subtree; a convention-targeting op **no-ops** on a body
-  that lacks the tag — §3.6), reversibility (undo restores the exact graph, including
+  that lacks the tag — §3.7), reversibility (undo restores the exact graph, including
   re-grafting removed subtrees), save/load round-trip, commitment gate (no phantom-part
   prose).
 
@@ -489,14 +526,14 @@ bulk, the rich prose realizer, combat/world/NPC triggers.
 
 ## 8. Open questions (genuinely open — not resolved here)
 
-Two earlier open questions are now **decided** and have moved into the body model:
-**coherence is unenforced** (optional opt-in validator, §3.7) and **naming/targeting is
-convention, not enforcement** (§3.6). What remains genuinely open:
+Earlier open questions are now **decided** and have moved into the design:
+**coherence is unenforced** (optional opt-in validator, §3.8); **naming/targeting is
+convention, not enforcement** (§3.7); **names are optional aliases bound to configurations**
+(§3.6); and **the pure system is setting-neutral** — example/MVP TFs are setting-neutral
+mechanism demos and setting flavor is a separate layer, deferred (§2, §4.3). What remains
+genuinely open:
 
 1. **How amorphous materials interact with form.** For slime (and other non-rigid materials)
    the form is a *held shape* rather than a skeleton. How held-shape behaves under FORM edits
    — whether a slime subtree even has stable attachment points, how it "flows" between stages
    — is **flagged, not solved** here.
-2. **Content flavor of example TFs.** Aeriea's modern-life + ambient body-tech register
-   (mundane pills/devices/fields), or generic placeholder content for the MVP, deferring
-   flavor? Affects naming/lore of the example records, not the architecture.

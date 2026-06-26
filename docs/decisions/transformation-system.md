@@ -87,6 +87,11 @@ transformation game; the graph is simply the *current* form, continuously editab
 body is mid-transformable by default. Slime is **not** a special "unstable" case — it just
 flows more readily. Do **not** encode any "stable form" / "fixed skeleton" assumption.
 
+**Continuous geometric fluidity** — smooth real-time morphing / blobbing — is **not** a
+data-model concern; it belongs to the already-deferred 3D embodiment problem (§2), the same
+bucket as rigging arbitrary topology. The data model edits the graph in discrete ops; how a
+form *visually* flows between states is the deferred 3D layer's job.
+
 ### 3.1 FORM — segments and attachment points
 
 A **segment** is a node in the graph. It carries its own geometry/extent, its material, its
@@ -132,8 +137,10 @@ Segment = {
 - **flesh** — soft tissue over an internal structure; takes a separate **covering**.
 - **chitin** — rigid exoskeleton: structure and exterior are the **same thing**, no separate
   covering (arthropod-style joints). `covering` is `null` for chitin.
-- **slime** — amorphous, translucent, no rigid joints; the form is a *held shape* rather
-  than a fixed skeleton. `covering` is `null`.
+- **slime** — amorphous, translucent, no rigid joints; `covering` is `null`. Slime is **just
+  another material value** — it needs no special substrate. Its graph is simply its *held
+  shape*: segments are shape-regions, and because form is always mutable (§3.0) the graph is
+  freely reshapeable. The uniform body graph carries it like any other material.
 - others: scale-hide, stone, energy, … — open.
 
 ### 3.3 COVERING — per-region surface
@@ -198,7 +205,7 @@ Variants are just different per-segment material/covering on the **same** form:
 - **chitin-centaur** — the lower `barrel` + legs subtree has `material:"chitin"`,
   `covering:null` (exoskeleton; no separate covering).
 - **slime-centaur** — the lower subtree has `material:"slime"`, `covering:null`; the form is
-  a *held shape* (see §8 open question on amorphous-material/form interaction).
+  a *held shape* on the same uniform graph (slime is just another material — §3.2).
 
 ### 3.6 Names are optional aliases bound to configurations
 
@@ -303,6 +310,20 @@ op carries a **region target** resolved by node id, by **tag (convention)**, or 
 **structural query** (e.g. `subtree` to fan an op across every segment under a root), plus an
 optional `when` Predicate (skip unless true). No op touches a global slot or a fixed
 part-kind; everything is addressed by id, tag, or structure (§3.7).
+
+**Merge / split fall out of these ops — no new machinery.** Generalize the source/destination
+of the FORM ops to allow *another body* (or a detached graph), not just a template or the
+void: **merge = `graft_subtree`** of another body's graph onto this one; **split =
+`remove_subtree`** of a subtree, kept as its own detached graph rather than discarded. This is
+a one-line generalization of the existing ops, **not slime-specific** — it works for any
+material.
+
+**Body identity under split/merge is the author's call — the pure TF system is unopinionated.**
+The system produces the detached or combined graph and **stops there**. Whether a split-off
+graph becomes its own persistent world-entity, is discarded, becomes an NPC, or anything else
+is a **policy the author / game layer decides**; the TF model imposes nothing. Same
+unopinionated stance as coherence (opt-in validator, §3.8) and naming (convention, §3.7) —
+out of scope here as a policy concern.
 
 ### 4.3 Worked TF records
 
@@ -524,16 +545,16 @@ bulk, the rich prose realizer, combat/world/NPC triggers.
 
 ---
 
-## 8. Open questions (genuinely open — not resolved here)
+## 8. Open questions
 
-Earlier open questions are now **decided** and have moved into the design:
-**coherence is unenforced** (optional opt-in validator, §3.8); **naming/targeting is
-convention, not enforcement** (§3.7); **names are optional aliases bound to configurations**
-(§3.6); and **the pure system is setting-neutral** — example/MVP TFs are setting-neutral
-mechanism demos and setting flavor is a separate layer, deferred (§2, §4.3). What remains
-genuinely open:
+The pure TF data-model design has **no open questions remaining**. Everything once flagged is
+now decided and folded into the design: **coherence is unenforced** (opt-in validator, §3.8);
+**naming/targeting is convention, not enforcement** (§3.7); **names are optional aliases bound
+to configurations** (§3.6); **the pure system is setting-neutral** (§2, §4.3); **amorphous
+material (slime) is just another material on the uniform graph** (§3.2); and **merge/split are
+the existing graft/remove ops generalized across body boundaries** (§4.2).
 
-1. **How amorphous materials interact with form.** For slime (and other non-rigid materials)
-   the form is a *held shape* rather than a skeleton. How held-shape behaves under FORM edits
-   — whether a slime subtree even has stable attachment points, how it "flows" between stages
-   — is **flagged, not solved** here.
+The only residuals belong to **already-fenced layers**, not to the data model:
+**continuous 3D geometric fluidity** is part of the deferred 3D embodiment problem (§2, §3.0);
+and **world-entity identity policy under split/merge** is the author / game layer's call
+(§4.2). Neither is open *for the pure TF system*.

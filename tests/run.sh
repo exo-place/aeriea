@@ -51,6 +51,7 @@ SUITES=(
   face_expression_test
   gaze_test
   sim_clock_test
+  tf_system_test
   memory_test
   relationship_mood_test
   body_asset_test

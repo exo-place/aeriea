@@ -77,6 +77,8 @@ So every change to a user-facing surface (UI, rendered body, movement, text flow
 - **Implementer self-playtest.** The subagent that builds a surface runs it (xvfb render / drive the scene / capture the transcript), looks at the actual output, and fixes what is visibly wrong before returning. Coding a UI blind and reporting "tests pass" is not done. Reasoning about layout is not seeing it.
 - **Orchestrator playtest of the composed whole.** The orchestrator never relays a subagent's success report as truth. Before accepting work it playtests the composed result — itself or via a dedicated playtest subagent whose only job is to run the app as a user and report defects. Cross-seam defects (a duplicated header from two slices, a head doubled across two meshes) live in no single implementer's slice; only a whole-app playtest catches them.
 
+Playtesting a user-facing surface includes reading every user-facing string as a player would. Dev-notes, parenthetical self-comments, em-dash asides, and placeholder or awkward phrasing are defects, rejected the same as a visual glitch. A label states what it does in plain words.
+
 A defect is reported from observation, never guessed: run it and look, do not infer a plausible cause. Playtesting is not optional, not "when time permits," and never satisfied by the test suite alone.
 
 ## Feature gating

@@ -107,6 +107,30 @@
             program = "${wrapper}/bin/aeriea-test";
           };
 
+        # Launch the interactive TF (transformation) playground scene
+        # (tools/tf_play.tscn) in a REAL window on the user's display — NOT
+        # headless / NOT xvfb — so the user can drive the TF engine live.
+        #   nix run .#tfplay
+        # Mirrors apps.test: a writeShellApplication wrapper with godot_4 on
+        # PATH. `nix run` executes from the Nix store, so Godot's `--path` must
+        # point at the project root; we take it from the caller's cwd via
+        # AERIEA_ROOT (same convention as the test runner).
+        apps.tfplay =
+          let
+            wrapper = pkgs.writeShellApplication {
+              name = "aeriea-tfplay";
+              runtimeInputs = with pkgs; [ godot_4 ];
+              text = ''
+                export AERIEA_ROOT="''${AERIEA_ROOT:-$PWD}"
+                exec godot4 --path "$AERIEA_ROOT" "res://tools/tf_play.tscn" "$@"
+              '';
+            };
+          in
+          {
+            type = "app";
+            program = "${wrapper}/bin/aeriea-tfplay";
+          };
+
         devShells.default = pkgs.mkShell rec {
           buildInputs = with pkgs; [
             # Godot 4.x — primary engine

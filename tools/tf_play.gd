@@ -39,6 +39,7 @@ var _detached_prose: RichTextLabel
 var _detached_struct: RichTextLabel
 var _active_label: RichTextLabel
 var _clock_label: Label
+var _sex_label: RichTextLabel
 var _log: RichTextLabel
 var _merge_btn: Button
 var _split_buttons: VBoxContainer
@@ -118,6 +119,13 @@ func _build_ui() -> void:
 	_clock_label = Label.new()
 	_clock_label.add_theme_color_override("font_color", Color(0.7, 0.85, 0.7))
 	actions.add_child(_clock_label)
+
+	_sex_label = RichTextLabel.new()
+	_sex_label.bbcode_enabled = true
+	_sex_label.fit_content = true
+	_sex_label.scroll_active = false
+	_sex_label.custom_minimum_size = Vector2(0, 24)
+	actions.add_child(_sex_label)
 
 	# seed + reset
 	actions.add_child(_section("DETERMINISM"))
@@ -420,6 +428,9 @@ func _refresh() -> void:
 	_prose_label.text = _describe(_holder.body)
 	_struct_label.text = _structure_bb(_holder.body)
 
+	# derived sex readout (recomputed live — never stored, §6).
+	_sex_label.text = "[color=#f9c]derived sex:[/color] " + TfDescribe.sex_readout(_holder.body)
+
 	# detached body
 	if not _detached.is_empty():
 		_detached_prose.text = _describe(_detached)
@@ -494,8 +505,18 @@ func _struct_walk(seg: Dictionary, at: String, depth: int, lines: Array) -> void
 	var tag_s := ""
 	if not tags.is_empty():
 		tag_s = " [color=#7a9]{%s}[/color]" % ",".join(tags)
-	lines.append("%s[color=#9cf]%s[/color][color=#666]@%s[/color]  [color=#fc9]%s[/color]/%s%s%s" % [
-		indent, seg["id"], at, mat, cov_s, ext, tag_s])
+	# Fluid reservoirs (§5.1): type amount/capacity, total-ordered by type.
+	var fluid_s := ""
+	var fluids: Array = seg.get("fluids", [])
+	if not fluids.is_empty():
+		var ordered := fluids.duplicate()
+		ordered.sort_custom(func(a, b): return str(a.get("type", "")) < str(b.get("type", "")))
+		var fbits: Array = []
+		for f in ordered:
+			fbits.append("%s %d/%d" % [str(f.get("type", "")), int(f.get("amount", 0)), int(f.get("capacity", 0))])
+		fluid_s = " [color=#6cf]«%s»[/color]" % ", ".join(fbits)
+	lines.append("%s[color=#9cf]%s[/color][color=#666]@%s[/color]  [color=#fc9]%s[/color]/%s%s%s%s" % [
+		indent, seg["id"], at, mat, cov_s, ext, tag_s, fluid_s])
 	var kids: Array = seg.get("children", []).duplicate()
 	kids.sort_custom(func(a, b): return str(a["node"]["id"]) < str(b["node"]["id"]))
 	for edge in kids:
@@ -615,6 +636,56 @@ func _run_self_playtest() -> void:
 		errors.append("split produced no detached body")
 	_on_merge()
 	await _shot(out, "05_merge")
+
+	# === COMPOUND PARTS / GENITALIA / FLUIDS drive ===
+	# Fresh body so the genital/breast/fluid state is the starting reservoir set.
+	_reset()
+	print("[pt] start sex: " + TfDescribe.sex_readout(_holder.body))
+	await _shot(out, "06_genitalia_start")
+	# add a member -> derived phallic count rises.
+	_on_tf("add_phallic_genital")
+	print("[pt] after add member sex: " + TfDescribe.sex_readout(_holder.body))
+	if TfDescribe.derive_sex(_holder.body)["counts"]["phallic"] != 2:
+		errors.append("add_phallic_genital did not raise phallic count to 2")
+	# grow the 1st phallic (staged, seeded).
+	var g1_before := float(BodyGraph.find_by_id(_holder.body["root"], "genital_1")["props"]["length_cm"])
+	_on_tf("grow_first_phallic")
+	for i in 4:
+		_on_advance()
+	var g1_after := float(BodyGraph.find_by_id(_holder.body["root"], "genital_1")["props"]["length_cm"])
+	print("[pt] grew genital_1 length %.1f -> %.1f" % [g1_before, g1_after])
+	if g1_after <= g1_before:
+		errors.append("grow_first_phallic did not grow the member")
+	# set lactating -> milk fills (instant kick) + staged production refills.
+	var milk_before := int(BodyGraph.find_by_id(_holder.body["root"], "breast_l")["fluids"][0]["amount"])
+	_on_tf("set_lactating")
+	var milk_kick := int(BodyGraph.find_by_id(_holder.body["root"], "breast_l")["fluids"][0]["amount"])
+	print("[pt] milk after set_lactating: %d -> %d" % [milk_before, milk_kick])
+	if milk_kick <= milk_before:
+		errors.append("set_lactating did not fill milk")
+	_on_tf("lactation_production")
+	for i in 4:
+		_on_advance()
+	var milk_prod := int(BodyGraph.find_by_id(_holder.body["root"], "breast_l")["fluids"][0]["amount"])
+	print("[pt] milk after staged production: %d (cap %d)" % [milk_prod, int(BodyGraph.find_by_id(_holder.body["root"], "breast_l")["fluids"][0]["capacity"])])
+	await _shot(out, "07_lactating")
+	# feminize -> derived sex flips (parts only, no gender field).
+	print("[pt] PRE-feminize sex: " + TfDescribe.sex_readout(_holder.body))
+	_on_tf("feminize")
+	print("[pt] POST-feminize sex: " + TfDescribe.sex_readout(_holder.body))
+	var fem := TfDescribe.derive_sex(_holder.body)
+	if fem["has_phallic"] or not fem["has_vaginal"]:
+		errors.append("feminize did not flip derived sex (phallic removed, vaginal added)")
+	print("[pt] post-feminize prose:\n" + _describe(_holder.body))
+	await _shot(out, "08_feminized")
+	# fluid save/load round-trip.
+	_on_save()
+	var milk_pre_load := int(BodyGraph.find_by_id(_holder.body["root"], "breast_l")["fluids"][0]["amount"])
+	_on_load()
+	var milk_post_load := int(BodyGraph.find_by_id(_holder.body["root"], "breast_l")["fluids"][0]["amount"])
+	print("[pt] fluid round-trip: milk %d -> %d (%s)" % [milk_pre_load, milk_post_load, "OK" if milk_pre_load == milk_post_load else "DIVERGED"])
+	if milk_pre_load != milk_post_load:
+		errors.append("fluid amount diverged across save/load")
 
 	# determinism check (independent of the live holder)
 	var det_ok := _determinism_check()

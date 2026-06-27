@@ -118,6 +118,19 @@ static func apply_stage(
 	return effects
 
 
+# Resolve the single node-id an id-style op targets. Supports both the literal
+# `target_node` key and the ordinal `target` selector (§3.2) which resolves to a
+# specific node by node-id order. Returns "" if nothing resolves (op no-ops).
+static func _target_id(root: Dictionary, op: Dictionary) -> String:
+	if op.has("target_node"):
+		return str(op["target_node"])
+	if op.has("target"):
+		var nodes := BodyGraph.resolve_targets(root, {"select": op["target"]})
+		if not nodes.is_empty():
+			return str(nodes[0]["id"])
+	return ""
+
+
 static func _apply_op(root: Dictionary, op: Dictionary, rng: DetRng):
 	match op.get("effect", ""):
 		"graft_subtree":
@@ -127,16 +140,36 @@ static func _apply_op(root: Dictionary, op: Dictionary, rng: DetRng):
 			return {"effect": "graft_subtree", "parent_id": op["target_node"],
 					"node_id": op["subtree"]["id"]}
 		"remove_subtree":
-			var loc = BodyGraph.find_parent(root, op["target_node"])
+			# An `all_tagged` select fans the removal across every matching member,
+			# capturing each removed edge for undo (re-grafted in reverse on undo).
+			if op.has("target") and typeof(op["target"]) == TYPE_DICTIONARY \
+					and op["target"].get("select", "") == "all_tagged":
+				var matched := BodyGraph.resolve_targets(root, {"select": op["target"]})
+				var removed: Array = []
+				for seg in matched:
+					var l = BodyGraph.find_parent(root, seg["id"])
+					if l == null:
+						continue
+					var pid: String = l["parent"]["id"]
+					var e = BodyGraph.remove(root, seg["id"])
+					if e != null:
+						removed.append({"parent_id": pid, "node_id": seg["id"], "removed_edge": e})
+				if removed.is_empty():
+					return null
+				return {"effect": "remove_subtree_fan", "removed": removed}
+			var tid := _target_id(root, op)
+			if tid == "":
+				return null
+			var loc = BodyGraph.find_parent(root, tid)
 			if loc == null:
 				return null
 			var parent_id: String = loc["parent"]["id"]
-			var edge = BodyGraph.remove(root, op["target_node"])
+			var edge = BodyGraph.remove(root, tid)
 			if edge == null:
 				return null
 			# Store the removed edge so undo can re-graft it EXACTLY (§5.4).
 			return {"effect": "remove_subtree", "parent_id": parent_id,
-					"node_id": op["target_node"], "removed_edge": edge}
+					"node_id": tid, "removed_edge": edge}
 		"reparent":
 			var loc = BodyGraph.find_parent(root, op["target_node"])
 			if loc == null:
@@ -159,6 +192,10 @@ static func _apply_op(root: Dictionary, op: Dictionary, rng: DetRng):
 			return _apply_tag(root, op, true)
 		"tag_remove":
 			return _apply_tag(root, op, false)
+		"set_fluid_type":
+			return _apply_set_fluid_type(root, op)
+		"fluid_delta":
+			return _apply_fluid_delta(root, op, rng)
 		_:
 			return null
 
@@ -193,7 +230,10 @@ static func _fan_set(root: Dictionary, op: Dictionary, field: String, _rng: DetR
 # prop_delta: seeded integer roll (hundredths) added to a scalar, then clamped.
 # NO float in the draw: amount.roll draws integer hundredths in [lo*100, hi*100].
 static func _apply_prop_delta(root: Dictionary, op: Dictionary, rng: DetRng):
-	var seg = BodyGraph.find_by_id(root, op["target_node"])
+	var tid := _target_id(root, op)
+	if tid == "":
+		return null
+	var seg = BodyGraph.find_by_id(root, tid)
 	if seg == null:
 		return null
 	var prop: String = op["prop"]
@@ -220,6 +260,102 @@ static func _apply_prop_delta(root: Dictionary, op: Dictionary, rng: DetRng):
 	seg["props"][prop] = after
 	return {"effect": "prop_delta", "id": seg["id"], "prop": prop,
 			"before": before, "after": after}
+
+
+# set_fluid_type (§5.2): set/rename a fluid's `type` on the target(s). On a node with
+# no matching entry it ADDS one (amount:0, given/zero capacity) — the add/no-op
+# symmetry of the FORM ops. `match` selects the entry to retype (old type name); when
+# absent the op adds a fresh entry of `value` type. Captures the full prior fluids[]
+# per node so undo restores it exactly. Fans across resolved targets.
+# Resolve the fan-set of nodes a fluid op targets. Accepts the `target` selector
+# (§3.2 {select:...}) OR the legacy direct keys (target_node / tag / select / subtree_*).
+static func _fluid_targets(root: Dictionary, op: Dictionary) -> Array:
+	if op.has("target"):
+		var t = op["target"]
+		if typeof(t) == TYPE_DICTIONARY and t.has("select"):
+			return BodyGraph.resolve_targets(root, {"select": t})
+		return BodyGraph.resolve_targets(root, {"target_node": t})
+	return BodyGraph.resolve_targets(root, op)
+
+
+static func _apply_set_fluid_type(root: Dictionary, op: Dictionary):
+	var targets := _fluid_targets(root, op)
+	var new_type: String = str(op["value"])
+	var match_type = op.get("match", null)   # old type to rename, or null = add-if-absent
+	var capacity: int = int(op.get("capacity", 0))
+	var changes: Array = []
+	for seg in targets:
+		var before: Array = (seg.get("fluids", []) as Array).duplicate(true)
+		var fluids: Array = seg.get("fluids", [])
+		var found := false
+		for f in fluids:
+			if match_type != null and f.get("type", "") == match_type:
+				f["type"] = new_type
+				found = true
+				break
+			elif match_type == null and f.get("type", "") == new_type:
+				found = true   # entry already present — no add needed
+				break
+		if not found:
+			fluids.append({"type": new_type, "amount": 0, "capacity": capacity})
+		seg["fluids"] = fluids
+		var after: Array = fluids.duplicate(true)
+		if JSON.stringify(before) != JSON.stringify(after):
+			changes.append({"id": seg["id"], "before": before, "after": after})
+	if changes.is_empty():
+		return null
+	return {"effect": "fluids_set", "changes": changes}
+
+
+# fluid_delta (§5.2): add to a fluid's amount and/or capacity on the target(s), seeded
+# + clamped to integers (mirrors prop_delta — no float in the path). `amount` is a
+# {"roll":"uniform_int","lo":..,"hi":..} seeded integer draw or {"v":int} literal.
+# new amount clamps to [0, capacity]; capacity_delta grows/shrinks the reservoir
+# (clamped >= 0), and a shrunk capacity re-clamps amount down. If the target lacks the
+# named fluid entry it is ADDED (amount:0, capacity from capacity_delta) first, so a
+# capacity-opening delta can begin a reservoir. Captures prior fluids[] for undo.
+static func _apply_fluid_delta(root: Dictionary, op: Dictionary, rng: DetRng):
+	var targets := _fluid_targets(root, op)
+	var ftype: String = str(op["fluid"])
+	var changes: Array = []
+	for seg in targets:
+		var before: Array = (seg.get("fluids", []) as Array).duplicate(true)
+		var fluids: Array = seg.get("fluids", [])
+		var entry = null
+		for f in fluids:
+			if f.get("type", "") == ftype:
+				entry = f
+				break
+		if entry == null:
+			entry = {"type": ftype, "amount": 0, "capacity": 0}
+			fluids.append(entry)
+		# capacity first (so the amount clamp sees the new ceiling).
+		var cap: int = int(entry.get("capacity", 0))
+		cap = maxi(0, cap + int(op.get("capacity_delta", 0)))
+		entry["capacity"] = cap
+		# amount delta — seeded integer roll or literal.
+		var amount = op.get("amount", {"v": 0})
+		var delta: int = 0
+		if typeof(amount) == TYPE_DICTIONARY and amount.get("roll", "") == "uniform_int":
+			delta = rng.range_inclusive(int(amount["lo"]), int(amount["hi"]))
+		elif typeof(amount) == TYPE_DICTIONARY:
+			delta = int(amount.get("v", 0))
+		else:
+			delta = int(amount)
+		var amt: int = int(entry.get("amount", 0)) + delta
+		# clamp to [0, capacity] (null hi ⇒ this entry's capacity — §5.2).
+		var lo := 0
+		if op.has("clamp_amount"):
+			lo = int(op["clamp_amount"][0])
+		amt = clampi(amt, lo, cap)
+		entry["amount"] = amt
+		seg["fluids"] = fluids
+		var after: Array = fluids.duplicate(true)
+		if JSON.stringify(before) != JSON.stringify(after):
+			changes.append({"id": seg["id"], "before": before, "after": after})
+	if changes.is_empty():
+		return null
+	return {"effect": "fluids_set", "changes": changes}
 
 
 static func _apply_tag(root: Dictionary, op: Dictionary, add: bool):
@@ -256,6 +392,11 @@ static func _undo_one(root: Dictionary, eff: Dictionary) -> void:
 		"remove_subtree":
 			# Re-graft the exact removed edge back onto its parent.
 			BodyGraph.graft_edge(root, eff["parent_id"], eff["removed_edge"])
+		"remove_subtree_fan":
+			# Re-graft every removed member in reverse order (exact restoration).
+			for i in range(eff["removed"].size() - 1, -1, -1):
+				var r: Dictionary = eff["removed"][i]
+				BodyGraph.graft_edge(root, r["parent_id"], r["removed_edge"])
 		"reparent":
 			BodyGraph.reparent(root, eff["node_id"], eff["old_parent"], eff["old_at"])
 		"set_axis":
@@ -268,6 +409,16 @@ static func _undo_one(root: Dictionary, eff: Dictionary) -> void:
 			var seg = BodyGraph.find_by_id(root, eff["id"])
 			if seg != null:
 				seg["props"][eff["prop"]] = eff["before"]
+		"fluids_set":
+			# Restore each touched node's prior fluids[] exactly (§5.4).
+			for ch in eff["changes"]:
+				var seg = BodyGraph.find_by_id(root, ch["id"])
+				if seg != null:
+					var before: Array = (ch["before"] as Array).duplicate(true)
+					if before.is_empty():
+						seg.erase("fluids")   # was absent before — restore absence
+					else:
+						seg["fluids"] = before
 		"tag":
 			for id in eff["ids"]:
 				var seg = BodyGraph.find_by_id(root, id)

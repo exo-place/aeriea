@@ -8,23 +8,55 @@ const BodyGraph := preload("res://scripts/body/tf/body_graph.gd")
 
 
 # --- the starting biped (§7) ----------------------------------------------------
-# torso_upper (root) -> head, arm_l, arm_r, pelvis -> leg_l, leg_r.
-# All flesh + skin, conventionally tagged. Generic segments only.
+# torso_upper (root) -> head, arm_l, arm_r, breast_l, breast_r, pelvis -> leg_l,
+# leg_r, genital_1 (phallic), genital_2 (vaginal). Breasts + the phallic genital carry
+# fluid reservoirs (milk / seed / nectar), all amount 0 with capacity set. The pelvis
+# is the groin region exposing genital mounts. All flesh + skin, conventionally tagged;
+# genitalia/compound parts are ORDINARY tagged segments — no special-casing (§3).
 static func biped() -> Dictionary:
 	var seg := BodyGraph.segment
 	var c := BodyGraph.child
+	var fl := BodyGraph.fluid
 	var root: Dictionary = seg.call("torso_upper", "flesh", "skin", {"length_cm": 55.0},
 		["torso", "upper_body"], [
 			c.call("neck", seg.call("head", "flesh", "skin", {}, ["head"], [])),
 			c.call("shoulder_l", seg.call("arm_l", "flesh", "skin", {"length_cm": 62.0}, ["arm"], [])),
 			c.call("shoulder_r", seg.call("arm_r", "flesh", "skin", {"length_cm": 62.0}, ["arm"], [])),
+			c.call("chest_l", seg.call("breast_l", "flesh", "skin", {"volume_ml": 650.0},
+				["breast"], [], [fl.call("milk", 0, 400)])),
+			c.call("chest_r", seg.call("breast_r", "flesh", "skin", {"volume_ml": 650.0},
+				["breast"], [], [fl.call("milk", 0, 400)])),
 			c.call("hip", seg.call("pelvis", "flesh", "skin", {"length_cm": 25.0},
-				["pelvis", "lower_body"], [
+				["pelvis", "groin", "lower_body"], [
 					c.call("leg_l", seg.call("leg_l", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
 					c.call("leg_r", seg.call("leg_r", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
+					c.call("genital_mount_a", seg.call("genital_1", "flesh", "skin",
+						{"length_cm": 15.0, "girth_cm": 11.0}, ["genital", "phallic"], [],
+						[fl.call("seed", 0, 30)])),
+					c.call("genital_mount_b", seg.call("genital_2", "flesh", "skin",
+						{"depth_cm": 12.0}, ["genital", "vaginal"], [],
+						[fl.call("nectar", 0, 40)])),
 				])),
 		])
 	return {"root": root, "scalars": {"height_cm": 170.0}}
+
+
+# --- subtrees for the compound/genital TFs --------------------------------------
+static func phallic_genital(id: String) -> Dictionary:
+	return BodyGraph.segment(id, "flesh", "skin",
+		{"length_cm": 14.0, "girth_cm": 10.0}, ["genital", "phallic"], [],
+		[BodyGraph.fluid("seed", 0, 30)])
+
+
+static func vaginal_genital(id: String) -> Dictionary:
+	return BodyGraph.segment(id, "flesh", "skin",
+		{"depth_cm": 11.0}, ["genital", "vaginal"], [],
+		[BodyGraph.fluid("nectar", 0, 40)])
+
+
+static func breast_seg(id: String) -> Dictionary:
+	return BodyGraph.segment(id, "flesh", "skin", {"volume_ml": 500.0},
+		["breast"], [], [BodyGraph.fluid("milk", 0, 400)])
 
 
 # --- a quadruped-lower subtree (for the graft / merge demo) ----------------------
@@ -158,6 +190,98 @@ static func registry() -> Dictionary:
 			"ops": [
 				{"effect": "graft_subtree", "target_node": "barrel", "at": "tail_base",
 					"subtree": tail_seg()},
+			],
+		},
+
+		# === COMPOUND PARTS / GENITALIA / FLUIDS (compound-parts-and-fluids.md §8) ===
+
+		# (f) add a member — graft a phallic genital at a free groin mount. Proves "the
+		# Nth member" grows by one (an ordinary graft, like a tail); derived sex follows.
+		"add_phallic_genital": {
+			"id": "add_phallic_genital", "name": "graft a phallic genital", "staged": false,
+			"gate": {"op": "has_tag", "tag": "groin"},
+			"ops": [
+				{"effect": "graft_subtree", "target_node": "pelvis", "at": "genital_mount_c",
+					"subtree": phallic_genital("genital_3")},
+			],
+		},
+
+		# (g) remove a member — drop the 1st phallic genital by ORDINAL (node-id order).
+		# Proves nth_tagged ordinal targeting; undo re-grafts it exactly (§3.3).
+		"remove_first_phallic": {
+			"id": "remove_first_phallic", "name": "remove the 1st phallic genital",
+			"staged": false,
+			"gate": {"op": "has_tag", "tag": "phallic"},
+			"ops": [
+				{"effect": "remove_subtree",
+					"target": {"select": "nth_tagged", "tag": "genital", "kind": "phallic", "index": 0}},
+			],
+		},
+
+		# (h) grow a member — prop_delta length+girth on the 1st phallic genital, staged
+		# + seeded. (grow targets a single node via nth_tagged resolving to one.)
+		"grow_first_phallic": {
+			"id": "grow_first_phallic", "name": "grow the 1st phallic genital",
+			"staged": true, "stage_seconds": 600, "max_stages": 4,
+			"gate": {"op": "has_tag", "tag": "phallic"},
+			"ops": [
+				{"effect": "prop_delta",
+					"target": {"select": "nth_tagged", "tag": "genital", "kind": "phallic", "index": 0},
+					"prop": "length_cm",
+					"amount": {"roll": "uniform", "lo": 1.0, "hi": 3.0}, "clamp": [0.0, 40.0]},
+				{"effect": "prop_delta",
+					"target": {"select": "nth_tagged", "tag": "genital", "kind": "phallic", "index": 0},
+					"prop": "girth_cm",
+					"amount": {"roll": "uniform", "lo": 0.5, "hi": 1.5}, "clamp": [0.0, 25.0]},
+			],
+		},
+
+		# (i) set lactating — open the milk reservoir capacity AND begin production. The
+		# fluid_delta fans across ALL breasts (all_tagged), seeded integer fill, clamped
+		# to [0, capacity]. Instant kick-start; see lactation_production for the staged
+		# refill on sim_clock (§5.4).
+		"set_lactating": {
+			"id": "set_lactating", "name": "begin lactating (fill milk)", "staged": false,
+			"gate": {"op": "has_tag", "tag": "breast"},
+			"ops": [
+				{"effect": "fluid_delta",
+					"target": {"select": "all_tagged", "tag": "breast"}, "fluid": "milk",
+					"amount": {"roll": "uniform_int", "lo": 80, "hi": 160},
+					"capacity_delta": 0, "clamp_amount": [0]},
+			],
+		},
+
+		# (i2) standing milk production — a staged fluid_delta refilling on sim_clock,
+		# self-clamping at capacity (§5.4). Integer mL per stage.
+		"lactation_production": {
+			"id": "lactation_production", "name": "milk production (over time)",
+			"staged": true, "stage_seconds": 3600, "max_stages": 8,
+			"gate": {"op": "has_tag", "tag": "breast"},
+			"ops": [
+				{"effect": "fluid_delta",
+					"target": {"select": "all_tagged", "tag": "breast"}, "fluid": "milk",
+					"amount": {"roll": "uniform_int", "lo": 40, "hi": 70},
+					"capacity_delta": 0, "clamp_amount": [0]},
+			],
+		},
+
+		# (j) feminize — pure PART OPS that shift the DERIVED sex (no gender field, §6.2):
+		# remove every phallic genital, graft a vaginal one if absent, graft a 3rd breast
+		# row, and open milk capacity. Derived sex flips male/herm -> female for free.
+		"feminize": {
+			"id": "feminize", "name": "feminize (parts only — sex follows)", "staged": false,
+			"ops": [
+				{"effect": "remove_subtree",
+					"target": {"select": "all_tagged", "tag": "genital", "kind": "phallic"},
+					"when": {"op": "has_tag", "tag": "phallic"}},
+				{"effect": "graft_subtree", "target_node": "pelvis", "at": "genital_mount_v",
+					"subtree": vaginal_genital("genital_v"),
+					"when": {"op": "not", "of": {"op": "has_tag", "tag": "vaginal"}}},
+				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "chest_c",
+					"subtree": breast_seg("breast_c")},
+				{"effect": "fluid_delta",
+					"target": {"select": "all_tagged", "tag": "breast"}, "fluid": "milk",
+					"amount": {"v": 0}, "capacity_delta": 100, "clamp_amount": [0]},
 			],
 		},
 	}

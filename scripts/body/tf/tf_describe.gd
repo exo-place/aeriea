@@ -30,7 +30,65 @@ static func describe(body: Dictionary) -> String:
 	var zones := _transition_zones(root)
 	for z in zones:
 		lines.append("  ~ " + z)
+	# Derived sex/presentation — a pure read over the configuration, never stored (§6).
+	lines.append("  = sex (derived): " + sex_readout(body))
 	return "\n".join(lines)
+
+
+# --- derived sex / sexual presentation (§6) -------------------------------------
+# Sex is a CONFIGURATION, not a stored field: a pure read over which genital/breast
+# segments and tags are present. No gender enum, no stored field — a TF that grafts or
+# removes a part changes this output for free. Returns booleans, counts, and an OPEN
+# combinatorial token set (a body can satisfy several tokens at once, or none).
+static func derive_sex(body: Dictionary) -> Dictionary:
+	var root: Dictionary = body["root"]
+	var phallic := 0
+	var vaginal := 0
+	var breasts := 0
+	for seg in BodyGraph.all_segments(root):
+		var tags: Array = seg.get("tags", [])
+		if "genital" in tags:
+			if "phallic" in tags:
+				phallic += 1
+			if "vaginal" in tags:
+				vaginal += 1
+		if "breast" in tags:
+			breasts += 1
+	var has_p := phallic > 0
+	var has_v := vaginal > 0
+	var has_b := breasts > 0
+	# Open, combinatorial token mapping (content-owned, not engine-baked — §6.1).
+	var tokens: Array = []
+	if has_p and has_v:
+		tokens.append("herm")
+		tokens.append("intersex")
+	elif has_p and not has_v:
+		tokens.append("male")
+		if has_b:
+			tokens.append("busty")
+	elif has_v and not has_p:
+		tokens.append("female")
+		if not has_b:
+			tokens.append("flat")
+	else:   # neither phallic nor vaginal
+		if has_b:
+			tokens.append("femme_neuter")
+		else:
+			tokens.append("neuter")
+			tokens.append("agender")
+	return {
+		"has_phallic": has_p, "has_vaginal": has_v, "has_breasts": has_b,
+		"counts": {"phallic": phallic, "vaginal": vaginal, "breast": breasts},
+		"presentation_tokens": tokens,
+	}
+
+
+## A one-line human-readable form of derive_sex for the harness/description.
+static func sex_readout(body: Dictionary) -> String:
+	var s := derive_sex(body)
+	var c: Dictionary = s["counts"]
+	return "{%s}  (phallic=%d, vaginal=%d, breast=%d)" % [
+		", ".join(s["presentation_tokens"]), c["phallic"], c["vaginal"], c["breast"]]
 
 
 # --- form summary: alias if one matches, else structural (§3.6 fallback) ---------
@@ -90,7 +148,36 @@ static func _describe_segment(seg: Dictionary) -> String:
 	if surface != "":
 		bits.append(surface)
 	bits.append(noun)
-	return " ".join(bits) + " (" + seg["id"] + ")"
+	var line: String = " ".join(bits) + " (" + seg["id"] + ")"
+	# Fluid state, gated by the commitment gate (§5.3): a fluid is described ONLY if
+	# the segment actually carries that entry — no phantom milk. Plain (type, band).
+	var fluids: Array = seg.get("fluids", [])
+	if not fluids.is_empty():
+		var ordered := fluids.duplicate()
+		ordered.sort_custom(func(a, b): return str(a.get("type", "")) < str(b.get("type", "")))
+		var fbits: Array = []
+		for f in ordered:
+			fbits.append("%s %s" % [_fluid_band(int(f.get("amount", 0)), int(f.get("capacity", 0))), str(f.get("type", ""))])
+		line += " [" + ", ".join(fbits) + "]"
+	return line
+
+
+# Fullness band for a fluid reservoir (§5.3). Sensible MVP defaults, kept simple:
+# empty / low / partial / full / leaking (amount can exceed capacity only transiently;
+# clamping keeps it at capacity, so "full" is the ceiling).
+static func _fluid_band(amount: int, capacity: int) -> String:
+	if capacity <= 0:
+		return "no"     # no reservoir opened
+	if amount <= 0:
+		return "empty"
+	var pct := float(amount) / float(capacity)
+	if pct < 0.25:
+		return "low"
+	if pct < 0.75:
+		return "partial"
+	if pct < 1.0:
+		return "full"
+	return "brimming"
 
 
 # The visible surface: covering for flesh-type; the material itself otherwise (§6).
@@ -105,8 +192,17 @@ static func _surface_word(seg: Dictionary) -> String:
 
 
 static func _noun_for_tags(tags: Array) -> String:
+	# Genitalia: noun from the kind tag, clinical and setting-neutral (§4.1). The
+	# `genital` tag marks membership; a kind tag (phallic/vaginal/…) gives the noun.
+	if "genital" in tags:
+		for kind in ["phallic", "vaginal", "cloacal", "ovipositor", "tentacular"]:
+			if kind in tags:
+				return "%s genital" % kind
+		return "genital"
+	if "breast" in tags:
+		return "breast"
 	# Prefer the most specific conventional tag; structural fallback if none.
-	for pref in ["head", "tail", "arm", "leg", "hand", "spine", "torso"]:
+	for pref in ["head", "tail", "arm", "leg", "hand", "spine", "pelvis", "torso"]:
 		if pref in tags:
 			return pref
 	return "segment"
@@ -114,6 +210,29 @@ static func _noun_for_tags(tags: Array) -> String:
 
 static func _size_band(seg: Dictionary) -> String:
 	var props: Dictionary = seg.get("props", {})
+	var tags: Array = seg.get("tags", [])
+	# Genital size bands (§4.3) — clinical, MVP defaults, simple. Phallic reads off
+	# length_cm; vaginal off depth_cm; breasts off volume_ml.
+	if "genital" in tags:
+		if "phallic" in tags and props.has("length_cm"):
+			var pl := float(props["length_cm"])
+			if pl <= 0: return ""
+			if pl < 10: return "small"
+			if pl < 18: return ""
+			if pl < 28: return "large"
+			return "huge"
+		if "vaginal" in tags and props.has("depth_cm"):
+			var d := float(props["depth_cm"])
+			if d < 8: return "shallow"
+			if d < 16: return ""
+			return "deep"
+		return ""
+	if "breast" in tags and props.has("volume_ml"):
+		var v := float(props["volume_ml"])
+		if v < 200: return "small"
+		if v < 700: return ""
+		if v < 1200: return "large"
+		return "huge"
 	if props.has("length_cm"):
 		var l: float = float(props["length_cm"])
 		if l <= 0:

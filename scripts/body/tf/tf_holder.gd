@@ -175,6 +175,10 @@ func to_dict() -> Dictionary:
 ## shared static data, not per-character save state).
 static func from_dict(d: Dictionary, tf_registry: Dictionary) -> RefCounted:
 	var h := new(d["body"], int(d.get("world_seed", 0)), tf_registry)
+	# Fluids are integer-only (§5.1); JSON reloads every number as a float, so re-cast
+	# fluid amount/capacity back to int for a byte-identical, drift-free round-trip.
+	if h.body.has("root"):
+		BodyGraph.recast_fluid_ints(h.body["root"])
 	h.clock = SimClock.from_dict(d.get("clock", {}))
 	h.active = d.get("active", []).duplicate(true)
 	h.undo_log = d.get("undo_log", []).duplicate(true)
@@ -189,4 +193,21 @@ static func from_dict(d: Dictionary, tf_registry: Dictionary) -> RefCounted:
 	for batch in h.undo_log:
 		batch["action_id"] = int(batch.get("action_id", 0))
 		batch["stage_index"] = int(batch.get("stage_index", 0))
+		# Undo records may carry detached subtrees (remove_subtree's removed_edge) or
+		# captured fluids[] (fluids_set before/after) — recast their fluid ints too so
+		# the reloaded undo log is byte-identical and undo restores exact integers.
+		for eff in batch.get("effects", []):
+			if eff.get("effect", "") == "remove_subtree" and eff.has("removed_edge"):
+				BodyGraph.recast_fluid_ints(eff["removed_edge"]["node"])
+			elif eff.get("effect", "") == "remove_subtree_fan":
+				for r in eff.get("removed", []):
+					BodyGraph.recast_fluid_ints(r["removed_edge"]["node"])
+			elif eff.get("effect", "") == "fluids_set":
+				for ch in eff.get("changes", []):
+					for snap in [ch.get("before", []), ch.get("after", [])]:
+						for f in snap:
+							if f.has("amount"):
+								f["amount"] = int(round(float(f["amount"])))
+							if f.has("capacity"):
+								f["capacity"] = int(round(float(f["capacity"])))
 	return h

@@ -36,18 +36,30 @@ static func material_takes_covering(material: String) -> bool:
 # --- segment construction -------------------------------------------------------
 
 ## Build a generic segment dict. `covering` is nulled automatically if `material`
-## takes none. `props`/`tags`/`children` default to empty.
+## takes none. `props`/`tags`/`children` default to empty. `fluids` is OPTIONAL
+## (§5.1): an array of integer {type, amount, capacity} reservoir blocks. Absent ⇒ no
+## fluids (the default; back-compatible with every existing segment) — the key is only
+## added when fluids are supplied, so bodies without reservoirs are byte-unchanged.
 static func segment(
 		id: String, material: String, covering, props: Dictionary = {},
-		tags: Array = [], children: Array = []) -> Dictionary:
+		tags: Array = [], children: Array = [], fluids: Array = []) -> Dictionary:
 	var cov = covering
 	if not material_takes_covering(material):
 		cov = null
-	return {
+	var s := {
 		"id": id, "material": material, "covering": cov,
 		"props": props.duplicate(true), "tags": tags.duplicate(),
 		"children": children.duplicate(true),
 	}
+	if not fluids.is_empty():
+		s["fluids"] = fluids.duplicate(true)
+	return s
+
+
+## A fluid reservoir block (§5.1): integer {type, amount, capacity}. `type` is an open
+## string (milk / seed / nectar / …); engine bakes in none.
+static func fluid(type: String, amount: int, capacity: int) -> Dictionary:
+	return {"type": type, "amount": int(amount), "capacity": int(capacity)}
 
 
 ## A child-edge entry: a subtree docked at attachment point `at`.
@@ -123,6 +135,10 @@ static func subtree_segments(node: Dictionary) -> Array:
 
 ## Resolve the node(s) an op targets. Recognized op keys (checked in this order):
 ##   "target_node": id            -> [that segment] (or [] if absent)
+##   "select": {...}              -> ordinal/compound selector (§3.2):
+##       {"select":"all_tagged","tag":t[,"kind":k]}  -> every matching member
+##       {"select":"nth_tagged","tag":t[,"kind":k],"index":n} -> zero or one,
+##           by node-id order (no-op if fewer than n+1 — §3.7)
 ##   "tag": tagstr                -> every segment carrying that tag
 ##   "subtree_tag": tagstr        -> every segment in the subtree(s) rooted at a
 ##                                   tagged node (fan an op across a region)
@@ -135,6 +151,8 @@ static func resolve_targets(root: Dictionary, op: Dictionary) -> Array:
 		var seg = find_by_id(root, op["target_node"])
 		if seg != null:
 			out.append(seg)
+	elif op.has("select"):
+		out = _resolve_select(root, op["select"])
 	elif op.has("tag"):
 		for seg in all_segments(root):
 			if op["tag"] in seg.get("tags", []):
@@ -151,6 +169,35 @@ static func resolve_targets(root: Dictionary, op: Dictionary) -> Array:
 			out = subtree_segments(node)
 	out.sort_custom(func(a, b): return str(a["id"]) < str(b["id"]))
 	return out
+
+
+# Compound/ordinal selectors (§3.2). `all_tagged` returns the whole compound set
+# (by node-id order); `nth_tagged` returns zero or one — the index-th member in that
+# same order, or [] if the body has fewer than index+1 members (the §3.7 no-op).
+# An optional `kind` further filters to members also carrying that tag (e.g. the
+# phallic subset of the genital set). Both reduce to tag-resolution + node-id sort,
+# so they are sugar, not a new targeting mechanism.
+static func _resolve_select(root: Dictionary, sel: Dictionary) -> Array:
+	var tag: String = str(sel.get("tag", ""))
+	var kind = sel.get("kind", null)
+	var matched: Array = []
+	for seg in all_segments(root):
+		var tags: Array = seg.get("tags", [])
+		if tag != "" and not (tag in tags):
+			continue
+		if kind != null and not (kind in tags):
+			continue
+		matched.append(seg)
+	# Node-id order so "the Nth" is deterministic and replay-safe (§3.2).
+	matched.sort_custom(func(a, b): return str(a["id"]) < str(b["id"]))
+	var kind_kw: String = str(sel.get("select", ""))
+	if kind_kw == "nth_tagged":
+		var idx: int = int(sel.get("index", 0))
+		if idx < 0 or idx >= matched.size():
+			return []   # no-op past the end (§3.7)
+		return [matched[idx]]
+	# all_tagged (default): the whole compound set.
+	return matched
 
 
 # --- form edits -----------------------------------------------------------------
@@ -209,4 +256,21 @@ static func from_json(text: String) -> Dictionary:
 	var parsed = JSON.parse_string(text)
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return {}
+	if parsed.has("root"):
+		recast_fluid_ints(parsed["root"])
 	return parsed
+
+
+## Re-cast every segment's fluid `amount`/`capacity` back to INTEGER after a JSON
+## reload (JSON erases the int/float distinction — every number reloads as a float).
+## Fluids are integer-only (§5.1), so a reloaded body must restore exact ints for a
+## byte-identical round-trip and drift-free determinism. Walks the whole graph.
+static func recast_fluid_ints(seg: Dictionary) -> void:
+	if seg.has("fluids"):
+		for f in seg["fluids"]:
+			if f.has("amount"):
+				f["amount"] = int(round(float(f["amount"])))
+			if f.has("capacity"):
+				f["capacity"] = int(round(float(f["capacity"])))
+	for edge in seg.get("children", []):
+		recast_fluid_ints(edge["node"])

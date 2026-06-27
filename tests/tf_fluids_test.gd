@@ -282,8 +282,8 @@ func _test_feminize_flips_sex() -> void:
 		"undo re-grafts genital_1 byte-identically (props + fluids)")
 	_ok(JSON.stringify(BodyGraph.find_by_id(h.body["root"], "genital_3")) == g3_pre,
 		"undo re-grafts genital_3 byte-identically (props + fluids)")
-	_ok(BodyGraph.find_parent(h.body["root"], "genital_1")["parent"]["id"] == "lower_body",
-		"undo restores genital_1 under the lower body")
+	_ok(BodyGraph.find_parent(h.body["root"], "genital_1")["parent"]["id"] == "torso_upper",
+		"undo restores genital_1 under the torso (a biped has no separate lower-body part)")
 
 
 # lactation_production self-limits at capacity (staged refill on sim_clock).

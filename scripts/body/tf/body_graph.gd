@@ -236,6 +236,19 @@ static func graft_edge(root: Dictionary, target_id: String, edge: Dictionary) ->
 	return true
 
 
+## Re-graft a removed edge at a SPECIFIC child index (so undo can restore exact sibling
+## order — §5.4). Clamps the index into range; appends if out of range or parent missing.
+static func graft_edge_at(root: Dictionary, target_id: String, edge: Dictionary, index: int) -> bool:
+	var parent = find_by_id(root, target_id)
+	if parent == null:
+		return false
+	var p: Dictionary = parent
+	var kids: Array = p["children"]
+	var i := clampi(index, 0, kids.size())
+	kids.insert(i, child(edge["at"], edge["node"]))
+	return true
+
+
 ## Move `node_id` to dock at (`new_parent_id`, `at`). Returns true on success.
 static func reparent(root: Dictionary, node_id: String, new_parent_id: String, at: String) -> bool:
 	var edge = remove(root, node_id)

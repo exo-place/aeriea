@@ -228,9 +228,12 @@ func _target_phrase(op: Dictionary) -> String:
 	if op.has("target") and typeof(op["target"]) == TYPE_DICTIONARY:
 		var sel: Dictionary = op["target"]
 		var kind = sel.get("kind", null)
-		# A region tag ("groin"/"lower_body") names the lower body, not a per-item "every X".
+		# The `groin` region tag names the genitals + rear (the parts that hang at the
+		# groin), not a separate lower-body part — a biped has none.
 		var tagstr := str(sel.get("tag", "part"))
-		if kind == null and (tagstr == "groin" or tagstr == "lower_body"):
+		if kind == null and tagstr == "groin":
+			return "the genitals and rear"
+		if kind == null and tagstr == "lower_body":
 			return "the lower body"
 		var noun := _kind_noun(str(kind)) if kind != null else _word(tagstr)
 		if sel.get("select", "") == "nth_tagged":

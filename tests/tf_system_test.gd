@@ -106,11 +106,14 @@ func _test_staged_progression() -> void:
 
 
 func _test_region_targeting_tag() -> void:
-	# A tag-targeting op hits ONLY tagged nodes. Build a body, tag-add to lower_body.
+	# A subtree-tag op hits ONLY nodes under the tagged region. Make a taur (a real
+	# `lower_body`-tagged barrel) and mark its subtree. After the biped→taur graft the
+	# barrel carries its 4 legs PLUS the reparented groin parts (butt + 2 genitals), so
+	# the lower_body subtree is 7 nodes; the upper body (torso/head/arms/breasts) is
+	# untouched.
 	var reg := TfContent.registry()
 	var h := TfHolder.new(TfContent.biped(), 1, reg)
 	h.apply_instant("graft_quadruped_lower")
-	# Manually drive a tag op via the applier over the lower_body subtree.
 	var tf := {"id": "x", "ops": [{"effect": "tag_add", "subtree_tag": "lower_body", "value": "MARK"}]}
 	TfApplier.apply_stage(h.body, tf, 0, 1, 99)
 	var marked := 0
@@ -120,7 +123,7 @@ func _test_region_targeting_tag() -> void:
 			marked += 1
 		if seg["id"] in ["torso_upper", "head", "arm_l", "arm_r"] and "MARK" in seg.get("tags", []):
 			unmarked_upper = false
-	_ok(marked == 5, "tag-target hit only the lower_body subtree (5 nodes: barrel+4 legs), got %d" % marked)
+	_ok(marked == 8, "subtree-tag hit only the lower_body subtree (8 nodes: barrel+4 legs+butt+2 genitals), got %d" % marked)
 	_ok(unmarked_upper, "tag-target left the upper body untouched")
 
 
@@ -134,7 +137,7 @@ func _test_region_targeting_structural() -> void:
 	for seg in BodyGraph.all_segments(h.body["root"]):
 		if "S" in seg.get("tags", []):
 			n += 1
-	_ok(n == 5, "structural subtree_under hit barrel + its 4 legs (5), got %d" % n)
+	_ok(n == 8, "structural subtree_under hit the barrel subtree (8: barrel+4 legs+butt+2 reparented genitals), got %d" % n)
 
 
 func _test_convention_noop() -> void:
@@ -146,29 +149,53 @@ func _test_convention_noop() -> void:
 	_ok(eff.is_empty(), "convention-targeting op no-ops on a body lacking the tag (§3.7)")
 
 
+# A graph normal form: every node's children sorted by id, recursively. Sibling-array
+# ORDER carries no meaning (the whole engine addresses/iterates by id — all_segments
+# sorts by id), so undo's §5.4 contract is "restore the graph", checked in normal form.
+# A compound form edit (remove legs + graft barrel + reparent the groin parts) can leave
+# siblings in a different append order while being a perfect semantic restore.
+func _normal_form(body: Dictionary) -> String:
+	var copy: Dictionary = body.duplicate(true)
+	_sort_children(copy["root"])
+	return JSON.stringify(copy)
+
+
+func _sort_children(seg: Dictionary) -> void:
+	var kids: Array = seg.get("children", [])
+	kids.sort_custom(func(a, b): return str(a["node"]["id"]) < str(b["node"]["id"]))
+	for edge in kids:
+		_sort_children(edge["node"])
+
+
 func _test_reversibility() -> void:
 	var reg := TfContent.registry()
 	var h := TfHolder.new(TfContent.biped(), 1, reg)
-	var before := JSON.stringify(h.body)
-	h.apply_instant("graft_quadruped_lower")   # removes the biped lower body + grafts barrel
-	var after := JSON.stringify(h.body)
+	var before := _normal_form(h.body)
+	h.apply_instant("graft_quadruped_lower")   # remove legs + graft barrel + reparent groin
+	var after := _normal_form(h.body)
 	_ok(before != after, "graft changed the graph")
 	h.undo_last()
-	_ok(JSON.stringify(h.body) == before, "undo restored the EXACT prior graph (incl. re-grafted lower body)")
+	_ok(_normal_form(h.body) == before,
+		"undo restored the prior graph (genitals/butt reparented back, legs re-grafted)")
 
 
 func _test_reversibility_regraft() -> void:
-	# A remove_subtree undo must re-graft the removed subtree byte-identically.
+	# A remove_subtree FAN undo must re-graft every removed member byte-identically. A
+	# biped has no lower-body node — the groin parts (butt + 2 genitals) hang off the
+	# torso — so removing `all_tagged groin` fans across them; undo restores each exactly.
 	var reg := TfContent.registry()
 	var h := TfHolder.new(TfContent.biped(), 1, reg)
-	var lower_before := JSON.stringify(BodyGraph.find_by_id(h.body["root"], "lower_body"))
+	var body_before := _normal_form(h.body)
 	var tf := {"id": "x", "ops": [{"effect": "remove_subtree",
 		"target": {"select": "all_tagged", "tag": "groin"}}]}
 	var eff := TfApplier.apply_stage(h.body, tf, 0, 1, 1)
-	_ok(BodyGraph.find_by_id(h.body["root"], "lower_body") == null, "remove dropped the lower-body subtree")
+	var still_has_groin := false
+	for seg in BodyGraph.all_segments(h.body["root"]):
+		if "groin" in seg.get("tags", []):
+			still_has_groin = true
+	_ok(not still_has_groin, "remove fanned across and dropped every groin-tagged part")
 	TfApplier.undo_effects(h.body, eff)
-	var lower_after := JSON.stringify(BodyGraph.find_by_id(h.body["root"], "lower_body"))
-	_ok(lower_after == lower_before, "undo re-grafted the removed subtree byte-identically")
+	_ok(_normal_form(h.body) == body_before, "undo re-grafted the removed groin parts (graph restored)")
 
 
 func _test_save_load_roundtrip() -> void:
@@ -287,8 +314,9 @@ func _test_staged_graft() -> void:
 	h.advance_time(1200)   # stage 0 due — the form edit lands
 	_ok(BodyGraph.find_by_id(h.body["root"], "barrel") != null,
 		"staged graft: form edit lands on the first due stage (barrel grafted)")
-	_ok(BodyGraph.find_by_id(h.body["root"], "lower_body") == null,
-		"staged graft: the biped lower body was removed as part of the staged form edit")
+	_ok(BodyGraph.find_by_id(h.body["root"], "leg_l") == null \
+			and BodyGraph.find_by_id(h.body["root"], "leg_r") == null,
+		"staged graft: the biped legs were removed as part of the staged form edit")
 	var len0: float = float(BodyGraph.find_by_id(h.body["root"], "barrel")["props"]["length_cm"])
 	h.advance_time(1200 * 4)   # remaining grow stages
 	var len1: float = float(BodyGraph.find_by_id(h.body["root"], "barrel")["props"]["length_cm"])

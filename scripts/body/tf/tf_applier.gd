@@ -144,6 +144,18 @@ static func _graft_parent_id(root: Dictionary, op: Dictionary) -> String:
 	return ""
 
 
+# Resolve a reparent's NEW parent id: a literal `new_parent` id, or `new_parent_tag`
+# resolving to the first node carrying that tag (id order). "" if nothing resolves.
+static func _reparent_parent_id(root: Dictionary, op: Dictionary) -> String:
+	if op.has("new_parent"):
+		return str(op["new_parent"])
+	if op.has("new_parent_tag"):
+		var nodes := BodyGraph.resolve_targets(root, {"tag": op["new_parent_tag"]})
+		if not nodes.is_empty():
+			return str(nodes[0]["id"])
+	return ""
+
+
 static func _apply_op(root: Dictionary, op: Dictionary, rng: DetRng):
 	match op.get("effect", ""):
 		"graft_subtree":
@@ -191,17 +203,43 @@ static func _apply_op(root: Dictionary, op: Dictionary, rng: DetRng):
 			return {"effect": "remove_subtree", "parent_id": parent_id,
 					"node_id": tid, "removed_edge": edge}
 		"reparent":
+			# Resolve the new parent: a literal `new_parent` id, or `new_parent_tag`
+			# resolving to the first node carrying that tag (id order). "" ⇒ no-op.
+			var np := _reparent_parent_id(root, op)
+			if np == "":
+				return null
+			# Fan form: an `all_tagged` select moves every matching member onto the new
+			# parent (genitals/butt onto a freshly-grafted barrel). Idempotent — a member
+			# already docked under `np` is skipped, so a re-run produces no spurious move.
+			if op.has("target") and typeof(op["target"]) == TYPE_DICTIONARY \
+					and op["target"].get("select", "") == "all_tagged":
+				var matched := BodyGraph.resolve_targets(root, {"select": op["target"]})
+				var moves: Array = []
+				for seg in matched:
+					var l = BodyGraph.find_parent(root, seg["id"])
+					if l == null or l["parent"]["id"] == np:
+						continue
+					var op_id: String = l["parent"]["id"]
+					var op_at: String = l["at"]
+					var op_idx: int = int(l["index"])   # original sibling index (exact undo)
+					if BodyGraph.reparent(root, seg["id"], np, op["at"]):
+						moves.append({"node_id": seg["id"], "old_parent": op_id,
+							"old_at": op_at, "old_index": op_idx,
+							"new_parent": np, "new_at": op["at"]})
+				if moves.is_empty():
+					return null
+				return {"effect": "reparent_fan", "moves": moves}
 			var loc = BodyGraph.find_parent(root, op["target_node"])
 			if loc == null:
 				return null
 			var old_parent: String = loc["parent"]["id"]
 			var old_at: String = loc["at"]
-			var ok := BodyGraph.reparent(root, op["target_node"], op["new_parent"], op["at"])
+			var ok := BodyGraph.reparent(root, op["target_node"], np, op["at"])
 			if not ok:
 				return null
 			return {"effect": "reparent", "node_id": op["target_node"],
 					"old_parent": old_parent, "old_at": old_at,
-					"new_parent": op["new_parent"], "new_at": op["at"]}
+					"new_parent": np, "new_at": op["at"]}
 		"set_material":
 			return _fan_set(root, op, "material", rng)
 		"set_covering":
@@ -454,6 +492,15 @@ static func _undo_one(root: Dictionary, eff: Dictionary) -> void:
 				BodyGraph.graft_edge(root, r["parent_id"], r["removed_edge"])
 		"reparent":
 			BodyGraph.reparent(root, eff["node_id"], eff["old_parent"], eff["old_at"])
+		"reparent_fan":
+			# Reverse each move in reverse order, docking the node back at its EXACT prior
+			# parent AND sibling index so the graph restores byte-identically (§5.4).
+			for i in range(eff["moves"].size() - 1, -1, -1):
+				var m: Dictionary = eff["moves"][i]
+				var edge = BodyGraph.remove(root, m["node_id"])
+				if edge != null:
+					edge["at"] = m["old_at"]
+					BodyGraph.graft_edge_at(root, m["old_parent"], edge, int(m["old_index"]))
 		"set_axis":
 			for ch in eff["changes"]:
 				var seg = BodyGraph.find_by_id(root, ch["id"])

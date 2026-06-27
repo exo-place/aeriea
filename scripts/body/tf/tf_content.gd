@@ -8,19 +8,20 @@ const BodyGraph := preload("res://scripts/body/tf/body_graph.gd")
 
 
 # --- the starting biped (§7) ----------------------------------------------------
-# torso_upper (root) -> head, arm_l, arm_r, breast_l, breast_r, lower_body -> leg_l,
-# leg_r, genital_1 (phallic), genital_2 (vaginal). Breasts + the phallic genital carry
-# fluid reservoirs (milk / seed / nectar), all amount 0 with capacity set. The lower body
-# is the groin region exposing genital mounts — an ORDINARY tagged segment carrying the
-# `lower_body` region tag + `groin` mount tag (NOT `body_core`, so a biped never reads as
-# a taur; NOT a special `pelvis` id/tag — content targets it by tag/relation, §3). Legs,
-# butt and genital mounts hang off it exactly as a barrel/naga lower carries its own legs.
+# torso_upper (root) -> head, arm_l, arm_r, breast_l, breast_r, leg_l, leg_r, butt,
+# genital_1 (phallic), genital_2 (vaginal). Breasts + the phallic genital carry fluid
+# reservoirs (milk / seed / nectar), all amount 0 with capacity set. A biped has NO
+# separate lower-body part: the legs hang directly off the torso, and the butt + genital
+# mounts carry the `groin` region tag (so they stay tag-targetable) while attaching to
+# the torso just like any other segment. The torso stays `body_core`/`upper_body` only —
+# never `lower_body` — so a biped never false-matches the taur/naga detector. A real
+# lower-body STRUCTURE (a barrel/serpent) is an added body_core segment, not present here.
 static func biped() -> Dictionary:
 	var seg := BodyGraph.segment
 	var c := BodyGraph.child
 	var fl := BodyGraph.fluid
 	var root: Dictionary = seg.call("torso_upper", "flesh", "skin", {"length_cm": 55.0},
-		["torso", "body_core", "upper_body"], [
+		["torso", "body_core", "upper_body", "groin_mount"], [
 			c.call("neck", seg.call("head", "flesh", "skin", {}, ["head"], [])),
 			c.call("shoulder_l", seg.call("arm_l", "flesh", "skin", {"length_cm": 62.0}, ["arm"], [])),
 			c.call("shoulder_r", seg.call("arm_r", "flesh", "skin", {"length_cm": 62.0}, ["arm"], [])),
@@ -28,18 +29,15 @@ static func biped() -> Dictionary:
 				["breast"], [], [fl.call("milk", 0, 400)])),
 			c.call("chest_r", seg.call("breast_r", "flesh", "skin", {"volume_ml": 650, "band_cm": 32},
 				["breast"], [], [fl.call("milk", 0, 400)])),
-			c.call("hip", seg.call("lower_body", "flesh", "skin", {"length_cm": 25.0, "width_cm": 36.0},
-				["groin", "lower_body"], [
-					c.call("leg_l", seg.call("leg_l", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
-					c.call("leg_r", seg.call("leg_r", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
-					c.call("rear", seg.call("butt", "flesh", "skin", {"volume_ml": 800}, ["butt"], [])),
-					c.call("genital_mount_a", seg.call("genital_1", "flesh", "skin",
-						{"length_cm": 15.0, "girth_cm": 11.0}, ["genital", "phallic"], [],
-						[fl.call("seed", 0, 30)])),
-					c.call("genital_mount_b", seg.call("genital_2", "flesh", "skin",
-						{"depth_cm": 12.0}, ["genital", "vaginal"], [],
-						[fl.call("nectar", 0, 40)])),
-				])),
+			c.call("leg_l", seg.call("leg_l", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
+			c.call("leg_r", seg.call("leg_r", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
+			c.call("rear", seg.call("butt", "flesh", "skin", {"volume_ml": 800}, ["butt", "groin"], [])),
+			c.call("genital_mount_a", seg.call("genital_1", "flesh", "skin",
+				{"length_cm": 15.0, "girth_cm": 11.0}, ["genital", "groin", "phallic"], [],
+				[fl.call("seed", 0, 30)])),
+			c.call("genital_mount_b", seg.call("genital_2", "flesh", "skin",
+				{"depth_cm": 12.0}, ["genital", "groin", "vaginal"], [],
+				[fl.call("nectar", 0, 40)])),
 		])
 	return {"root": root, "scalars": {"height_cm": 170.0}}
 
@@ -47,13 +45,13 @@ static func biped() -> Dictionary:
 # --- subtrees for the compound/genital TFs --------------------------------------
 static func phallic_genital(id: String) -> Dictionary:
 	return BodyGraph.segment(id, "flesh", "skin",
-		{"length_cm": 14.0, "girth_cm": 10.0}, ["genital", "phallic"], [],
+		{"length_cm": 14.0, "girth_cm": 10.0}, ["genital", "groin", "phallic"], [],
 		[BodyGraph.fluid("seed", 0, 30)])
 
 
 static func vaginal_genital(id: String) -> Dictionary:
 	return BodyGraph.segment(id, "flesh", "skin",
-		{"depth_cm": 11.0}, ["genital", "vaginal"], [],
+		{"depth_cm": 11.0}, ["genital", "groin", "vaginal"], [],
 		[BodyGraph.fluid("nectar", 0, 40)])
 
 
@@ -71,7 +69,7 @@ static func quadruped_lower() -> Dictionary:
 	var seg := BodyGraph.segment
 	var c := BodyGraph.child
 	return seg.call("barrel", "flesh", "skin", {"length_cm": 90.0},
-		["barrel", "body_core", "lower_body"], [
+		["barrel", "body_core", "lower_body", "groin_mount"], [
 			c.call("leg_fl", seg.call("leg_fl", "flesh", "skin", {"length_cm": 80.0}, ["leg"], [])),
 			c.call("leg_fr", seg.call("leg_fr", "flesh", "skin", {"length_cm": 80.0}, ["leg"], [])),
 			c.call("leg_bl", seg.call("leg_bl", "flesh", "skin", {"length_cm": 80.0}, ["leg"], [])),
@@ -87,19 +85,22 @@ static func tail_seg() -> Dictionary:
 # --- the TF registry (id -> TF record) ------------------------------------------
 static func registry() -> Dictionary:
 	return {
-		# (a) FORM graft, instant: biped -> taur. Remove the biped lower body first
-		# (targeted by its `lower_body` region tag, not a global id), then graft the
-		# quadruped-lower structure at the hip. Gate: a biped lower body present and not
-		# already a barrel.
+		# (a) FORM graft, instant: biped -> taur. A biped has no lower-body part — its legs
+		# hang off the torso — so the form edit removes every `leg`, grafts the quadruped
+		# barrel (a real body_core lower structure) at the hip, then REPARENTS the groin
+		# parts (genitals + butt) onto the barrel so they're carried by the new lower body
+		# instead of being lost. Gate: not already a barrel.
 		"graft_quadruped_lower": {
 			"id": "graft_quadruped_lower",
 			"name": "Graft quadruped lower body",
 			"staged": false,
 			"gate": {"op": "not", "of": {"op": "has_tag", "tag": "barrel"}},
 			"ops": [
-				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "groin"}},
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
 					"subtree": quadruped_lower()},
+				{"effect": "reparent", "target": {"select": "all_tagged", "tag": "groin"},
+					"new_parent_tag": "barrel", "at": "groin_mount"},
 			],
 		},
 
@@ -174,15 +175,18 @@ static func registry() -> Dictionary:
 			# out (and kill the staged TF) the moment the barrel lands. Op-level `when` lets
 			# the form fire once in stage 0 while the grow stages keep running.
 			"ops": [
-				# stage 0: the form edit (remove the biped lower body by its `groin` mount
-				# tag — only the biped lower carries it, never a barrel; graft the barrel).
-				# On later stages these no-op (the groin-tagged lower is gone / the graft
-				# `when` keeps it from re-firing).
-				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "groin"},
-					"when": {"op": "has_tag", "tag": "groin"}},
+				# stage 0: the form edit. A biped's legs hang off the torso, so remove every
+				# `leg`, graft the barrel, and reparent the groin parts (genitals/butt) onto
+				# it. On later stages these no-op (the legs are gone / the graft+reparent
+				# `when` guards keep them from re-firing once the barrel is present).
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"},
+					"when": {"op": "not", "of": {"op": "has_tag", "tag": "barrel"}}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
 					"subtree": quadruped_lower(),
 					"when": {"op": "not", "of": {"op": "has_tag", "tag": "barrel"}}},
+				{"effect": "reparent", "target": {"select": "all_tagged", "tag": "groin"},
+					"new_parent_tag": "barrel", "at": "groin_mount",
+					"when": {"op": "has_tag", "tag": "barrel"}},
 				# stages 1-4: grow the grafted barrel a little each step (visible progression
 				# after the form lands). Guarded so it stops once grown.
 				{"effect": "prop_delta", "target_node": "barrel", "prop": "length_cm",
@@ -209,7 +213,7 @@ static func registry() -> Dictionary:
 			"id": "add_phallic_genital", "name": "Graft a phallic genital", "staged": false,
 			"gate": {"op": "has_tag", "tag": "groin"},
 			"ops": [
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "genital_mount_c",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "genital_mount_c",
 					"subtree": phallic_genital("genital_3")},
 			],
 		},
@@ -285,7 +289,7 @@ static func registry() -> Dictionary:
 				{"effect": "remove_subtree",
 					"target": {"select": "all_tagged", "tag": "genital", "kind": "phallic"},
 					"when": {"op": "has_tag", "tag": "phallic"}},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "genital_mount_v",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "genital_mount_v",
 					"subtree": vaginal_genital("genital_v"),
 					"when": {"op": "not", "of": {"op": "has_tag", "tag": "vaginal"}}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "chest_c",

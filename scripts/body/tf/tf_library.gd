@@ -92,12 +92,12 @@ static func _bird_leg(id: String) -> Dictionary:
 # --- compound parts / reproductive ---
 static func _penis(id: String) -> Dictionary:
 	return _seg(id, "flesh", "skin", {"length_cm": 15.0, "girth_cm": 11.0},
-		["genital", "phallic"], [], [BodyGraph.fluid("seed", 0, 30)])
+		["genital", "groin", "phallic"], [], [BodyGraph.fluid("seed", 0, 30)])
 
 
 static func _vagina(id: String) -> Dictionary:
 	return _seg(id, "flesh", "skin", {"depth_cm": 12.0},
-		["genital", "vaginal"], [], [BodyGraph.fluid("nectar", 0, 40)])
+		["genital", "groin", "vaginal"], [], [BodyGraph.fluid("nectar", 0, 40)])
 
 
 static func _breast(id: String, volume: int = 500) -> Dictionary:
@@ -127,8 +127,10 @@ static func _nipple(id: String) -> Dictionary:
 # --- whole quadruped / serpentine lowers (body-core barrels) ---
 static func _quad_barrel(id: String, covering: String) -> Dictionary:
 	# A horizontal body-core barrel carrying four legs. `body_core` (NOT a special spine
-	# tag) + `lower_body`; `barrel` role tag so a graft can guard on "barrel absent".
-	return _seg(id, "flesh", covering, {"length_cm": 90.0}, ["barrel", "body_core", "lower_body"], [
+	# tag) + `lower_body`; `barrel` role tag so a graft can guard on "barrel absent". The
+	# `groin_mount` tag marks it as the carrier the genitals/butt/tail dock onto (the role
+	# a biped's torso plays, since a biped has no separate lower-body part).
+	return _seg(id, "flesh", covering, {"length_cm": 90.0}, ["barrel", "body_core", "lower_body", "groin_mount"], [
 		_child("leg_fl", _seg("leg_fl", "flesh", covering, {"length_cm": 80.0}, ["leg", "front"], [])),
 		_child("leg_fr", _seg("leg_fr", "flesh", covering, {"length_cm": 80.0}, ["leg", "front"], [])),
 		_child("leg_bl", _seg("leg_bl", "flesh", covering, {"length_cm": 80.0}, ["leg", "hind"], [])),
@@ -137,8 +139,9 @@ static func _quad_barrel(id: String, covering: String) -> Dictionary:
 
 
 static func _serpent_tail(id: String) -> Dictionary:
-	# A long legless lower body (naga): a body-core lower segment, no legs.
-	return _seg(id, "flesh", "scales", {"length_cm": 240.0}, ["body_core", "lower_body", "serpentine"], [])
+	# A long legless lower body (naga): a body-core lower segment, no legs. Carries
+	# `groin_mount` so the genitals reparent onto it (a naga keeps its sex, just no legs).
+	return _seg(id, "flesh", "scales", {"length_cm": 240.0}, ["body_core", "lower_body", "serpentine", "groin_mount"], [])
 
 
 # =============================================================================== records
@@ -220,14 +223,6 @@ static func _size_tfs() -> Dictionary:
 			"gate": {"op": "has_tag", "tag": "vaginal"},
 			"ops": [{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "genital", "kind": "vaginal"},
 				"prop": "depth_cm", "amount": {"v": 6.0}, "clamp": [0.0, 40.0]}],
-		},
-		"widen_hips": {
-			"id": "widen_hips", "name": "Widen hips", "cat": "Size and scale",
-			"blurb": "Broadens the hips for a wider, curvier lower body.",
-			"staged": false,
-			"gate": {"op": "has_tag", "tag": "groin"},
-			"ops": [{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin"},
-				"prop": "width_cm", "amount": {"v": 14.0}, "clamp": [0.0, 90.0]}],
 		},
 		"grow_taller": {
 			"id": "grow_taller", "name": "Grow taller", "cat": "Size and scale",
@@ -345,7 +340,7 @@ static func _appendage_tfs() -> Dictionary:
 			"blurb": "Grows a long, flowing horse-like tail at the base of the spine.",
 			"staged": false,
 			"gate": {"op": "not", "of": {"op": "has_tag", "tag": "tail"}},
-			"ops": [{"effect": "graft_subtree", "parent_tag": "groin", "at": "tail_base",
+			"ops": [{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "tail_base",
 				"subtree": _equine_tail()}],
 		},
 		"add_feline_tail": {
@@ -353,7 +348,7 @@ static func _appendage_tfs() -> Dictionary:
 			"blurb": "Grows a slim, expressive feline tail at the base of the spine.",
 			"staged": false,
 			"gate": {"op": "not", "of": {"op": "has_tag", "tag": "tail"}},
-			"ops": [{"effect": "graft_subtree", "parent_tag": "groin", "at": "tail_base",
+			"ops": [{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "tail_base",
 				"subtree": _feline_tail()}],
 		},
 		"add_draconic_tail": {
@@ -361,7 +356,7 @@ static func _appendage_tfs() -> Dictionary:
 			"blurb": "Grows a thick, scaled dragon tail at the base of the spine.",
 			"staged": false,
 			"gate": {"op": "not", "of": {"op": "has_tag", "tag": "tail"}},
-			"ops": [{"effect": "graft_subtree", "parent_tag": "groin", "at": "tail_base",
+			"ops": [{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "tail_base",
 				"subtree": _draconic_tail()}],
 		},
 		"add_feathered_wings": {
@@ -464,45 +459,62 @@ static func _plan_tfs() -> Dictionary:
 			"id": "biped_to_taur", "name": "Become a taur", "cat": "Whole-body plans",
 			"blurb": "Replaces the two legs with a four-legged barrel below the upright torso.",
 			"staged": false,
-			"gate": {"op": "has_tag", "tag": "groin"},
+			"gate": {"op": "not", "of": {"op": "has_tag", "tag": "barrel"}},
 			"ops": [
-				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "groin"}},
+				# A biped has no lower-body part — its legs hang off the torso. Remove every
+				# leg, graft the barrel (a real body_core lower structure), then reparent the
+				# groin parts (genitals/butt) onto the barrel so they aren't lost.
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
 					"subtree": _quad_barrel("barrel", "skin")},
+				{"effect": "reparent", "target": {"select": "all_tagged", "tag": "groin"},
+					"new_parent_tag": "barrel", "at": "groin_mount"},
 			],
 		},
 		"taur_to_biped": {
 			"id": "taur_to_biped", "name": "Return to two legs", "cat": "Whole-body plans",
-			"blurb": "Removes a taur barrel and restores an ordinary two-legged lower body.",
+			"blurb": "Removes a taur barrel and restores an ordinary two-legged stance.",
 			"staged": false,
 			"gate": {"op": "has_tag", "tag": "barrel"},
 			"ops": [
+				# Bring the groin parts (genitals/butt) back onto the torso, drop the barrel,
+				# then regrow two legs directly on the torso — a biped has no lower part.
+				{"effect": "reparent", "target": {"select": "all_tagged", "tag": "groin"},
+					"new_parent_tag": "upper_body", "at": "groin_mount"},
 				{"effect": "remove_subtree", "target_node": "barrel"},
-				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
-					"subtree": _biped_lower()},
+				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "leg_l",
+					"subtree": _seg("leg_l", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])},
+				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "leg_r",
+					"subtree": _seg("leg_r", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])},
 			],
 		},
 		"biped_to_naga": {
 			"id": "biped_to_naga", "name": "Become a naga", "cat": "Whole-body plans",
 			"blurb": "Replaces the legs with a single long, scaled serpentine tail.",
 			"staged": false,
-			"gate": {"op": "has_tag", "tag": "groin"},
+			"gate": {"op": "has_tag", "tag": "leg"},
 			"ops": [
-				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "groin"}},
+				# Remove the legs, graft the serpentine lower, then carry the groin parts
+				# (genitals/butt) onto it — a naga keeps its sex, just loses the legs.
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
 					"subtree": _naga_lower()},
+				{"effect": "reparent", "target": {"select": "all_tagged", "tag": "groin"},
+					"new_parent_tag": "serpentine", "at": "groin_mount"},
 			],
 		},
 		"biped_to_quadruped": {
 			"id": "biped_to_quadruped", "name": "Become a quadruped", "cat": "Whole-body plans",
 			"blurb": "Drops to all fours: the arms become front legs on a four-legged barrel.",
 			"staged": false,
-			"gate": {"op": "has_tag", "tag": "groin"},
+			"gate": {"op": "not", "of": {"op": "has_tag", "tag": "barrel"}},
 			"ops": [
-				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "groin"}},
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
 				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "arm"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
 					"subtree": _quad_barrel("barrel", "skin")},
+				{"effect": "reparent", "target": {"select": "all_tagged", "tag": "groin"},
+					"new_parent_tag": "barrel", "at": "groin_mount"},
 				{"effect": "tag_add", "target_node": "torso_upper", "value": "quadruped"},
 			],
 		},
@@ -510,35 +522,23 @@ static func _plan_tfs() -> Dictionary:
 			"id": "biped_to_harpy", "name": "Become a harpy", "cat": "Whole-body plans",
 			"blurb": "Trades arms for feathered wings and legs for clawed bird legs.",
 			"staged": false,
-			"gate": {"op": "has_tag", "tag": "groin"},
+			"gate": {"op": "has_tag", "tag": "leg"},
 			"ops": [
 				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "arm"}},
-				{"effect": "remove_subtree", "target_node": "leg_l"},
-				{"effect": "remove_subtree", "target_node": "leg_r"},
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_l",
 					"subtree": _feathered_wing("wing_l")},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_r",
 					"subtree": _feathered_wing("wing_r")},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "leg_l",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "leg_l",
 					"subtree": _bird_leg("leg_bird_l")},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "leg_r",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "leg_r",
 					"subtree": _bird_leg("leg_bird_r")},
 				{"effect": "set_covering", "subtree_under": "torso_upper", "value": "feathers",
 					"when": {"op": "has_tag", "tag": "torso"}},
 			],
 		},
 	}
-
-
-# An ordinary biped lower body: the `lower_body` region carrying `groin` mounts, two legs
-# and the butt. NOT `body_core` (so it never reads as a taur) and NOT a special `pelvis`
-# id/tag — content targets it by tag, exactly like the barrel/naga lower (§3).
-static func _biped_lower() -> Dictionary:
-	return _seg("lower_body", "flesh", "skin", {"length_cm": 25.0, "width_cm": 36.0}, ["groin", "lower_body"], [
-		_child("leg_l", _seg("leg_l", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
-		_child("leg_r", _seg("leg_r", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
-		_child("rear", _seg("butt", "flesh", "skin", {"volume_ml": 800}, ["butt"], [])),
-	])
 
 
 static func _naga_lower() -> Dictionary:
@@ -558,7 +558,7 @@ static func _species_tfs() -> Dictionary:
 					"subtree": _animal_ear("ear_l", "fur")},
 				{"effect": "graft_subtree", "target_node": "head", "at": "crown_r",
 					"subtree": _animal_ear("ear_r", "fur")},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "tail_base",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "tail_base",
 					"subtree": _seg("tail", "flesh", "fur", {"length_cm": 70.0}, ["tail"], [])},
 				{"effect": "graft_subtree", "target_node": "arm_l", "at": "fingertips",
 					"subtree": _seg("claw_l", "keratin", null, {"length_cm": 3.0}, ["claw"], [])},
@@ -576,7 +576,7 @@ static func _species_tfs() -> Dictionary:
 					"subtree": _animal_ear("ear_l", "fur_red")},
 				{"effect": "graft_subtree", "target_node": "head", "at": "crown_r",
 					"subtree": _animal_ear("ear_r", "fur_red")},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "tail_base",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "tail_base",
 					"subtree": _seg("tail", "flesh", "fur_red", {"length_cm": 80.0}, ["tail"], [])},
 			],
 		},
@@ -594,7 +594,7 @@ static func _species_tfs() -> Dictionary:
 					"subtree": _membrane_wing("wing_l")},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_r",
 					"subtree": _membrane_wing("wing_r")},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "tail_base",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "tail_base",
 					"subtree": _draconic_tail()},
 			],
 		},
@@ -602,11 +602,13 @@ static func _species_tfs() -> Dictionary:
 			"id": "config_naga", "name": "Naga", "cat": "Species configurations",
 			"blurb": "A serpent-folk: the legs give way to one long scaled tail, with a scaled hide.",
 			"staged": false,
-			"gate": {"op": "has_tag", "tag": "groin"},
+			"gate": {"op": "has_tag", "tag": "leg"},
 			"ops": [
-				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "groin"}},
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
 					"subtree": _naga_lower()},
+				{"effect": "reparent", "target": {"select": "all_tagged", "tag": "groin"},
+					"new_parent_tag": "serpentine", "at": "groin_mount"},
 				{"effect": "set_covering", "subtree_under": "torso_upper", "value": "scales",
 					"when": {"op": "has_tag", "tag": "torso"}},
 			],
@@ -615,20 +617,19 @@ static func _species_tfs() -> Dictionary:
 			"id": "config_harpy", "name": "Harpy", "cat": "Species configurations",
 			"blurb": "A bird-folk: feathered body, winged arms, and clawed digitigrade bird legs.",
 			"staged": false,
-			"gate": {"op": "has_tag", "tag": "groin"},
+			"gate": {"op": "has_tag", "tag": "leg"},
 			"ops": [
 				{"effect": "set_covering", "subtree_under": "torso_upper", "value": "feathers",
 					"when": {"op": "has_tag", "tag": "torso"}},
 				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "arm"}},
-				{"effect": "remove_subtree", "target_node": "leg_l"},
-				{"effect": "remove_subtree", "target_node": "leg_r"},
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_l",
 					"subtree": _feathered_wing("wing_l")},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_r",
 					"subtree": _feathered_wing("wing_r")},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "leg_l",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "leg_l",
 					"subtree": _bird_leg("leg_bird_l")},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "leg_r",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "leg_r",
 					"subtree": _bird_leg("leg_bird_r")},
 			],
 		},
@@ -655,9 +656,9 @@ static func _species_tfs() -> Dictionary:
 					"prop": "volume_ml", "amount": {"v": 1600.0}, "clamp": [0.0, 8000.0]},
 				{"effect": "fluid_delta", "target": {"select": "all_tagged", "tag": "breast"},
 					"fluid": "milk", "amount": {"v": 300}, "capacity_delta": 600, "clamp_amount": [0]},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "tail_base",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "tail_base",
 					"subtree": _seg("tail", "flesh", "fur", {"length_cm": 70.0}, ["tail"], [])},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "udder_mount",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "udder_mount",
 					"subtree": _udder("udder")},
 				{"effect": "fluid_delta", "tag": "udder", "fluid": "milk",
 					"amount": {"v": 1500}, "capacity_delta": 0, "clamp_amount": [0]},
@@ -690,7 +691,7 @@ static func _reproductive_tfs() -> Dictionary:
 			"blurb": "Grows a penis at a free groin mount; derived sex follows the new part.",
 			"staged": false,
 			"gate": {"op": "has_tag", "tag": "groin"},
-			"ops": [{"effect": "graft_subtree", "parent_tag": "groin", "at": "genital_mount_c",
+			"ops": [{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "genital_mount_c",
 				"subtree": _penis("genital_added")}],
 		},
 		"remove_penis": {
@@ -706,7 +707,7 @@ static func _reproductive_tfs() -> Dictionary:
 			"blurb": "Grows a vagina at a free groin mount; derived sex follows the new part.",
 			"staged": false,
 			"gate": {"op": "not", "of": {"op": "has_tag", "tag": "vaginal"}},
-			"ops": [{"effect": "graft_subtree", "parent_tag": "groin", "at": "genital_mount_v",
+			"ops": [{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "genital_mount_v",
 				"subtree": _vagina("genital_v")}],
 		},
 		"feminize_parts": {
@@ -717,7 +718,7 @@ static func _reproductive_tfs() -> Dictionary:
 				{"effect": "remove_subtree",
 					"target": {"select": "all_tagged", "tag": "genital", "kind": "phallic"},
 					"when": {"op": "has_tag", "tag": "phallic"}},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "genital_mount_v",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "genital_mount_v",
 					"subtree": _vagina("genital_v"),
 					"when": {"op": "not", "of": {"op": "has_tag", "tag": "vaginal"}}},
 				# Guarded so a second application adds no duplicate-id breast row (idempotent).
@@ -734,7 +735,7 @@ static func _reproductive_tfs() -> Dictionary:
 				{"effect": "remove_subtree",
 					"target": {"select": "all_tagged", "tag": "genital", "kind": "vaginal"},
 					"when": {"op": "has_tag", "tag": "vaginal"}},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "genital_mount_c",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "genital_mount_c",
 					"subtree": _penis("genital_added"),
 					"when": {"op": "not", "of": {"op": "has_tag", "tag": "phallic"}}},
 				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "breast"}},
@@ -769,9 +770,9 @@ static func _reproductive_tfs() -> Dictionary:
 			"staged": false,
 			"gate": {"op": "has_tag", "tag": "groin"},
 			"ops": [
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "belly_l",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "belly_l",
 					"subtree": _teat("teat_belly_l")},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "belly_r",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "belly_r",
 					"subtree": _teat("teat_belly_r")},
 			],
 		},
@@ -785,11 +786,13 @@ static func _hybrid_tfs() -> Dictionary:
 			"id": "hybrid_chitin_naga", "name": "Chitin naga", "cat": "Hybrids",
 			"blurb": "A serpentine lower body of hard chitin under a chitin-shelled torso.",
 			"staged": false,
-			"gate": {"op": "has_tag", "tag": "groin"},
+			"gate": {"op": "has_tag", "tag": "leg"},
 			"ops": [
-				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "groin"}},
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
 					"subtree": _serpent_tail("naga_tail")},
+				{"effect": "reparent", "target": {"select": "all_tagged", "tag": "groin"},
+					"new_parent_tag": "serpentine", "at": "groin_mount"},
 				{"effect": "set_material", "subtree_under": "torso_upper", "value": "chitin"},
 			],
 		},
@@ -797,11 +800,13 @@ static func _hybrid_tfs() -> Dictionary:
 			"id": "hybrid_furred_taur", "name": "Furred taur", "cat": "Hybrids",
 			"blurb": "A four-legged taur barrel and torso both covered in fur.",
 			"staged": false,
-			"gate": {"op": "has_tag", "tag": "groin"},
+			"gate": {"op": "not", "of": {"op": "has_tag", "tag": "barrel"}},
 			"ops": [
-				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "groin"}},
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
 					"subtree": _quad_barrel("barrel", "fur")},
+				{"effect": "reparent", "target": {"select": "all_tagged", "tag": "groin"},
+					"new_parent_tag": "barrel", "at": "groin_mount"},
 				{"effect": "set_covering", "subtree_under": "torso_upper", "value": "fur",
 					"when": {"op": "has_tag", "tag": "torso"}},
 				{"effect": "graft_subtree", "target_node": "barrel", "at": "tail_base",
@@ -812,18 +817,17 @@ static func _hybrid_tfs() -> Dictionary:
 			"id": "hybrid_slime_harpy", "name": "Slime harpy", "cat": "Hybrids",
 			"blurb": "A winged bird-legged harpy whose whole body is translucent slime.",
 			"staged": false,
-			"gate": {"op": "has_tag", "tag": "groin"},
+			"gate": {"op": "has_tag", "tag": "leg"},
 			"ops": [
 				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "arm"}},
-				{"effect": "remove_subtree", "target_node": "leg_l"},
-				{"effect": "remove_subtree", "target_node": "leg_r"},
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_l",
 					"subtree": _feathered_wing("wing_l")},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_r",
 					"subtree": _feathered_wing("wing_r")},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "leg_l",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "leg_l",
 					"subtree": _bird_leg("leg_bird_l")},
-				{"effect": "graft_subtree", "parent_tag": "groin", "at": "leg_r",
+				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "leg_r",
 					"subtree": _bird_leg("leg_bird_r")},
 				{"effect": "set_material", "subtree_under": "torso_upper", "value": "slime"},
 			],

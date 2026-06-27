@@ -205,6 +205,12 @@ static func from_dict(d: Dictionary, tf_registry: Dictionary) -> RefCounted:
 				for r in eff.get("removed", []):
 					BodyGraph.recast_fluid_ints(r["removed_edge"]["node"])
 					BodyGraph.recast_int_props(r["removed_edge"]["node"])
+			elif eff.get("effect", "") == "reparent_fan":
+				# `old_index` is the integer sibling slot for exact-order undo (§5.4); JSON
+				# reloads it as a float, so re-cast it for a type-stable round-trip.
+				for m in eff.get("moves", []):
+					if m.has("old_index"):
+						m["old_index"] = int(round(float(m["old_index"])))
 			elif eff.get("effect", "") == "fluids_set":
 				for ch in eff.get("changes", []):
 					for snap in [ch.get("before", []), ch.get("after", [])]:

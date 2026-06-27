@@ -25,10 +25,10 @@ const TfMeasure := preload("res://scripts/body/tf/tf_measure.gd")
 # Optional form aliases: a structural predicate -> short label. Open, conventional,
 # unenforced (§3.6). They key off a SECOND body-core lower segment — a node tagged both
 # `body_core` AND `lower_body` (a horizontal barrel or a serpentine lower carrying the
-# weight, distinct from the upright torso). A plain biped's lower body carries `lower_body`
-# but NOT `body_core` (it is an ordinary groin-bearing segment, uniform with how a barrel/
-# naga lower is just a tag arrangement), so these never false-match a biped. No special
-# `spine` tag: a barrel and a torso are both body-core.
+# weight, distinct from the upright torso). A plain biped has NO lower-body part at all —
+# its legs hang off the torso, and the torso is `body_core`/`upper_body` only (never
+# `lower_body`) — so these never false-match a biped. No special `spine` tag: a barrel and
+# a torso are both body-core.
 #   - a serpentine (legless) lower  -> "naga"
 #   - any other body-core lower      -> "taur"
 static func _form_alias(root: Dictionary):
@@ -51,6 +51,11 @@ static func describe(body: Dictionary, std: Dictionary = {}) -> String:
 	var root: Dictionary = body["root"]
 	var lines: Array = []
 	lines.append(_form_summary(root))
+	# A single body-coat line for a non-default covering/material (fur/scales/chitin/…)
+	# so the surface reads once instead of being inventoried per segment.
+	var coat := _body_coat_line(root)
+	if coat != "":
+		lines.append("  " + coat + ".")
 	for phrase in _part_phrases(root, std):
 		lines.append("  " + phrase + ".")
 	# Transition zones, de-duplicated (symmetric parts share one seam description).
@@ -243,13 +248,18 @@ static func _structural_form_raw(root: Dictionary) -> String:
 
 # --- per-segment player prose ---------------------------------------------------
 
-# Collapse the segment list into player phrases: identical descriptions for symmetric
-# parts merge into a count ("two bare-skinned arms"), preserving first-seen order.
+# Collapse the NOTABLE segments into player phrases: identical descriptions for symmetric
+# parts merge into a count ("two large breasts"), preserving first-seen order. Baseline
+# gross-anatomy parts (a plain torso/head/arms/legs/trunk) are NOT listed — the form line
+# already conveys them; only distinctive features and sizes are bulleted (a description,
+# not a parts inventory).
 static func _part_phrases(root: Dictionary, std: Dictionary) -> Array:
 	var order: Array = []        # phrase (singular) in first-seen order
 	var counts := {}
 	var pluralizers := {}        # singular -> plural form, captured once
 	for seg in BodyGraph.all_segments(root):
+		if not _is_notable(seg, std):
+			continue
 		var p := _segment_phrase(seg, std)
 		if p["text"] == "":
 			continue
@@ -263,14 +273,67 @@ static func _part_phrases(root: Dictionary, std: Dictionary) -> Array:
 	for key in order:
 		var n: int = counts[key]
 		if n == 1:
-			# Inherently-plural part nouns ("hips") take no article and read bare.
-			if _is_plural_noun_phrase(key):
-				out.append("- " + _capitalize(key))
-			else:
-				out.append("- " + _capitalize(_article(key) + " " + key))
+			out.append("- " + _capitalize(_article(key) + " " + key))
 		else:
 			out.append("- %s %s" % [_num_word(n).capitalize(), pluralizers[key]])
 	return out
+
+
+# Baseline gross-anatomy nouns that the form line already conveys — never bulleted on
+# their own (a plain one of these is implied by "a two-armed torso over a two-legged
+# lower body"). A distinctive SIZE or a NOTABLE role still promotes the segment.
+const _BASELINE_NOUNS := ["torso", "head", "arm", "leg", "hand", "barrel",
+	"serpentine lower body"]
+
+# Roles that are always notable features worth a bullet (regardless of size/surface).
+const _FEATURE_NOUNS := ["breast", "penis", "vagina", "vulva", "cloaca", "tentacle",
+	"ovipositor", "genitals", "butt", "tail", "wing", "horn", "ear", "claw", "hoof",
+	"udder", "teat", "nipple"]
+
+
+# Is this segment worth a bullet? A feature part always is; a baseline structural part
+# (torso/head/arms/legs/trunk) only when it carries a distinctive size band (long legs,
+# a short fae torso). Plain baseline parts are implied by the form line and stay silent.
+static func _is_notable(seg: Dictionary, _std: Dictionary) -> bool:
+	var noun := _noun_for_tags(seg.get("tags", []))
+	if noun in _FEATURE_NOUNS:
+		return true
+	# Hands and feet are implied by their limb (arm/leg count in the form line) — never
+	# bulleted on their own.
+	if noun == "hand" or noun == "foot":
+		return false
+	if noun in _BASELINE_NOUNS:
+		return _size_band(seg) != ""
+	# An unrecognized/other segment: bullet it (better seen than silently dropped).
+	return true
+
+
+# A single line for the body's overall non-default coat (covering or material), read off
+# the body-core trunk so a uniformly-furred/scaled/chitin body says it ONCE rather than
+# repeating the surface on every segment. Empty for an ordinary bare-skinned body.
+static func _body_coat_line(root: Dictionary) -> String:
+	var trunk = _trunk_segment(root)
+	if trunk == null:
+		return ""
+	var material: String = trunk.get("material", "")
+	if not BodyGraph.material_takes_covering(material):
+		# The material IS the surface (chitin/slime/…): "A body of living slime."
+		return "A body of %s" % _humanize(material)
+	var cov = trunk.get("covering")
+	if cov == null or cov == "skin":
+		return ""
+	# Flesh with a non-skin covering: "Covered in fur." / "Covered in red fur."
+	return "Covered in %s" % _humanize(str(cov))
+
+
+# The body-core trunk that carries the body's overall surface — the upright torso (the
+# upper_body core). Returns null if none found.
+static func _trunk_segment(root: Dictionary):
+	for seg in BodyGraph.all_segments(root):
+		var tags: Array = seg.get("tags", [])
+		if "body_core" in tags and "upper_body" in tags:
+			return seg
+	return null
 
 
 # One segment's player phrase: { text (singular, no article), plural }. Size and fluids
@@ -328,12 +391,6 @@ static func _plural(noun: String) -> String:
 	if noun.ends_with("y") and noun.length() > 1:
 		return noun.substr(0, noun.length() - 1) + "ies"
 	return noun + "s"
-
-
-# True if the phrase's head noun is inherently plural (reads bare, no "a"/"an"). The
-# biped lower body reads as "hips" — a pair-shaped noun with no singular here.
-static func _is_plural_noun_phrase(phrase: String) -> bool:
-	return phrase.ends_with("hips")
 
 
 # Indefinite article for a phrase ("a"/"an") by its leading sound (vowel heuristic).
@@ -573,10 +630,6 @@ static func _noun_for_tags(tags: Array) -> String:
 			"nipple", "teat", "arm", "leg", "hand", "torso"]:
 		if pref in tags:
 			return pref
-	# A biped lower body (the groin-bearing `lower_body` region, NOT a body_core
-	# barrel/naga lower) reads as "hips" — a uniform tag-driven noun, no `pelvis` id/tag.
-	if ("lower_body" in tags or "groin" in tags) and not ("body_core" in tags):
-		return "hips"
 	# A body-core trunk with no more-specific noun. A serpentine lower (naga) reads as a
 	# serpentine lower body; a horizontal barrel (taur) reads as a barrel; an upright
 	# trunk reads as a torso.
@@ -614,15 +667,21 @@ static func _size_band(seg: Dictionary) -> String:
 		if v < 700: return ""
 		if v < 1200: return "large"
 		return "huge"
-	# Hips read a width band off width_cm so widen_hips is VISIBLE (the base lower body is
-	# ~36 cm; widen_hips raises it). Below the generic length band so it wins for the lower
-	# body. (§4.3 — a real prop the describer reads, replacing the old no-op width_cm.)
-	if ("lower_body" in tags or "groin" in tags) and props.has("width_cm"):
-		var w := float(props["width_cm"])
-		if w < 30: return "narrow"
-		if w < 44: return ""
-		if w < 58: return "wide"
-		return "broad"
+	# Baseline structural limbs/trunk (leg/arm/torso) carry an ORDINARY natural length —
+	# the starting biped's legs (~85 cm), arms (~62 cm) and torso (~55 cm) read with NO
+	# adjective so they stay silent in a plain description. Only a distinctively short
+	# (fae) or long (taller/giant) limb gets a band, so the size morphs stay visible.
+	if ("leg" in tags or "arm" in tags or "torso" in tags) and props.has("length_cm"):
+		var ll := float(props["length_cm"])
+		if ll <= 0:
+			return ""
+		if ll < 25:
+			return "short"
+		if ll < 100:
+			return ""   # ordinary natural length — no adjective
+		if ll < 150:
+			return "long"
+		return "very long"
 	if props.has("length_cm"):
 		var l: float = float(props["length_cm"])
 		if l <= 0:

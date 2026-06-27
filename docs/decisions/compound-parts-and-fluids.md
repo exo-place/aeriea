@@ -218,6 +218,55 @@ have (§3.2). Nothing here is a closed record. Banding (cup bands, length bands)
 is the same `band(props)` concern as elsewhere (`transformation-system.md` §6) — content, not
 structure.
 
+### 4.4 Size model — canonical integers + a derived, configurable measurement (implemented)
+
+The size a player *reads* (a cup, an inch length) is **derived on every describe**, never
+stored. Only canonical integers are stored on the segment; the human-facing unit/cup is a pure
+function of those integers under a chosen **measurement standard** (a describe-layer parameter,
+not body state). This is the size analog of the fluid fullness bands (§5.3), and it **answers
+open question §9.3** ("who owns banding thresholds"): the engine ships a deterministic default
+model here.
+
+**Canonical fields (integers, stored as per-segment props):**
+- breast segments: `volume_ml` (int) and `band_cm` (int)
+- butt segment: `volume_ml` (int)
+- genital segments: `length_cm` / `girth_cm` (existing)
+
+**Deterministic integer cup derivation** (`scripts/body/tf/tf_measure.gd`):
+
+```
+isqrt(n)               = integer floor sqrt (Newton iteration, integer-only)
+diff_mm(volume, band)  = max(0, K_V*isqrt(volume) - K_B*band)     # K_V=8, K_B=4
+```
+
+`diff_mm` is **increasing in volume** (concave, via `isqrt`) and **decreasing in band** — both
+monotonicities hold by construction, so a bigger volume grows the cup while a wider rib band
+shrinks it at fixed volume. No float touches the decision path.
+
+**A measurement standard** = `(step_mm, letters[], length_unit, volume_unit, band_render)`:
+
+- **IMPERIAL**: `step_mm=25`, letters `[AA,A,B,C,D,DD,DDD,G,H,I,J]`, lengths in inches
+  (cm/2.54 rounded), volume in floz (cc/29.57 rounded), band shown in inches (band_cm/2.54).
+- **METRIC** (default): `step_mm=20`, letters `[AA,A,B,C,D,E,F,G,H,I,J,K,L]`, lengths in cm,
+  volume in ml/cc, band shown in cm.
+
+```
+cup_letter(volume,band,std) = std.letters[ clamp(diff_mm(volume,band)/std.step_mm, 0, n-1) ]
+cup_label(volume,band,std)  = str(band_in_std_unit) + cup_letter(...)
+```
+
+**Worked example** (asserted in `tests/tf_size_test.gd`): `volume_ml=1200, band_cm=32` →
+`diff=max(0, 8*34 - 4*32)=144`. Imperial: idx `144/25=5` → "DD", band 32cm→13in → **"13DD"**.
+Metric: idx `144/20=7` → "G", band "32" → **"32G"**. The *same body* renders "13DD" (imperial)
+vs "32G" (metric); cm↔in and ml↔floz flip with the standard.
+
+**Where the standard lives.** It is a parameter of the describe layer — `TfDescribe.describe(
+body, std)` with a default standard and an override arg — **never stored on the body**. The
+playground (`tools/tf_play.gd`) has a switch control that re-renders the same body under either
+standard. Size TFs (`grow_breasts`, `shrink_breasts`, `widen_band`, `grow_butt`) are ordinary
+seeded+clamped `prop_delta`s on the canonical integers; the derived cup/size re-reads for free.
+`volume_ml`/`band_cm` round-trip save/load as exact integers (recast on reload, like fluids).
+
 ---
 
 ## 5. Fluids — the one genuinely new primitive
@@ -481,11 +530,13 @@ Genuinely open (everything else is decided above):
    description-layer concern — but unconfirmed, and a candidate first place over-modeling could
    creep in.
 
-3. **Banding thresholds are content, but someone owns the defaults.** Cup/length/fullness bands
-   (§4.3, §5.3) are description content, yet the MVP needs *some* default banding to read
-   sensibly. Open: ship a minimal default band table here, or treat bands as wholly downstream
-   content the MVP stubs? (Same shape as the parent's prop-banding question — likely resolves
-   together.)
+3. ~~**Banding thresholds are content, but someone owns the defaults.**~~ **RESOLVED (§4.4).**
+   The engine owns a deterministic **default** size model: canonical integer `volume_ml`/
+   `band_cm`, a derived cup via `diff_mm` (K_V=8, K_B=4) clamped into a standard's letter table,
+   and two shipped standards (IMPERIAL / METRIC). The standard is a describe-layer *parameter*
+   (default + override), not body state, so the same body re-renders "13DD" ↔ "32G". Authors
+   still override bands downstream; the engine just ships a sensible, configurable default —
+   the same answer the parent's prop-banding question wants.
 
 ---
 

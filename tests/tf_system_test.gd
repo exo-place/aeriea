@@ -140,7 +140,7 @@ func _test_region_targeting_structural() -> void:
 func _test_convention_noop() -> void:
 	# A convention-targeting op on a body lacking the tag NO-OPS (§3.7).
 	var reg := TfContent.registry()
-	var h := TfHolder.new(TfContent.biped(), 1, reg)   # biped: no "spine"/quadruped tags
+	var h := TfHolder.new(TfContent.biped(), 1, reg)   # biped: no quadruped lower tags
 	var tf := {"id": "x", "ops": [{"effect": "set_covering", "tag": "wing", "value": "feathers"}]}
 	var eff := TfApplier.apply_stage(h.body, tf, 0, 1, 1)
 	_ok(eff.is_empty(), "convention-targeting op no-ops on a body lacking the tag (§3.7)")
@@ -224,12 +224,12 @@ func _test_commitment_gate() -> void:
 	var h := TfHolder.new(TfContent.biped(), 1, reg)
 	var desc_biped := TfDescribe.describe(h.body)
 	_ok(not ("tail" in desc_biped), "biped description has no phantom tail")
-	_ok(not ("spine" in desc_biped), "biped description has no phantom spine/quadruped lower")
+	_ok(not ("taur" in desc_biped), "biped description is not labelled a taur")
 	h.apply_instant("graft_quadruped_lower")
 	h.apply_instant("graft_tail")
 	var desc_taur := TfDescribe.describe(h.body)
 	_ok("tail" in desc_taur, "after graft_tail the tail IS described (committed)")
-	_ok("spine" in desc_taur, "after the quadruped graft the spine IS described")
+	_ok("taur" in desc_taur, "after the quadruped graft the form reads as a taur")
 
 
 func _test_validator_opt_in() -> void:

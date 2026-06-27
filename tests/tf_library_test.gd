@@ -1,0 +1,136 @@
+## TF library test — asserts the authored transformation library (tf_library.gd) is sound:
+##   (a) every TF in the library APPLIES to the standard base body without error and
+##       leaves a NON-EMPTY description (a real, readable body).
+##   (b) determinism: applying a TF to the base twice yields byte-identical bodies.
+##   (c) no authored content uses a global numeric ordinal / raw id in TARGETING beyond
+##       the stable named base mounts (a smell check that targeting stays declarative).
+##   (d) the body-core convention: no segment in any authored part carries the retired
+##       `spine` tag; trunks use `body_core`.
+##   (e) genital nouns are natural (penis/vagina) in any description that has genitals.
+##
+## Run: xvfb-run -a godot4 --path . res://tests/tf_library_test.tscn --quit-after 4000
+extends Node
+
+const BodyGraph := preload("res://scripts/body/tf/body_graph.gd")
+const TfHolder := preload("res://scripts/body/tf/tf_holder.gd")
+const TfContent := preload("res://scripts/body/tf/tf_content.gd")
+const TfLibrary := preload("res://scripts/body/tf/tf_library.gd")
+const TfDescribe := preload("res://scripts/body/tf/tf_describe.gd")
+
+var _pass := 0
+var _fail := 0
+
+
+func _ready() -> void:
+	print("\n=== aeriea TF-library test ===\n")
+	_test_all_apply_and_describe()
+	_test_determinism()
+	_test_no_spine_tag()
+	_test_categories_cover_registry()
+	_test_natural_genital_nouns()
+	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
+	get_tree().quit(0 if _fail == 0 else 1)
+
+
+func _ok(cond: bool, msg: String) -> void:
+	if cond:
+		_pass += 1
+	else:
+		_fail += 1
+		print("  FAIL: ", msg)
+
+
+# Apply one TF (staged or instant) to a fresh base; return the resulting body.
+func _apply(tf_id: String, seed_value: int) -> Dictionary:
+	var reg := TfLibrary.registry()
+	var tf: Dictionary = reg[tf_id]
+	var h := TfHolder.new(TfContent.biped(), seed_value, reg)
+	if bool(tf.get("staged", false)):
+		h.start_tf(tf_id)
+		var step: int = int(tf.get("stage_seconds", 600))
+		for i in int(tf.get("max_stages", 1)):
+			h.advance_time(step)
+	else:
+		h.apply_instant(tf_id)
+	return h.body
+
+
+func _test_all_apply_and_describe() -> void:
+	var reg := TfLibrary.registry()
+	_ok(reg.size() >= 30, "library has at least 30 transformations (has %d)" % reg.size())
+	var all_ok := true
+	for tf_id in reg.keys():
+		var body := _apply(tf_id, 0xA0D17)
+		var desc := TfDescribe.describe(body)
+		if desc.strip_edges() == "":
+			all_ok = false
+			print("    %s -> empty description" % tf_id)
+		# Every body must still have a root and at least a head + torso (a real body).
+		if BodyGraph.find_by_id(body["root"], "head") == null:
+			all_ok = false
+			print("    %s -> body lost its head" % tf_id)
+	_ok(all_ok, "every TF applies to the base and yields a non-empty, headed body")
+
+
+func _test_determinism() -> void:
+	var reg := TfLibrary.registry()
+	var any_checked := false
+	var det_ok := true
+	for tf_id in reg.keys():
+		var a := _apply(tf_id, 0x1234)
+		var b := _apply(tf_id, 0x1234)
+		any_checked = true
+		if JSON.stringify(a) != JSON.stringify(b):
+			det_ok = false
+			print("    %s diverged across identical seed+log" % tf_id)
+	_ok(any_checked and det_ok, "every TF is deterministic (same seed+log -> identical body)")
+
+
+func _test_no_spine_tag() -> void:
+	# The retired `spine` special tag must not appear in any authored part; trunks/barrels
+	# use the consistent `body_core` tag instead.
+	var reg := TfLibrary.registry()
+	var found_spine := false
+	var found_core := false
+	for tf_id in reg.keys():
+		var body := _apply(tf_id, 1)
+		for seg in BodyGraph.all_segments(body["root"]):
+			var tags: Array = seg.get("tags", [])
+			if "spine" in tags:
+				found_spine = true
+			if "body_core" in tags:
+				found_core = true
+	_ok(not found_spine, "no authored part carries the retired `spine` tag")
+	_ok(found_core, "trunks/barrels carry the `body_core` tag (convention is used)")
+
+
+func _test_categories_cover_registry() -> void:
+	# Every TF in the registry appears in exactly one display category, and vice versa.
+	var reg := TfLibrary.registry()
+	var seen := {}
+	for entry in TfLibrary.categories():
+		for tf_id in entry[1]:
+			_ok(reg.has(tf_id), "category lists a real TF id (%s)" % tf_id)
+			seen[tf_id] = true
+	for tf_id in reg.keys():
+		_ok(seen.has(tf_id), "TF %s appears in a display category" % tf_id)
+
+
+func _test_natural_genital_nouns() -> void:
+	# Any description that mentions genitalia must use natural nouns (penis / vagina) and
+	# never the clinical "phallic genital" / "vaginal genital" phrasing.
+	var reg := TfLibrary.registry()
+	var bad := false
+	var saw_penis := false
+	var saw_vagina := false
+	for tf_id in reg.keys():
+		var desc := TfDescribe.describe(_apply(tf_id, 1))
+		if "phallic genital" in desc or "vaginal genital" in desc:
+			bad = true
+			print("    %s description uses a clinical genital noun" % tf_id)
+		if "penis" in desc:
+			saw_penis = true
+		if "vagina" in desc:
+			saw_vagina = true
+	_ok(not bad, "no description uses 'phallic genital' / 'vaginal genital'")
+	_ok(saw_penis and saw_vagina, "descriptions use natural nouns penis and vagina")

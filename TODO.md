@@ -225,6 +225,16 @@ change, reviewed against "collapse asymmetries to primitives.")
   in `units-and-scale.md` (in progress, not closed). Names are the user's to
   set — coin none.
 
+- **TF inference engine (fallback, low priority / backlog)** — an automatic
+  correspondence/diff mechanism for the case where a user wants to force a fully
+  custom structural change that role-and-relational authored TFs can't express.
+  The normal path is authored TFs written against roles and relations (segments
+  tagged by role/region/relation; three primitives in-place/add/remove); this
+  inference fallback is only for forcible-custom changes, explicitly nice-to-have,
+  not now. Note: automatic correspondence/graph-matching is otherwise forbidden in
+  the normal authored path (no global ids, no canonical ordinals); this fallback is
+  the single sanctioned exception, opt-in.
+
 ## Interaction-structure (anti-walking-sim)
 
 - **Affordance substrate (the "second kit")** — designed, not yet implemented:

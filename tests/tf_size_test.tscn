@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://tf_size_test_v1"]
+
+[ext_resource type="Script" path="res://tests/tf_size_test.gd" id="1_tfsize"]
+
+[node name="TfSizeTest" type="Node"]
+script = ExtResource("1_tfsize")

@@ -28,18 +28,19 @@ static func validate(body: Dictionary) -> Array:
 		if not BodyGraph.material_takes_covering(seg.get("material", "")) and seg.get("covering") != null:
 			issues.append({"kind": "spurious_covering", "node": seg["id"],
 						"detail": "non-flesh material carries a covering"})
-	# A MULTI-LEGGED lower body (4+ legs) with no spine to support it (the §3.8
-	# example). A normal biped pelvis (2 legs, no spine) is unremarkable and NOT
-	# flagged — the heuristic targets a grafted quadruped lower that lost its spine.
+	# A MULTI-LEGGED lower body (4+ legs) with no body-core barrel to carry them (the
+	# §3.8 example). A normal biped pelvis (2 legs) is unremarkable and NOT flagged — the
+	# heuristic targets a grafted quadruped lower that lost its body-core barrel.
 	var leg_count := 0
-	var has_spine := false
+	var has_lower_core := false
 	for seg in BodyGraph.all_segments(root):
-		if "leg" in seg.get("tags", []):
+		var tags: Array = seg.get("tags", [])
+		if "leg" in tags:
 			leg_count += 1
-		if "spine" in seg.get("tags", []):
-			has_spine = true
-	if leg_count >= 4 and not has_spine:
+		if "body_core" in tags and "lower_body" in tags:
+			has_lower_core = true
+	if leg_count >= 4 and not has_lower_core:
 		issues.append({"kind": "unsupported_lower", "node": "",
-					"detail": "a 4+-legged lower body has no supporting spine"})
+					"detail": "a 4+-legged lower body has no supporting body-core barrel"})
 	issues.sort_custom(func(a, b): return str(a) < str(b))
 	return issues

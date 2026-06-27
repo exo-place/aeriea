@@ -229,13 +229,38 @@ static func _fan_set(root: Dictionary, op: Dictionary, field: String, _rng: DetR
 
 # prop_delta: seeded integer roll (hundredths) added to a scalar, then clamped.
 # NO float in the draw: amount.roll draws integer hundredths in [lo*100, hi*100].
+# An `all_tagged` select FANS the same delta across every matching member (each member
+# draws from the one stage RNG in node-id order, so the fan is deterministic and
+# replay-safe). Captures per-node before/after so undo restores each exactly.
 static func _apply_prop_delta(root: Dictionary, op: Dictionary, rng: DetRng):
+	# Fan path: a compound `all_tagged` select touches every matching member.
+	if op.has("target") and typeof(op["target"]) == TYPE_DICTIONARY \
+			and op["target"].get("select", "") == "all_tagged":
+		var targets := BodyGraph.resolve_targets(root, {"select": op["target"]})
+		var changes: Array = []
+		for seg in targets:
+			var ch = _prop_delta_one(seg, op, rng)
+			if ch != null:
+				changes.append(ch)
+		if changes.is_empty():
+			return null
+		return {"effect": "prop_delta_fan", "prop": op["prop"], "changes": changes}
+	# Single-node path (target_node or an ordinal nth_tagged resolving to one).
 	var tid := _target_id(root, op)
 	if tid == "":
 		return null
 	var seg = BodyGraph.find_by_id(root, tid)
 	if seg == null:
 		return null
+	var ch = _prop_delta_one(seg, op, rng)
+	if ch == null:
+		return null
+	return {"effect": "prop_delta", "id": ch["id"], "prop": ch["prop"],
+			"before": ch["before"], "after": ch["after"]}
+
+
+# Apply one prop_delta to one segment; returns {id, prop, before, after} or null (no-op).
+static func _prop_delta_one(seg: Dictionary, op: Dictionary, rng: DetRng):
 	var prop: String = op["prop"]
 	var before: float = float(seg.get("props", {}).get(prop, 0.0))
 	var amount: Dictionary = op["amount"]
@@ -257,9 +282,12 @@ static func _apply_prop_delta(root: Dictionary, op: Dictionary, rng: DetRng):
 		return null
 	if not seg.has("props"):
 		seg["props"] = {}
-	seg["props"][prop] = after
-	return {"effect": "prop_delta", "id": seg["id"], "prop": prop,
-			"before": before, "after": after}
+	# Canonical integer size props stay INT (no float drift, byte-identical round-trip).
+	if prop in BodyGraph.INT_PROPS:
+		seg["props"][prop] = int(round(after))
+	else:
+		seg["props"][prop] = after
+	return {"id": seg["id"], "prop": prop, "before": before, "after": after}
 
 
 # set_fluid_type (§5.2): set/rename a fluid's `type` on the target(s). On a node with
@@ -379,6 +407,13 @@ static func _apply_tag(root: Dictionary, op: Dictionary, add: bool):
 # ===========================================================================
 # Undo (§5.4) — walk an effects list BACKWARD, reverting each op exactly.
 # ===========================================================================
+# Restore a prop value with the right numeric type (canonical int props stay int).
+static func _restore_prop(prop: String, value):
+	if prop in BodyGraph.INT_PROPS:
+		return int(round(float(value)))
+	return value
+
+
 static func undo_effects(body: Dictionary, effects: Array) -> void:
 	var root: Dictionary = body["root"]
 	for i in range(effects.size() - 1, -1, -1):
@@ -408,7 +443,12 @@ static func _undo_one(root: Dictionary, eff: Dictionary) -> void:
 		"prop_delta":
 			var seg = BodyGraph.find_by_id(root, eff["id"])
 			if seg != null:
-				seg["props"][eff["prop"]] = eff["before"]
+				seg["props"][eff["prop"]] = _restore_prop(eff["prop"], eff["before"])
+		"prop_delta_fan":
+			for ch in eff["changes"]:
+				var fseg = BodyGraph.find_by_id(root, ch["id"])
+				if fseg != null:
+					fseg["props"][ch["prop"]] = _restore_prop(ch["prop"], ch["before"])
 		"fluids_set":
 			# Restore each touched node's prior fluids[] exactly (§5.4).
 			for ch in eff["changes"]:

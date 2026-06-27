@@ -24,7 +24,7 @@ extends RefCounted
 # Material values whose surface IS the material itself (no separate covering).
 # Open set — these are the few shipped values, not a closed enum (§3.2). A material
 # not listed here is treated as flesh-type (takes a covering).
-const NON_FLESH_MATERIALS := ["chitin", "slime", "stone", "energy"]
+const NON_FLESH_MATERIALS := ["chitin", "slime", "stone", "energy", "keratin"]
 
 
 ## True if `material` carries a separate covering (flesh-type). Chitin/slime/etc. are
@@ -258,6 +258,7 @@ static func from_json(text: String) -> Dictionary:
 		return {}
 	if parsed.has("root"):
 		recast_fluid_ints(parsed["root"])
+		recast_int_props(parsed["root"])
 	return parsed
 
 
@@ -274,3 +275,20 @@ static func recast_fluid_ints(seg: Dictionary) -> void:
 				f["capacity"] = int(round(float(f["capacity"])))
 	for edge in seg.get("children", []):
 		recast_fluid_ints(edge["node"])
+
+
+# Props that are CANONICAL INTEGERS (the size model — compound-parts-and-fluids.md §4.3).
+# They are stored and round-tripped as ints; JSON reload turns them to float so they must
+# be recast, exactly like fluid amounts.
+const INT_PROPS := ["volume_ml", "band_cm"]
+
+
+## Re-cast every segment's canonical integer size props (`volume_ml`, `band_cm`) back to
+## INTEGER after a JSON reload. Walks the whole graph.
+static func recast_int_props(seg: Dictionary) -> void:
+	var props: Dictionary = seg.get("props", {})
+	for k in INT_PROPS:
+		if props.has(k):
+			props[k] = int(round(float(props[k])))
+	for edge in seg.get("children", []):
+		recast_int_props(edge["node"])

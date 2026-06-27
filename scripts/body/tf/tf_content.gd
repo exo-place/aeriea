@@ -18,18 +18,19 @@ static func biped() -> Dictionary:
 	var c := BodyGraph.child
 	var fl := BodyGraph.fluid
 	var root: Dictionary = seg.call("torso_upper", "flesh", "skin", {"length_cm": 55.0},
-		["torso", "upper_body"], [
+		["torso", "body_core", "upper_body"], [
 			c.call("neck", seg.call("head", "flesh", "skin", {}, ["head"], [])),
 			c.call("shoulder_l", seg.call("arm_l", "flesh", "skin", {"length_cm": 62.0}, ["arm"], [])),
 			c.call("shoulder_r", seg.call("arm_r", "flesh", "skin", {"length_cm": 62.0}, ["arm"], [])),
-			c.call("chest_l", seg.call("breast_l", "flesh", "skin", {"volume_ml": 650.0},
+			c.call("chest_l", seg.call("breast_l", "flesh", "skin", {"volume_ml": 650, "band_cm": 32},
 				["breast"], [], [fl.call("milk", 0, 400)])),
-			c.call("chest_r", seg.call("breast_r", "flesh", "skin", {"volume_ml": 650.0},
+			c.call("chest_r", seg.call("breast_r", "flesh", "skin", {"volume_ml": 650, "band_cm": 32},
 				["breast"], [], [fl.call("milk", 0, 400)])),
 			c.call("hip", seg.call("pelvis", "flesh", "skin", {"length_cm": 25.0},
 				["pelvis", "groin", "lower_body"], [
 					c.call("leg_l", seg.call("leg_l", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
 					c.call("leg_r", seg.call("leg_r", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
+					c.call("rear", seg.call("butt", "flesh", "skin", {"volume_ml": 800}, ["butt"], [])),
 					c.call("genital_mount_a", seg.call("genital_1", "flesh", "skin",
 						{"length_cm": 15.0, "girth_cm": 11.0}, ["genital", "phallic"], [],
 						[fl.call("seed", 0, 30)])),
@@ -55,19 +56,20 @@ static func vaginal_genital(id: String) -> Dictionary:
 
 
 static func breast_seg(id: String) -> Dictionary:
-	return BodyGraph.segment(id, "flesh", "skin", {"volume_ml": 500.0},
+	return BodyGraph.segment(id, "flesh", "skin", {"volume_ml": 500, "band_cm": 32},
 		["breast"], [], [BodyGraph.fluid("milk", 0, 400)])
 
 
 # --- a quadruped-lower subtree (for the graft / merge demo) ----------------------
-# A from-scratch second spine + four legs, tagged lower_body/spine/leg by convention.
-# Shipped SKIN-covered so the set_covering_fur_upward demo (§4.3c) actually creeps a
-# visible skin->fur boundary up the structure stage by stage.
+# A from-scratch second body-core barrel + four legs, tagged lower_body/body_core/leg by
+# convention. A barrel and an upright torso are BOTH body-core — same `body_core` tag, no
+# special `spine` tag. Shipped SKIN-covered so the set_covering_fur_upward demo (§4.3c)
+# actually creeps a visible skin->fur boundary up the structure stage by stage.
 static func quadruped_lower() -> Dictionary:
 	var seg := BodyGraph.segment
 	var c := BodyGraph.child
 	return seg.call("barrel", "flesh", "skin", {"length_cm": 90.0},
-		["spine", "lower_body"], [
+		["barrel", "body_core", "lower_body"], [
 			c.call("leg_fl", seg.call("leg_fl", "flesh", "skin", {"length_cm": 80.0}, ["leg"], [])),
 			c.call("leg_fr", seg.call("leg_fr", "flesh", "skin", {"length_cm": 80.0}, ["leg"], [])),
 			c.call("leg_bl", seg.call("leg_bl", "flesh", "skin", {"length_cm": 80.0}, ["leg"], [])),
@@ -87,9 +89,9 @@ static func registry() -> Dictionary:
 		# then graft the quadruped-lower structure at the hip. Gate: not already taur.
 		"graft_quadruped_lower": {
 			"id": "graft_quadruped_lower",
-			"name": "graft a quadruped lower body",
+			"name": "Graft quadruped lower body",
 			"staged": false,
-			"gate": {"op": "not", "of": {"op": "has_tag", "tag": "spine"}},
+			"gate": {"op": "has_tag", "tag": "pelvis"},
 			"ops": [
 				{"effect": "remove_subtree", "target_node": "pelvis"},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
@@ -103,7 +105,7 @@ static func registry() -> Dictionary:
 		# effective op per stage so exactly one segment hardens per clock step. Setting
 		# chitin nulls covering (§3.2). 5 segments (4 legs + barrel) -> 5 stages.
 		"set_lower_material_chitin": {
-			"id": "set_lower_material_chitin", "name": "harden the lower body to chitin",
+			"id": "set_lower_material_chitin", "name": "Harden lower body to chitin",
 			"staged": true, "stage_seconds": 1200, "max_stages": 5, "one_op_per_stage": true,
 			"gate": {"op": "has_tag", "tag": "lower_body"},
 			"ops": [
@@ -126,7 +128,7 @@ static func registry() -> Dictionary:
 		# advances per clock step (§4.3c). The current skin<->fur joint is a describable
 		# transition zone (§6). leg_fl/leg_fr are intentionally NOT in the path.
 		"set_covering_fur_upward": {
-			"id": "set_covering_fur_upward", "name": "fur creeps up the lower body",
+			"id": "set_covering_fur_upward", "name": "Fur creeps up lower body",
 			"staged": true, "stage_seconds": 900, "max_stages": 4, "one_op_per_stage": true,
 			"gate": {"op": "material_is", "node": "barrel", "v": "flesh"},
 			"ops": [
@@ -143,7 +145,7 @@ static func registry() -> Dictionary:
 
 		# (d) PROPERTY delta, staged + seeded: grow the tail's length each stage.
 		"grow_tail_length": {
-			"id": "grow_tail_length", "name": "grow the tail",
+			"id": "grow_tail_length", "name": "Grow tail",
 			"staged": true, "stage_seconds": 900, "max_stages": 5,
 			"gate": {"op": "has_tag", "tag": "tail"},
 			"ops": [
@@ -161,7 +163,7 @@ static func registry() -> Dictionary:
 		# the trailing stages no-op cleanly once legs reach length.
 		"graft_quadruped_lower_staged": {
 			"id": "graft_quadruped_lower_staged",
-			"name": "graft a quadruped lower body (gradual)",
+			"name": "Graft quadruped lower body, gradual",
 			"staged": true, "stage_seconds": 1200, "max_stages": 5,
 			# NB: no TF-level `gate` here. The "not already taur" guard lives on the graft op
 			# as a `when` instead — a TF-level gate is re-checked every stage and would FALSE
@@ -171,10 +173,10 @@ static func registry() -> Dictionary:
 				# stage 0: the form edit (remove pelvis, graft barrel). On later stages these
 				# no-op (pelvis already gone / `when` keeps the graft from re-firing).
 				{"effect": "remove_subtree", "target_node": "pelvis",
-					"when": {"op": "not", "of": {"op": "has_tag", "tag": "spine"}}},
+					"when": {"op": "has_tag", "tag": "pelvis"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
 					"subtree": quadruped_lower(),
-					"when": {"op": "not", "of": {"op": "has_tag", "tag": "spine"}}},
+					"when": {"op": "not", "of": {"op": "has_tag", "tag": "barrel"}}},
 				# stages 1-4: grow the grafted barrel a little each step (visible progression
 				# after the form lands). Guarded so it stops once grown.
 				{"effect": "prop_delta", "target_node": "barrel", "prop": "length_cm",
@@ -185,7 +187,7 @@ static func registry() -> Dictionary:
 
 		# (e) a graft to add the tail (instant) — used before grow_tail_length.
 		"graft_tail": {
-			"id": "graft_tail", "name": "graft a tail", "staged": false,
+			"id": "graft_tail", "name": "Graft a tail", "staged": false,
 			"gate": {"op": "not", "of": {"op": "has_tag", "tag": "tail"}},
 			"ops": [
 				{"effect": "graft_subtree", "target_node": "barrel", "at": "tail_base",
@@ -198,7 +200,7 @@ static func registry() -> Dictionary:
 		# (f) add a member — graft a phallic genital at a free groin mount. Proves "the
 		# Nth member" grows by one (an ordinary graft, like a tail); derived sex follows.
 		"add_phallic_genital": {
-			"id": "add_phallic_genital", "name": "graft a phallic genital", "staged": false,
+			"id": "add_phallic_genital", "name": "Graft a phallic genital", "staged": false,
 			"gate": {"op": "has_tag", "tag": "groin"},
 			"ops": [
 				{"effect": "graft_subtree", "target_node": "pelvis", "at": "genital_mount_c",
@@ -209,7 +211,7 @@ static func registry() -> Dictionary:
 		# (g) remove a member — drop the 1st phallic genital by ORDINAL (node-id order).
 		# Proves nth_tagged ordinal targeting; undo re-grafts it exactly (§3.3).
 		"remove_first_phallic": {
-			"id": "remove_first_phallic", "name": "remove the 1st phallic genital",
+			"id": "remove_first_phallic", "name": "Remove first phallic genital",
 			"staged": false,
 			"gate": {"op": "has_tag", "tag": "phallic"},
 			"ops": [
@@ -221,7 +223,7 @@ static func registry() -> Dictionary:
 		# (h) grow a member — prop_delta length+girth on the 1st phallic genital, staged
 		# + seeded. (grow targets a single node via nth_tagged resolving to one.)
 		"grow_first_phallic": {
-			"id": "grow_first_phallic", "name": "grow the 1st phallic genital",
+			"id": "grow_first_phallic", "name": "Grow first phallic genital",
 			"staged": true, "stage_seconds": 600, "max_stages": 4,
 			"gate": {"op": "has_tag", "tag": "phallic"},
 			"ops": [
@@ -241,7 +243,7 @@ static func registry() -> Dictionary:
 		# to [0, capacity]. Instant kick-start; see lactation_production for the staged
 		# refill on sim_clock (§5.4).
 		"set_lactating": {
-			"id": "set_lactating", "name": "begin lactating (fill milk)", "staged": false,
+			"id": "set_lactating", "name": "Begin lactating", "staged": false,
 			"gate": {"op": "has_tag", "tag": "breast"},
 			"ops": [
 				{"effect": "fluid_delta",
@@ -254,7 +256,7 @@ static func registry() -> Dictionary:
 		# (i2) standing milk production — a staged fluid_delta refilling on sim_clock,
 		# self-clamping at capacity (§5.4). Integer mL per stage.
 		"lactation_production": {
-			"id": "lactation_production", "name": "milk production (over time)",
+			"id": "lactation_production", "name": "Milk production over time",
 			"staged": true, "stage_seconds": 3600, "max_stages": 8,
 			"gate": {"op": "has_tag", "tag": "breast"},
 			"ops": [
@@ -269,7 +271,7 @@ static func registry() -> Dictionary:
 		# remove every phallic genital, graft a vaginal one if absent, graft a 3rd breast
 		# row, and open milk capacity. Derived sex flips male/herm -> female for free.
 		"feminize": {
-			"id": "feminize", "name": "feminize (parts only — sex follows)", "staged": false,
+			"id": "feminize", "name": "Feminize", "staged": false,
 			"ops": [
 				{"effect": "remove_subtree",
 					"target": {"select": "all_tagged", "tag": "genital", "kind": "phallic"},
@@ -282,6 +284,57 @@ static func registry() -> Dictionary:
 				{"effect": "fluid_delta",
 					"target": {"select": "all_tagged", "tag": "breast"}, "fluid": "milk",
 					"amount": {"v": 0}, "capacity_delta": 100, "clamp_amount": [0]},
+			],
+		},
+
+		# === SIZE TFs (compound-parts-and-fluids.md §4.3) — prop_delta on the canonical
+		# integer volume/length, staged + seeded + clamped. The derived cup/size under
+		# the current measurement standard re-reads off the new volume for free.
+
+		# (k) grow every breast — fan a seeded volume_ml delta across all breasts.
+		"grow_breasts": {
+			"id": "grow_breasts", "name": "Grow breasts", "staged": true,
+			"stage_seconds": 600, "max_stages": 4,
+			"gate": {"op": "has_tag", "tag": "breast"},
+			"ops": [
+				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "breast"},
+					"prop": "volume_ml",
+					"amount": {"roll": "uniform", "lo": 120.0, "hi": 240.0}, "clamp": [0.0, 6000.0]},
+			],
+		},
+
+		# (l) shrink every breast — the same fan with a negative seeded delta.
+		"shrink_breasts": {
+			"id": "shrink_breasts", "name": "Shrink breasts", "staged": true,
+			"stage_seconds": 600, "max_stages": 4,
+			"gate": {"op": "has_tag", "tag": "breast"},
+			"ops": [
+				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "breast"},
+					"prop": "volume_ml",
+					"amount": {"roll": "uniform", "lo": -240.0, "hi": -120.0}, "clamp": [0.0, 6000.0]},
+			],
+		},
+
+		# (m) widen the rib band on every breast — raises band_cm at fixed volume, which
+		# LOWERS the derived cup letter (band-dependence is real, not cosmetic).
+		"widen_band": {
+			"id": "widen_band", "name": "Widen rib band", "staged": false,
+			"gate": {"op": "has_tag", "tag": "breast"},
+			"ops": [
+				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "breast"},
+					"prop": "band_cm",
+					"amount": {"v": 6.0}, "clamp": [20.0, 60.0]},
+			],
+		},
+
+		# (n) grow the butt — a seeded volume_ml delta on the butt segment.
+		"grow_butt": {
+			"id": "grow_butt", "name": "Grow butt", "staged": true,
+			"stage_seconds": 600, "max_stages": 4,
+			"gate": {"op": "has_tag", "tag": "butt"},
+			"ops": [
+				{"effect": "prop_delta", "target_node": "butt", "prop": "volume_ml",
+					"amount": {"roll": "uniform", "lo": 150.0, "hi": 300.0}, "clamp": [0.0, 8000.0]},
 			],
 		},
 	}

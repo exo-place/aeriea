@@ -277,6 +277,10 @@ static func _size_tfs() -> Dictionary:
 			"id": "shrink_to_fae", "name": "Shrink to fae size", "cat": "Size and scale",
 			"blurb": "Shrinks the whole body down to a tiny, delicate fae stature.",
 			"staged": false,
+			# Whole-body scale-down: limbs shorten AND the FIGURE measurements scale
+			# proportionally (waist/hip/band by the linear factor 1/5, breast & butt volume
+			# by its CUBE 1/125 — volume scales as length^3) so the fae keeps the base's
+			# PROPORTIONS and reads the SAME figure shape, just smaller.
 			"ops": [
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "leg"},
 					"prop": "length_cm", "amount": {"v": -70.0}, "clamp": [4.0, 200.0]},
@@ -284,12 +288,26 @@ static func _size_tfs() -> Dictionary:
 					"prop": "length_cm", "amount": {"v": -50.0}, "clamp": [4.0, 200.0]},
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "torso"},
 					"prop": "length_cm", "amount": {"v": -42.0}, "clamp": [4.0, 140.0]},
+				{"effect": "prop_scale", "target": {"select": "all_tagged", "tag": "body_core"},
+					"prop": "waist_mm", "num": 1, "den": 5, "clamp": [40.0, 4000.0]},
+				{"effect": "prop_scale", "target": {"select": "all_tagged", "tag": "body_core"},
+					"prop": "hip_mm", "num": 1, "den": 5, "clamp": [40.0, 4000.0]},
+				{"effect": "prop_scale", "target": {"select": "all_tagged", "tag": "breast"},
+					"prop": "band_mm", "num": 1, "den": 5, "clamp": [40.0, 4000.0]},
+				{"effect": "prop_scale", "target": {"select": "all_tagged", "tag": "breast"},
+					"prop": "volume_ml", "num": 1, "den": 5, "cube": true, "clamp": [0.0, 60000.0]},
+				{"effect": "prop_scale", "target": {"select": "all_tagged", "tag": "butt"},
+					"prop": "volume_ml", "num": 1, "den": 5, "cube": true, "clamp": [0.0, 60000.0]},
 			],
 		},
 		"grow_to_giant": {
 			"id": "grow_to_giant", "name": "Grow to giant size", "cat": "Size and scale",
 			"blurb": "Scales the whole body up to a towering giant frame.",
 			"staged": false,
+			# Whole-body scale-up: limbs lengthen AND the FIGURE measurements scale
+			# proportionally (waist/hip/band by the linear factor 3, breast & butt volume by
+			# its CUBE 27) so the giant keeps the base's PROPORTIONS and reads the SAME figure
+			# shape, just larger.
 			"ops": [
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "leg"},
 					"prop": "length_cm", "amount": {"v": 160.0}, "clamp": [0.0, 400.0]},
@@ -297,6 +315,16 @@ static func _size_tfs() -> Dictionary:
 					"prop": "length_cm", "amount": {"v": 120.0}, "clamp": [0.0, 400.0]},
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "torso"},
 					"prop": "length_cm", "amount": {"v": 90.0}, "clamp": [0.0, 300.0]},
+				{"effect": "prop_scale", "target": {"select": "all_tagged", "tag": "body_core"},
+					"prop": "waist_mm", "num": 3, "den": 1, "clamp": [40.0, 9000.0]},
+				{"effect": "prop_scale", "target": {"select": "all_tagged", "tag": "body_core"},
+					"prop": "hip_mm", "num": 3, "den": 1, "clamp": [40.0, 9000.0]},
+				{"effect": "prop_scale", "target": {"select": "all_tagged", "tag": "breast"},
+					"prop": "band_mm", "num": 3, "den": 1, "clamp": [40.0, 9000.0]},
+				{"effect": "prop_scale", "target": {"select": "all_tagged", "tag": "breast"},
+					"prop": "volume_ml", "num": 3, "den": 1, "cube": true, "clamp": [0.0, 600000.0]},
+				{"effect": "prop_scale", "target": {"select": "all_tagged", "tag": "butt"},
+					"prop": "volume_ml", "num": 3, "den": 1, "cube": true, "clamp": [0.0, 600000.0]},
 			],
 		},
 	}

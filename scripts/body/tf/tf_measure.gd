@@ -46,6 +46,28 @@ static func isqrt(n: int) -> int:
 	return x
 
 
+## Integer floor cube root — deterministic, integer-only (no float pow in the path). Returns
+## the largest r with r*r*r <= n. Used by the FIGURE bust projection so the bust-circumference
+## contribution scales LINEARLY with the body: breast volume scales as length^3, so its cube
+## root scales as length^1 — the same scale^1 as band/waist/hip, which is what makes figure
+## SHAPE a true function of proportions at any overall scale. The doubling-search keeps the
+## intermediate cube just above n (never overflowing 64-bit for any realistic volume).
+static func icbrt(n: int) -> int:
+	if n <= 0:
+		return 0
+	var hi := 1
+	while hi * hi * hi <= n:
+		hi *= 2
+	var lo := hi / 2
+	while lo < hi:
+		var mid := (lo + hi + 1) / 2
+		if mid * mid * mid <= n:
+			lo = mid
+		else:
+			hi = mid - 1
+	return lo
+
+
 ## The cup "difference" in mm: K_V * isqrt(volume_ml) - K_B * (band_mm - BAND_ANCHOR_MM)/10,
 ## floored at 0. Bigger volume -> bigger cup; bigger ribcage (at fixed volume) -> smaller
 ## cup (the same breast spread over a wider chest reads a smaller cup). The band term is
@@ -210,26 +232,37 @@ static func length_phrase(length_cm: float, std: Dictionary) -> String:
 
 # --- BWH figure measurements (the size analog of cup, for the whole figure) ------
 # Canonical state: waist_mm + hip_mm are STORED integers (MILLIMETERS) on the body-core
-# carrier; the bust is DERIVED (never stored) from the ribcage band + total breast volume —
-# the same concave isqrt projection the cup uses, so a bigger chest reads as a bigger bust
-# for free. All three are integer mm; storing in mm (not whole cm) keeps the PROPORTIONS
-# intact at any overall scale — a uniformly 0.1× (sprite) copy keeps 62 mm of waist where a
-# whole-cm store would have truncated 6.2 cm to 6. The figure WORDS are derived per standard
-# from the numbers and their ratios, with the cut-points living in the standard.
+# carrier; the bust is DERIVED (never stored) from the ribcage band + total breast volume,
+# so a bigger chest reads as a bigger bust for free. All three are integer mm; storing in mm
+# (not whole cm) keeps the PROPORTIONS intact at any overall scale — a uniformly 0.1× (sprite)
+# copy keeps 62 mm of waist where a whole-cm store would have truncated 6.2 cm to 6. The
+# figure WORDS are derived per standard from the numbers and their ratios, with the cut-points
+# living in the standard.
 
-# Bust projection: bust_mm = ribcage_mm + isqrt(total_breast_volume_ml) * BUST_MM_PER_ISQRT.
-# Concave in volume (via isqrt) so the bust grows but tapers, like the cup difference. The
-# ribcage is a realistic circumference (~810 mm), so the projection is a small chest-depth
-# add-on (a ~1300 ml pair adds isqrt(1300)=36 -> 72 mm -> ~88 cm bust ≈ 35 in), NOT a
-# doubling of the band.
-const BUST_MM_PER_ISQRT := 2
+# Bust projection: bust_mm = ribcage_mm + icbrt(total_breast_volume_ml) * K_BUST.
+#
+# It MUST use the CUBE root, not the square root. band/waist/hip all scale LINEARLY with the
+# body (scale^1); breast volume scales as length^3 (scale^3), so its CUBE root scales as
+# scale^1 — matching band/waist/hip. An isqrt (volume^0.5 -> scale^1.5) projection would grow
+# the bust's share faster than the body, so the bust-vs-hip relationship that decides
+# top-heavy/pear/hourglass would NOT be scale-invariant: a top-heavy body flipped to hourglass
+# at small scale. With icbrt the whole figure is a true function of proportions at any scale.
+#
+# The ribcage is a realistic circumference (~810 mm), so the projection is a small chest-depth
+# add-on: a ~1300 ml pair adds icbrt(1300)=10 -> *7 = 70 mm -> ~880 mm bust (~88 cm / ~35 in),
+# NOT a doubling of the band. K_BUST is retuned (from the old isqrt*2) to keep the base bust
+# realistic under the cube root. This is the FIGURE bust only; the CUP derivation (diff_mm)
+# is a SEPARATE, deliberately ABSOLUTE measure and keeps its own isqrt — a bigger person
+# genuinely has a bigger cup, so cup is NOT made scale-invariant and is left untouched.
+const K_BUST := 7
 
 
-## Derived bust CIRCUMFERENCE in mm (canonical unit): ribcage circumference + a small,
-## concave projection from total breast volume. Integer-only; 0-volume (flat) reads as the
-## bare ribcage.
+## Derived bust CIRCUMFERENCE in mm (canonical unit): ribcage circumference + a small
+## projection from total breast volume via its CUBE root, so the bust scales LINEARLY with the
+## body and figure shape stays a pure function of proportions at any scale. Integer-only;
+## 0-volume (flat) reads as the bare ribcage.
 static func bust_mm(band_mm: int, total_breast_volume_ml: int) -> int:
-	return band_mm + isqrt(maxi(0, total_breast_volume_ml)) * BUST_MM_PER_ISQRT
+	return band_mm + icbrt(maxi(0, total_breast_volume_ml)) * K_BUST
 
 
 ## A measurement in mm rendered in the standard's BWH unit (cm = mm/10 rounded, or inches =

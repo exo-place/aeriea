@@ -246,6 +246,8 @@ static func _apply_op(root: Dictionary, op: Dictionary, rng: DetRng):
 			return _fan_set(root, op, "covering", rng)
 		"prop_delta":
 			return _apply_prop_delta(root, op, rng)
+		"prop_scale":
+			return _apply_prop_scale(root, op)
 		"tag_add":
 			return _apply_tag(root, op, true)
 		"tag_remove":
@@ -315,6 +317,58 @@ static func _apply_prop_delta(root: Dictionary, op: Dictionary, rng: DetRng):
 		return null
 	return {"effect": "prop_delta", "id": ch["id"], "prop": ch["prop"],
 			"before": ch["before"], "after": ch["after"]}
+
+
+# prop_scale: MULTIPLY a scalar prop by an integer fixed-point factor num/den (optionally
+# CUBED), then clamp. This is how the whole-body scale TFs (shrink_to_fae / grow_to_giant)
+# scale the FIGURE measurements proportionally — waist/hip/band by the linear factor, breast
+# (and butt) volume by the CUBE of the factor (volume scales as length^3) — so a fae/giant
+# keeps the base body's PROPORTIONS and reads the SAME figure shape. No RNG (a deterministic
+# multiply, not a roll). Integer-only in the path; INT_PROPS stay int. Fans across every
+# resolved target that actually CARRIES the prop (others no-op). Emits the prop_delta_fan
+# result shape so the existing undo path restores each before-value exactly.
+static func _apply_prop_scale(root: Dictionary, op: Dictionary):
+	var targets := _scale_targets(root, op)
+	var prop: String = op["prop"]
+	var n: int = int(op.get("num", 1))
+	var d: int = int(op.get("den", 1))
+	if op.get("cube", false):
+		n = n * n * n
+		d = d * d * d
+	if d == 0:
+		return null
+	var changes: Array = []
+	for seg in targets:
+		if not seg.get("props", {}).has(prop):
+			continue
+		var before: float = float(seg["props"][prop])
+		var before_h := int(round(before * 100.0))
+		var after_h := before_h * n / d
+		if op.has("clamp"):
+			var lo_c := int(round(float(op["clamp"][0]) * 100.0))
+			var hi_c := int(round(float(op["clamp"][1]) * 100.0))
+			after_h = clampi(after_h, lo_c, hi_c)
+		var after: float = float(after_h) / 100.0
+		if after == before:
+			continue
+		if prop in BodyGraph.INT_PROPS:
+			seg["props"][prop] = int(round(after))
+		else:
+			seg["props"][prop] = after
+		changes.append({"id": seg["id"], "prop": prop, "before": before, "after": after})
+	if changes.is_empty():
+		return null
+	return {"effect": "prop_delta_fan", "prop": prop, "changes": changes}
+
+
+# Resolve the fan-set a prop_scale targets. Accepts a `target` select dict (the §3.2
+# {select:"all_tagged",tag:...} sugar, mirroring prop_delta's fan), a direct `target_node`,
+# or the legacy tag/subtree keys.
+static func _scale_targets(root: Dictionary, op: Dictionary) -> Array:
+	if op.has("target") and typeof(op["target"]) == TYPE_DICTIONARY \
+			and str(op["target"].get("select", "")) != "":
+		return BodyGraph.resolve_targets(root, {"select": op["target"]})
+	return BodyGraph.resolve_targets(root, op)
 
 
 # Apply one prop_delta to one segment; returns {id, prop, before, after} or null (no-op).

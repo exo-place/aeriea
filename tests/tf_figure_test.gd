@@ -51,9 +51,14 @@ func _ok(cond: bool, msg: String) -> void:
 func _test_bust_derived() -> void:
 	# ribcage only (flat) -> bust == ribcage.
 	_ok(TfMeasure.bust_mm(810, 0) == 810, "flat bust == ribcage")
-	# bigger volume -> bigger bust, but a small concave projection: +1300ml adds
-	# isqrt(1300)*2 = 36*2 = 72 mm (a realistic chest-depth add-on, not a doubled band).
-	_ok(TfMeasure.bust_mm(810, 1300) == 810 + 72, "bust adds concave projection (got %d)" % TfMeasure.bust_mm(810, 1300))
+	# bigger volume -> bigger bust, via the CUBE root so the projection scales LINEARLY with
+	# the body: +1300ml adds icbrt(1300)*K_BUST = 10*7 = 70 mm (a realistic chest-depth add-on,
+	# not a doubled band). The cube root (not isqrt) is what makes figure shape scale-invariant.
+	_ok(TfMeasure.bust_mm(810, 1300) == 810 + 70, "bust adds cube-root projection (got %d)" % TfMeasure.bust_mm(810, 1300))
+	# icbrt is an exact integer floor cube root.
+	_ok(TfMeasure.icbrt(0) == 0 and TfMeasure.icbrt(7) == 1 and TfMeasure.icbrt(8) == 2
+		and TfMeasure.icbrt(26) == 2 and TfMeasure.icbrt(27) == 3 and TfMeasure.icbrt(1000) == 10,
+		"icbrt is the exact integer floor cube root")
 	# monotonic non-decreasing in volume.
 	var prev := -1
 	var mono := true
@@ -159,6 +164,34 @@ func _test_scale_invariant() -> void:
 		if TfMeasure.figure_shape(800 * s / 100, 620 * s / 100, 1000 * s / 100, std) != "pear":
 			pear_ok = false
 	_ok(pear_ok, "pear proportions read pear at every scale")
+	# A genuinely STRAIGHT body (undefined waist) stays straight at every scale.
+	var straight_ok := true
+	for s_v in scales:
+		var s: int = s_v
+		if TfMeasure.figure_shape(880 * s / 100, 820 * s / 100, 900 * s / 100, std) != "straight":
+			straight_ok = false
+	_ok(straight_ok, "straight proportions read straight at every scale")
+	# TOP-HEAVY across scale — the exact defect being fixed. The bust here is DERIVED through
+	# the real bust_mm(band, total_volume) projection, with band scaled LINEARLY and the breast
+	# volume scaled by the CUBE of the scale (volume ~ length^3), exactly as a whole-body scale
+	# TF does. Base: band 820 mm, total breast volume 35937 ml, waist 580 mm, hip 900 mm — a
+	# bust meaningfully wider than the hips with a defined waist. Under the OLD isqrt projection
+	# the bust's volume share collapsed at small scale (isqrt -> scale^1.5) and the 0.1× sprite
+	# flipped to HOURGLASS; under the cube-root projection the bust scales scale^1 like the body
+	# and it reads TOP-HEAVY at EVERY scale. This assertion would have FAILED before the fix.
+	var top_ok := true
+	for s_v in scales:
+		var s: int = s_v
+		var band := 820 * s / 100
+		var vol := 35937 * (s * s * s) / 1000000   # cube-of-scale on volume (length^3)
+		var bust := TfMeasure.bust_mm(band, vol)
+		var waist := 580 * s / 100
+		var hip := 900 * s / 100
+		var shape := TfMeasure.figure_shape(bust, waist, hip, std)
+		if shape != "top-heavy":
+			top_ok = false
+			print("    top-heavy scale %d: %s  (B%d W%d H%d)" % [s, shape, bust, waist, hip])
+	_ok(top_ok, "top-heavy proportions (bust DERIVED, band linear + volume cubed) read top-heavy at every scale")
 
 
 # (c') Build word follows the hip-to-waist FLARE ratio (a proportion); descriptors follow

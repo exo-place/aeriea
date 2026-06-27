@@ -21,14 +21,14 @@ static func biped() -> Dictionary:
 	var c := BodyGraph.child
 	var fl := BodyGraph.fluid
 	var root: Dictionary = seg.call("torso_upper", "flesh", "skin",
-		{"length_cm": 55.0, "waist_cm": 62, "hip_cm": 90},
+		{"length_cm": 55.0, "waist_mm": 620, "hip_mm": 900},
 		["torso", "body_core", "upper_body", "groin_mount"], [
 			c.call("neck", seg.call("head", "flesh", "skin", {}, ["head"], [])),
 			c.call("shoulder_l", seg.call("arm_l", "flesh", "skin", {"length_cm": 62.0}, ["arm"], [])),
 			c.call("shoulder_r", seg.call("arm_r", "flesh", "skin", {"length_cm": 62.0}, ["arm"], [])),
-			c.call("chest_l", seg.call("breast_l", "flesh", "skin", {"volume_ml": 650, "band_cm": 81},
+			c.call("chest_l", seg.call("breast_l", "flesh", "skin", {"volume_ml": 650, "band_mm": 810},
 				["breast"], [], [fl.call("milk", 0, 400)])),
-			c.call("chest_r", seg.call("breast_r", "flesh", "skin", {"volume_ml": 650, "band_cm": 81},
+			c.call("chest_r", seg.call("breast_r", "flesh", "skin", {"volume_ml": 650, "band_mm": 810},
 				["breast"], [], [fl.call("milk", 0, 400)])),
 			c.call("leg_l", seg.call("leg_l", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
 			c.call("leg_r", seg.call("leg_r", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
@@ -57,7 +57,7 @@ static func vaginal_genital(id: String) -> Dictionary:
 
 
 static func breast_seg(id: String) -> Dictionary:
-	return BodyGraph.segment(id, "flesh", "skin", {"volume_ml": 500, "band_cm": 81},
+	return BodyGraph.segment(id, "flesh", "skin", {"volume_ml": 500, "band_mm": 810},
 		["breast"], [], [BodyGraph.fluid("milk", 0, 400)])
 
 
@@ -69,7 +69,7 @@ static func breast_seg(id: String) -> Dictionary:
 static func quadruped_lower() -> Dictionary:
 	var seg := BodyGraph.segment
 	var c := BodyGraph.child
-	return seg.call("barrel", "flesh", "skin", {"length_cm": 90.0, "waist_cm": 70, "hip_cm": 110},
+	return seg.call("barrel", "flesh", "skin", {"length_cm": 90.0, "waist_mm": 700, "hip_mm": 1100},
 		["barrel", "body_core", "lower_body", "groin_mount"], [
 			c.call("leg_fl", seg.call("leg_fl", "flesh", "skin", {"length_cm": 80.0}, ["leg"], [])),
 			c.call("leg_fr", seg.call("leg_fr", "flesh", "skin", {"length_cm": 80.0}, ["leg"], [])),
@@ -330,57 +330,58 @@ static func registry() -> Dictionary:
 			],
 		},
 
-		# (m) widen the rib band on every breast — raises band_cm at fixed volume, which
+		# (m) widen the rib band on every breast — raises band_mm at fixed volume, which
 		# LOWERS the derived cup letter (band-dependence is real, not cosmetic).
 		"widen_band": {
 			"id": "widen_band", "name": "Widen rib band", "staged": false,
 			"gate": {"op": "has_tag", "tag": "breast"},
 			"ops": [
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "breast"},
-					"prop": "band_cm",
-					"amount": {"v": 6.0}, "clamp": [60.0, 120.0]},
+					"prop": "band_mm",
+					"amount": {"v": 60.0}, "clamp": [600.0, 1200.0]},
 			],
 		},
 
 		# === FIGURE (BWH) TFs (compound-parts-and-fluids.md §4.3) — prop_delta on the
-		# canonical integer waist_cm / hip_cm stored on the body-core carrier (the
-		# `groin_mount` segment). The derived figure line (shape/build/triple) re-reads off
-		# the new measurements for free. Authored against the `groin_mount` tag, not a node
-		# id, so they work whether the carrier is a biped torso or a taur barrel.
+		# canonical integer waist_mm / hip_mm (MILLIMETERS) stored on the body-core carrier
+		# (the `groin_mount` segment). The derived figure line (shape/build/triple) re-reads
+		# off the new measurements for free. Authored against the `groin_mount` tag, not a
+		# node id, so they work whether the carrier is a biped torso or a taur barrel. Deltas
+		# and clamps are in mm (a centimeter is 10 units).
 
-		# (o) widen the hips — raise hip_cm; widens the figure toward pear/wide-hipped.
+		# (o) widen the hips — raise hip_mm; widens the figure toward pear/wide-hipped.
 		"widen_hips": {
 			"id": "widen_hips", "name": "Widen hips", "staged": true,
 			"stage_seconds": 600, "max_stages": 4,
 			"gate": {"op": "has_tag", "tag": "groin_mount"},
 			"ops": [
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
-					"prop": "hip_cm",
-					"amount": {"roll": "uniform", "lo": 4.0, "hi": 8.0}, "clamp": [40.0, 160.0]},
+					"prop": "hip_mm",
+					"amount": {"roll": "uniform", "lo": 40.0, "hi": 80.0}, "clamp": [400.0, 1600.0]},
 			],
 		},
 
-		# (p) cinch the waist — shrink waist_cm; deepens the hourglass / slims the waist.
+		# (p) cinch the waist — shrink waist_mm; deepens the hourglass / slims the waist.
 		"cinch_waist": {
 			"id": "cinch_waist", "name": "Cinch waist", "staged": true,
 			"stage_seconds": 600, "max_stages": 4,
 			"gate": {"op": "has_tag", "tag": "groin_mount"},
 			"ops": [
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
-					"prop": "waist_cm",
-					"amount": {"roll": "uniform", "lo": -6.0, "hi": -3.0}, "clamp": [30.0, 140.0]},
+					"prop": "waist_mm",
+					"amount": {"roll": "uniform", "lo": -60.0, "hi": -30.0}, "clamp": [300.0, 1400.0]},
 			],
 		},
 
-		# (q) thicken the waist — grow waist_cm toward a straighter / apple figure.
+		# (q) thicken the waist — grow waist_mm toward a straighter / apple figure.
 		"thicken_waist": {
 			"id": "thicken_waist", "name": "Thicken waist", "staged": true,
 			"stage_seconds": 600, "max_stages": 4,
 			"gate": {"op": "has_tag", "tag": "groin_mount"},
 			"ops": [
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
-					"prop": "waist_cm",
-					"amount": {"roll": "uniform", "lo": 4.0, "hi": 8.0}, "clamp": [30.0, 140.0]},
+					"prop": "waist_mm",
+					"amount": {"roll": "uniform", "lo": 40.0, "hi": 80.0}, "clamp": [300.0, 1400.0]},
 			],
 		},
 
@@ -392,11 +393,11 @@ static func registry() -> Dictionary:
 			"gate": {"op": "has_tag", "tag": "groin_mount"},
 			"ops": [
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
-					"prop": "waist_cm",
-					"amount": {"roll": "uniform", "lo": -5.0, "hi": -3.0}, "clamp": [30.0, 140.0]},
+					"prop": "waist_mm",
+					"amount": {"roll": "uniform", "lo": -50.0, "hi": -30.0}, "clamp": [300.0, 1400.0]},
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
-					"prop": "hip_cm",
-					"amount": {"roll": "uniform", "lo": 3.0, "hi": 6.0}, "clamp": [40.0, 160.0]},
+					"prop": "hip_mm",
+					"amount": {"roll": "uniform", "lo": 30.0, "hi": 60.0}, "clamp": [400.0, 1600.0]},
 			],
 		},
 

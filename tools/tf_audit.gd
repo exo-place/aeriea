@@ -321,9 +321,9 @@ func _prop_word(prop: String) -> String:
 		"length_cm": return "length"
 		"girth_cm": return "girth"
 		"depth_cm": return "depth"
-		"band_cm": return "rib band"
-		"waist_cm": return "waist"
-		"hip_cm": return "hips"
+		"band_mm": return "rib band"
+		"waist_mm": return "waist"
+		"hip_mm": return "hips"
 		"width_cm": return "width"
 		_:
 			return prop.replace("_", " ")

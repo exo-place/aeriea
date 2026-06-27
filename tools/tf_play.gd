@@ -708,7 +708,7 @@ func _run_self_playtest() -> void:
 	# === SIZE + MEASUREMENT-STANDARD drive ===
 	_reset()
 	var bl = BodyGraph.find_by_id(_holder.body["root"], "breast_l")
-	print("[pt] start breast volume=%d band=%d" % [int(bl["props"]["volume_ml"]), int(bl["props"]["band_cm"])])
+	print("[pt] start breast volume=%d band_mm=%d" % [int(bl["props"]["volume_ml"]), int(bl["props"]["band_mm"])])
 	# The same body under both standards (default METRIC) — show it re-renders.
 	_std = TfMeasure.METRIC
 	var metric_desc := _describe(_holder.body)
@@ -720,14 +720,14 @@ func _run_self_playtest() -> void:
 	print("[pt] metric breast line: " + _measurement_line(metric_desc))
 	print("[pt] imperial breast line: " + _measurement_line(imperial_desc))
 	await _shot(out, "09_size_metric")
-	# Worked example: set a breast to (1200, 32) and read both standards.
+	# Worked example: set a breast to (1200 ml, 810 mm ribcage) and read both standards.
 	bl["props"]["volume_ml"] = 1200
-	bl["props"]["band_cm"] = 32
-	var met_cup := TfMeasure.cup_label(1200, 32, TfMeasure.METRIC)
-	var imp_cup := TfMeasure.cup_label(1200, 32, TfMeasure.IMPERIAL)
-	print("[pt] (1200,32) -> imperial=%s  metric=%s" % [imp_cup, met_cup])
-	if imp_cup != "13DD" or met_cup != "32G":
-		errors.append("worked example wrong: imperial=%s metric=%s (want 13DD / 32G)" % [imp_cup, met_cup])
+	bl["props"]["band_mm"] = 810
+	var met_cup := TfMeasure.cup_label(1200, 810, TfMeasure.METRIC)
+	var imp_cup := TfMeasure.cup_label(1200, 810, TfMeasure.IMPERIAL)
+	print("[pt] (1200,810mm) -> imperial=%s  metric=%s" % [imp_cup, met_cup])
+	if imp_cup != "32DD" or met_cup != "81G":
+		errors.append("worked example wrong: imperial=%s metric=%s (want 32DD / 81G)" % [imp_cup, met_cup])
 	# switch the live standard and re-shoot so the PNG shows the imperial rendering.
 	_on_switch_standard()
 	await _shot(out, "10_size_imperial")
@@ -754,7 +754,7 @@ func _run_self_playtest() -> void:
 	_on_save()
 	_on_load()
 	var rv = BodyGraph.find_by_id(_holder.body["root"], "breast_l")["props"]["volume_ml"]
-	var rb = BodyGraph.find_by_id(_holder.body["root"], "breast_l")["props"]["band_cm"]
+	var rb = BodyGraph.find_by_id(_holder.body["root"], "breast_l")["props"]["band_mm"]
 	print("[pt] size round-trip: volume type=%s band type=%s" % [typeof(rv), typeof(rb)])
 	if typeof(rv) != TYPE_INT or typeof(rb) != TYPE_INT:
 		errors.append("size props did not round-trip as integers")
@@ -777,7 +777,7 @@ func _breast_vol(id: String) -> int:
 
 
 func _breast_band(id: String) -> int:
-	return int(BodyGraph.find_by_id(_holder.body["root"], id)["props"]["band_cm"])
+	return int(BodyGraph.find_by_id(_holder.body["root"], id)["props"]["band_mm"])
 
 
 # Pull the breast_l line out of a rendered description (for the self-playtest log).

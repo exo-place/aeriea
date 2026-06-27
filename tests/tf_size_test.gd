@@ -1,10 +1,10 @@
 ## TF size / measurement test — aeriea's canonical size + configurable measurement
 ## model (decisions/compound-parts-and-fluids.md §4.3). Asserts:
-##   (a) WORKED EXAMPLE — (volume_ml=1200, ribcage band_cm=81, a realistic adult ribcage)
+##   (a) WORKED EXAMPLE — (volume_ml=1200, ribcage band_mm=810, a realistic adult ribcage)
 ##       renders "32DD" under IMPERIAL and "81G" under METRIC (the same body, two standards).
 ##   (b) isqrt is a correct integer floor sqrt; diff_mm matches the spec.
 ##   (c) cup is MONOTONIC: non-decreasing in volume, non-increasing in band.
-##   (d) volume_ml / band_cm ROUND-TRIP save/load as INTEGERS.
+##   (d) volume_ml / band_mm ROUND-TRIP save/load as INTEGERS.
 ##   (e) size TFs (grow_breasts, widen_band, grow_butt) change the derived label.
 ##   (f) unit conversions render inches / floz under IMPERIAL, cm / ml under METRIC.
 ##
@@ -45,20 +45,20 @@ func _ok(cond: bool, msg: String) -> void:
 
 # (a) The vetted worked example: same canonical body, two standards.
 func _test_worked_example() -> void:
-	# Realistic ribcage (81 cm ≈ a "32 band" adult). The cup LETTER is unchanged from the
-	# vetted example (the band term is anchored so 81 cm behaves as the old bare-32 did); the
-	# band NUMBER now renders realistically: 81 cm metric, 32 in imperial.
-	var imp := TfMeasure.cup_label(1200, 81, TfMeasure.IMPERIAL)
-	var met := TfMeasure.cup_label(1200, 81, TfMeasure.METRIC)
-	_ok(imp == "32DD", "(1200,81) imperial cup is 32DD (got %s)" % imp)
-	_ok(met == "81G", "(1200,81) metric cup is 81G (got %s)" % met)
+	# Realistic ribcage (810 mm ≈ a "32 band" adult). The cup LETTER is unchanged from the
+	# vetted example (the band term is anchored so 810 mm behaves as the old bare-32 did); the
+	# band NUMBER renders realistically: 81 cm metric, 32 in imperial.
+	var imp := TfMeasure.cup_label(1200, 810, TfMeasure.IMPERIAL)
+	var met := TfMeasure.cup_label(1200, 810, TfMeasure.METRIC)
+	_ok(imp == "32DD", "(1200,810mm) imperial cup is 32DD (got %s)" % imp)
+	_ok(met == "81G", "(1200,810mm) metric cup is 81G (got %s)" % met)
 	# intermediate values from the spec.
-	_ok(TfMeasure.diff_mm(1200, 81) == 144, "diff_mm(1200,81)==144 (got %d)" % TfMeasure.diff_mm(1200, 81))
-	_ok(TfMeasure.band_in_unit(81, TfMeasure.IMPERIAL) == 32, "81cm ribcage -> 32in band (even)")
-	_ok(TfMeasure.band_in_unit(81, TfMeasure.METRIC) == 81, "81cm ribcage -> 81cm band")
+	_ok(TfMeasure.diff_mm(1200, 810) == 144, "diff_mm(1200,810)==144 (got %d)" % TfMeasure.diff_mm(1200, 810))
+	_ok(TfMeasure.band_in_unit(810, TfMeasure.IMPERIAL) == 32, "810mm ribcage -> 32in band (even)")
+	_ok(TfMeasure.band_in_unit(810, TfMeasure.METRIC) == 81, "810mm ribcage -> 81cm band")
 
 
-# (b) isqrt is floor-sqrt; diff_mm = max(0, 8*isqrt(v) - 4*(band - BAND_ANCHOR)).
+# (b) isqrt is floor-sqrt; diff_mm = max(0, 8*isqrt(v) - 4*(band_mm - BAND_ANCHOR_MM)/10).
 func _test_isqrt_and_diff() -> void:
 	_ok(TfMeasure.isqrt(0) == 0, "isqrt(0)==0")
 	_ok(TfMeasure.isqrt(1) == 1, "isqrt(1)==1")
@@ -67,9 +67,9 @@ func _test_isqrt_and_diff() -> void:
 	_ok(TfMeasure.isqrt(1200) == 34, "isqrt(1200)==34")
 	_ok(TfMeasure.isqrt(1225) == 35, "isqrt(1225)==35 (35^2)")
 	# diff floors at 0 (a huge ribcage spreads the volume into nothing).
-	_ok(TfMeasure.diff_mm(100, 150) == 0, "diff floors at 0 for a huge ribcage")
+	_ok(TfMeasure.diff_mm(100, 1500) == 0, "diff floors at 0 for a huge ribcage")
 	# at the band anchor the volume term stands alone: 8*isqrt(2500) = 8*50 = 400.
-	_ok(TfMeasure.diff_mm(2500, TfMeasure.BAND_ANCHOR) == 8 * 50, "diff_mm(2500, anchor)==400")
+	_ok(TfMeasure.diff_mm(2500, TfMeasure.BAND_ANCHOR_MM) == 8 * 50, "diff_mm(2500, anchor)==400")
 
 
 # (c) Cup is non-decreasing as volume rises (band fixed).
@@ -78,7 +78,7 @@ func _test_monotonic_in_volume() -> void:
 		var prev := -1
 		var ok := true
 		for v in range(0, 4000, 50):
-			var d := TfMeasure.diff_mm(v, 81)
+			var d := TfMeasure.diff_mm(v, 810)
 			if d < prev:
 				ok = false
 			prev = d
@@ -87,7 +87,7 @@ func _test_monotonic_in_volume() -> void:
 		var pidx := -1
 		var ok2 := true
 		for v in range(0, 4000, 50):
-			var idx := clampi(TfMeasure.diff_mm(v, 81) / int(std["step_mm"]), 0, std["letters"].size() - 1)
+			var idx := clampi(TfMeasure.diff_mm(v, 810) / int(std["step_mm"]), 0, std["letters"].size() - 1)
 			if idx < pidx:
 				ok2 = false
 			pidx = idx
@@ -99,7 +99,7 @@ func _test_monotonic_in_band() -> void:
 	var prev := 1 << 30
 	var strictly_drops := false
 	var ok := true
-	for b in range(60, 110):
+	for b in range(600, 1100, 10):
 		var d := TfMeasure.diff_mm(1200, b)
 		if d > prev:
 			ok = false
@@ -109,13 +109,13 @@ func _test_monotonic_in_band() -> void:
 	_ok(ok, "diff_mm non-increasing in band at fixed volume")
 	_ok(strictly_drops, "diff_mm actually drops somewhere as band widens (real dependence)")
 	# concrete: a wider band lowers the cup letter for (1200, *).
-	var narrow := TfMeasure.cup_letter(1200, 72, TfMeasure.METRIC)
-	var wide := TfMeasure.cup_letter(1200, 96, TfMeasure.METRIC)
+	var narrow := TfMeasure.cup_letter(1200, 720, TfMeasure.METRIC)
+	var wide := TfMeasure.cup_letter(1200, 960, TfMeasure.METRIC)
 	var li := TfMeasure.METRIC["letters"]
 	_ok(li.find(wide) <= li.find(narrow), "wider band -> same-or-smaller cup letter (%s vs %s)" % [wide, narrow])
 
 
-# (d) volume_ml / band_cm round-trip save/load as INTEGERS.
+# (d) volume_ml / band_mm round-trip save/load as INTEGERS.
 func _test_size_roundtrip_int() -> void:
 	var reg := TfContent.registry()
 	var h := TfHolder.new(TfContent.biped(), 0xC0FFEE, reg)
@@ -128,7 +128,7 @@ func _test_size_roundtrip_int() -> void:
 	var h2 := TfHolder.from_dict(JSON.parse_string(saved), reg)
 	var seg2 = BodyGraph.find_by_id(h2.body["root"], "breast_l")
 	_ok(typeof(seg2["props"]["volume_ml"]) == TYPE_INT, "reloaded volume_ml is INT not float")
-	_ok(typeof(seg2["props"]["band_cm"]) == TYPE_INT, "reloaded band_cm is INT not float")
+	_ok(typeof(seg2["props"]["band_mm"]) == TYPE_INT, "reloaded band_mm is INT not float")
 	_ok(seg2["props"]["volume_ml"] == before_v, "volume_ml survives round-trip exactly")
 	_ok(JSON.stringify(h.body) == JSON.stringify(h2.body), "whole body round-trips byte-identically")
 	# butt segment exists with an integer volume.
@@ -144,7 +144,7 @@ func _test_size_tfs_change_label() -> void:
 	# grow_breasts raises the cup.
 	var h := TfHolder.new(TfContent.biped(), 0x515E, reg)
 	var v0 := int(BodyGraph.find_by_id(h.body["root"], "breast_l")["props"]["volume_ml"])
-	var b0 := int(BodyGraph.find_by_id(h.body["root"], "breast_l")["props"]["band_cm"])
+	var b0 := int(BodyGraph.find_by_id(h.body["root"], "breast_l")["props"]["band_mm"])
 	var cup0 := TfMeasure.cup_label(v0, b0, std)
 	h.start_tf("grow_breasts")
 	h.advance_time(600 * 4)
@@ -156,9 +156,9 @@ func _test_size_tfs_change_label() -> void:
 	var h2 := TfHolder.new(TfContent.biped(), 0x515E, reg)
 	var diff_a := TfMeasure.diff_mm(v0, b0)
 	h2.apply_instant("widen_band")
-	var b2 := int(BodyGraph.find_by_id(h2.body["root"], "breast_l")["props"]["band_cm"])
+	var b2 := int(BodyGraph.find_by_id(h2.body["root"], "breast_l")["props"]["band_mm"])
 	var diff_b := TfMeasure.diff_mm(v0, b2)
-	_ok(b2 > b0, "widen_band raised band_cm (%d -> %d)" % [b0, b2])
+	_ok(b2 > b0, "widen_band raised band_mm (%d -> %d)" % [b0, b2])
 	_ok(diff_b < diff_a, "widen_band lowered cup difference at fixed volume (%d -> %d)" % [diff_a, diff_b])
 	# grow_butt raises butt volume.
 	var h3 := TfHolder.new(TfContent.biped(), 0x515E, reg)
@@ -192,7 +192,7 @@ func _test_describe_uses_standard() -> void:
 	# pin a breast to the worked-example values for a deterministic rendering.
 	var bl = BodyGraph.find_by_id(body["root"], "breast_l")
 	bl["props"]["volume_ml"] = 1200
-	bl["props"]["band_cm"] = 81
+	bl["props"]["band_mm"] = 810
 	var met := TfDescribe.describe(body, TfMeasure.METRIC)
 	var imp := TfDescribe.describe(body, TfMeasure.IMPERIAL)
 	_ok(met != imp, "describe renders differently under the two standards")

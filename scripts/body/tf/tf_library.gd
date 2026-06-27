@@ -101,7 +101,7 @@ static func _vagina(id: String) -> Dictionary:
 
 
 static func _breast(id: String, volume: int = 500) -> Dictionary:
-	return _seg(id, "flesh", "skin", {"volume_ml": volume, "band_cm": 81},
+	return _seg(id, "flesh", "skin", {"volume_ml": volume, "band_mm": 810},
 		["breast"], [], [BodyGraph.fluid("milk", 0, 400)])
 
 
@@ -130,7 +130,7 @@ static func _quad_barrel(id: String, covering: String) -> Dictionary:
 	# tag) + `lower_body`; `barrel` role tag so a graft can guard on "barrel absent". The
 	# `groin_mount` tag marks it as the carrier the genitals/butt/tail dock onto (the role
 	# a biped's torso plays, since a biped has no separate lower-body part).
-	return _seg(id, "flesh", covering, {"length_cm": 90.0, "waist_cm": 70, "hip_cm": 110},
+	return _seg(id, "flesh", covering, {"length_cm": 90.0, "waist_mm": 700, "hip_mm": 1100},
 		["barrel", "body_core", "lower_body", "groin_mount"], [
 		_child("leg_fl", _seg("leg_fl", "flesh", covering, {"length_cm": 80.0}, ["leg", "front"], [])),
 		_child("leg_fr", _seg("leg_fr", "flesh", covering, {"length_cm": 80.0}, ["leg", "front"], [])),
@@ -142,7 +142,7 @@ static func _quad_barrel(id: String, covering: String) -> Dictionary:
 static func _serpent_tail(id: String) -> Dictionary:
 	# A long legless lower body (naga): a body-core lower segment, no legs. Carries
 	# `groin_mount` so the genitals reparent onto it (a naga keeps its sex, just no legs).
-	return _seg(id, "flesh", "scales", {"length_cm": 240.0, "waist_cm": 64, "hip_cm": 80},
+	return _seg(id, "flesh", "scales", {"length_cm": 240.0, "waist_mm": 640, "hip_mm": 800},
 		["body_core", "lower_body", "serpentine", "groin_mount"], [])
 
 
@@ -232,7 +232,7 @@ static func _size_tfs() -> Dictionary:
 			"staged": false,
 			"gate": {"op": "has_tag", "tag": "groin_mount"},
 			"ops": [{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
-				"prop": "hip_cm", "amount": {"v": 22.0}, "clamp": [40.0, 160.0]}],
+				"prop": "hip_mm", "amount": {"v": 220.0}, "clamp": [400.0, 1600.0]}],
 		},
 		"cinch_waist": {
 			"id": "cinch_waist", "name": "Cinch waist", "cat": "Size and scale",
@@ -240,7 +240,7 @@ static func _size_tfs() -> Dictionary:
 			"staged": false,
 			"gate": {"op": "has_tag", "tag": "groin_mount"},
 			"ops": [{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
-				"prop": "waist_cm", "amount": {"v": -14.0}, "clamp": [30.0, 140.0]}],
+				"prop": "waist_mm", "amount": {"v": -140.0}, "clamp": [300.0, 1400.0]}],
 		},
 		"thicken_waist": {
 			"id": "thicken_waist", "name": "Thicken waist", "cat": "Size and scale",
@@ -248,7 +248,7 @@ static func _size_tfs() -> Dictionary:
 			"staged": false,
 			"gate": {"op": "has_tag", "tag": "groin_mount"},
 			"ops": [{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
-				"prop": "waist_cm", "amount": {"v": 26.0}, "clamp": [30.0, 140.0]}],
+				"prop": "waist_mm", "amount": {"v": 260.0}, "clamp": [300.0, 1400.0]}],
 		},
 		"hourglass_figure": {
 			"id": "hourglass_figure", "name": "Hourglass figure", "cat": "Size and scale",
@@ -257,9 +257,9 @@ static func _size_tfs() -> Dictionary:
 			"gate": {"op": "has_tag", "tag": "groin_mount"},
 			"ops": [
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
-					"prop": "waist_cm", "amount": {"v": -12.0}, "clamp": [30.0, 140.0]},
+					"prop": "waist_mm", "amount": {"v": -120.0}, "clamp": [300.0, 1400.0]},
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
-					"prop": "hip_cm", "amount": {"v": 18.0}, "clamp": [40.0, 160.0]},
+					"prop": "hip_mm", "amount": {"v": 180.0}, "clamp": [400.0, 1600.0]},
 			],
 		},
 		"grow_taller": {

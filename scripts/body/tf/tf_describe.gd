@@ -342,9 +342,9 @@ static func _trunk_segment(root: Dictionary):
 
 
 # --- figure (BWH) line ----------------------------------------------------------
-# The figure is a MEASUREMENT, never a part: waist_cm/hip_cm are stored on the body-core
-# carrier (the `groin_mount` segment — the torso for a biped, the barrel/serpent lower for
-# a taur/naga), the bust is derived from the ribcage band + total breast volume. NONE of
+# The figure is a MEASUREMENT, never a part: waist_mm/hip_mm (millimeters) are stored on the
+# body-core carrier (the `groin_mount` segment — the torso for a biped, the barrel/serpent
+# lower for a taur/naga), the bust is derived from the ribcage band + total breast volume. NONE of
 # this ever becomes a "hips"/"pelvis" bullet — it reads as one prose sentence about the
 # overall figure, with the descriptive bands owned by the active standard (configurable).
 
@@ -377,15 +377,15 @@ static func _figure_line(root: Dictionary, std: Dictionary) -> String:
 	if carrier == null:
 		return ""
 	var props: Dictionary = carrier.get("props", {})
-	if not (props.has("waist_cm") and props.has("hip_cm")):
+	if not (props.has("waist_mm") and props.has("hip_mm")):
 		return ""
-	var waist := int(round(float(props["waist_cm"])))
-	var hip := int(round(float(props["hip_cm"])))
+	var waist := int(round(float(props["waist_mm"])))
+	var hip := int(round(float(props["hip_mm"])))
 	var band := _ribcage_band(root)
-	var bust := TfMeasure.bust_cm(band, _total_breast_volume(root))
+	var bust := TfMeasure.bust_mm(band, _total_breast_volume(root))
 	var shape := TfMeasure.figure_shape(bust, waist, hip, std)
-	var build := TfMeasure.figure_build(hip, std)
-	var descriptors := TfMeasure.figure_descriptors(waist, hip, std)
+	var build := TfMeasure.figure_build(waist, hip, std)
+	var descriptors := TfMeasure.figure_descriptors(bust, waist, hip, std)
 	# Head clause: the shape noun-phrase leads, qualified by the build word (slim/thick)
 	# when it adds something the shape doesn't already imply.
 	var sentence := _figure_head(shape, build)
@@ -430,16 +430,16 @@ static func noun_first_word(phrase: String) -> String:
 	return phrase if sp < 0 else phrase.substr(0, sp)
 
 
-# The ribcage band for the bust derivation: the band_cm shared by the breasts (the rib
-# band the cup already reads off — a realistic ribcage circumference in cm, ~81 for an
-# average adult). Falls back to ~81 cm when no breast carries one.
+# The ribcage band for the bust derivation: the band_mm shared by the breasts (the rib
+# band the cup already reads off — a realistic ribcage circumference in mm, ~810 for an
+# average adult). Falls back to ~810 mm when no breast carries one.
 static func _ribcage_band(root: Dictionary) -> int:
 	for seg in BodyGraph.all_segments(root):
 		if "breast" in seg.get("tags", []):
 			var p: Dictionary = seg.get("props", {})
-			if p.has("band_cm"):
-				return int(round(float(p["band_cm"])))
-	return 81
+			if p.has("band_mm"):
+				return int(round(float(p["band_mm"])))
+	return 810
 
 
 # Total breast volume across every breast segment (the bust derivation's volume term).
@@ -524,9 +524,9 @@ static func _article(phrase: String) -> String:
 static func _measurement_prose(seg: Dictionary, std: Dictionary) -> String:
 	var props: Dictionary = seg.get("props", {})
 	var tags: Array = seg.get("tags", [])
-	if "breast" in tags and props.has("volume_ml") and props.has("band_cm"):
+	if "breast" in tags and props.has("volume_ml") and props.has("band_mm"):
 		var letter := TfMeasure.cup_letter(
-			int(round(float(props["volume_ml"]))), int(round(float(props["band_cm"]))), std)
+			int(round(float(props["volume_ml"]))), int(round(float(props["band_mm"]))), std)
 		return "%s %s cup" % [_letter_article(letter), letter]
 	if "genital" in tags and "phallic" in tags and props.has("length_cm"):
 		var l := float(props["length_cm"])
@@ -663,9 +663,9 @@ static func _debug_segment(seg: Dictionary, std: Dictionary) -> String:
 static func _measurement_debug(seg: Dictionary, std: Dictionary) -> String:
 	var props: Dictionary = seg.get("props", {})
 	var tags: Array = seg.get("tags", [])
-	if "breast" in tags and props.has("volume_ml") and props.has("band_cm"):
+	if "breast" in tags and props.has("volume_ml") and props.has("band_mm"):
 		return "<%s>" % TfMeasure.breast_phrase(
-			int(round(float(props["volume_ml"]))), int(round(float(props["band_cm"]))), std)
+			int(round(float(props["volume_ml"]))), int(round(float(props["band_mm"]))), std)
 	if "butt" in tags and props.has("volume_ml"):
 		return "<%s>" % TfMeasure.butt_phrase(int(round(float(props["volume_ml"]))), std)
 	if "genital" in tags and "phallic" in tags and props.has("length_cm"):

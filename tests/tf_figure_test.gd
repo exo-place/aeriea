@@ -1,7 +1,7 @@
 ## TF figure / BWH measurement test — aeriea's figure-measurement layer (the size analog
 ## of the cup model, decisions/compound-parts-and-fluids.md §4.3). Asserts:
 ##   (a) BUST is DERIVED (band + concave volume term), never stored as a field.
-##   (b) waist_cm / hip_cm are STORED integers on the body-core carrier and ROUND-TRIP
+##   (b) waist_mm / hip_mm are STORED integers (mm) on the body-core carrier and ROUND-TRIP
 ##       save/load as INTEGERS.
 ##   (c) figure adjectives derive from RATIOS/spread, are RATIO-dependent and
 ##       STANDARD-dependent (cut-points live in the standard, like cup letters).
@@ -28,6 +28,7 @@ func _ready() -> void:
 	_test_waist_hip_stored_and_roundtrip()
 	_test_no_bust_field_stored()
 	_test_shape_is_ratio_dependent()
+	_test_scale_invariant()
 	_test_build_and_descriptors()
 	_test_standard_dependent()
 	_test_triple_units()
@@ -46,18 +47,18 @@ func _ok(cond: bool, msg: String) -> void:
 		print("  FAIL: ", msg)
 
 
-# (a) Bust is DERIVED from band + a concave function of total breast volume.
+# (a) Bust is DERIVED from band + a concave function of total breast volume. All in mm.
 func _test_bust_derived() -> void:
 	# ribcage only (flat) -> bust == ribcage.
-	_ok(TfMeasure.bust_cm(81, 0) == 81, "flat bust == ribcage")
+	_ok(TfMeasure.bust_mm(810, 0) == 810, "flat bust == ribcage")
 	# bigger volume -> bigger bust, but a small concave projection: +1300ml adds
-	# isqrt(1300)/5 = 36/5 = 7 cm (a realistic chest-depth add-on, not a doubled band).
-	_ok(TfMeasure.bust_cm(81, 1300) == 81 + 7, "bust adds concave projection (got %d)" % TfMeasure.bust_cm(81, 1300))
+	# isqrt(1300)*2 = 36*2 = 72 mm (a realistic chest-depth add-on, not a doubled band).
+	_ok(TfMeasure.bust_mm(810, 1300) == 810 + 72, "bust adds concave projection (got %d)" % TfMeasure.bust_mm(810, 1300))
 	# monotonic non-decreasing in volume.
 	var prev := -1
 	var mono := true
 	for v in range(0, 5000, 50):
-		var b := TfMeasure.bust_cm(81, v)
+		var b := TfMeasure.bust_mm(810, v)
 		if b < prev:
 			mono = false
 		prev = b
@@ -68,22 +69,22 @@ func _test_bust_derived() -> void:
 func _test_waist_hip_stored_and_roundtrip() -> void:
 	var body := TfContent.biped()
 	var torso = BodyGraph.find_by_id(body["root"], "torso_upper")
-	_ok(torso["props"].has("waist_cm"), "carrier stores waist_cm")
-	_ok(torso["props"].has("hip_cm"), "carrier stores hip_cm")
-	_ok(typeof(torso["props"]["waist_cm"]) == TYPE_INT, "waist_cm is INT")
-	_ok(typeof(torso["props"]["hip_cm"]) == TYPE_INT, "hip_cm is INT")
+	_ok(torso["props"].has("waist_mm"), "carrier stores waist_mm")
+	_ok(torso["props"].has("hip_mm"), "carrier stores hip_mm")
+	_ok(typeof(torso["props"]["waist_mm"]) == TYPE_INT, "waist_mm is INT")
+	_ok(typeof(torso["props"]["hip_mm"]) == TYPE_INT, "hip_mm is INT")
 	# round-trip through JSON: ints survive.
 	var reg := TfContent.registry()
 	var h := TfHolder.new(TfContent.biped(), 0xF16, reg)
 	h.start_tf("widen_hips")
 	h.advance_time(600 * 4)
-	var hip_before := int(BodyGraph.find_by_id(h.body["root"], "torso_upper")["props"]["hip_cm"])
+	var hip_before := int(BodyGraph.find_by_id(h.body["root"], "torso_upper")["props"]["hip_mm"])
 	var saved := JSON.stringify(h.to_dict())
 	var h2 := TfHolder.from_dict(JSON.parse_string(saved), reg)
 	var t2 = BodyGraph.find_by_id(h2.body["root"], "torso_upper")
-	_ok(typeof(t2["props"]["hip_cm"]) == TYPE_INT, "reloaded hip_cm is INT not float")
-	_ok(typeof(t2["props"]["waist_cm"]) == TYPE_INT, "reloaded waist_cm is INT not float")
-	_ok(int(t2["props"]["hip_cm"]) == hip_before, "hip_cm survives round-trip exactly")
+	_ok(typeof(t2["props"]["hip_mm"]) == TYPE_INT, "reloaded hip_mm is INT not float")
+	_ok(typeof(t2["props"]["waist_mm"]) == TYPE_INT, "reloaded waist_mm is INT not float")
+	_ok(int(t2["props"]["hip_mm"]) == hip_before, "hip_mm survives round-trip exactly")
 	_ok(JSON.stringify(h.body) == JSON.stringify(h2.body), "whole body round-trips byte-identically")
 
 
@@ -118,42 +119,87 @@ func _test_shape_is_ratio_dependent() -> void:
 		"the waist-definition gate uses the ratio, not the raw waist magnitude")
 
 
-# (c') Build word follows hip spread; descriptors follow the targeted cut-points.
+# (scale-invariance) The figure descriptor is a function of PROPORTIONS only: a body and a
+# uniformly scaled copy (giant / fae) with the IDENTICAL B:W:H ratios must read the IDENTICAL
+# shape, build and descriptors. This is the core defect being fixed — absolute-cm thresholds
+# made a scaled-up body flip shape/build for free.
+func _test_scale_invariant() -> void:
+	var std := TfMeasure.METRIC
+	# Base hourglass proportions bust:waist:hip = 880:620:900 mm (the realistic adult figure,
+	# ~88-62-90 cm). Scales span SPRITE (0.1×) to GIANT (3×). The 0.1× case is the one that
+	# used to break: stored in whole cm, a 62 cm waist truncated to 6 cm at sprite scale and
+	# the proportions distorted; stored in mm, 620 mm scales cleanly to 62 mm and the ratios
+	# hold, so the sprite reads the SAME figure as the base.
+	var scales := [10, 30, 50, 100, 200, 300]  # × base / 100  (0.1× sprite .. 3× giant)
+	var shape0 := ""
+	var desc0: Array = []
+	var consistent := true
+	var label0 := ""
+	for s_v in scales:
+		var s: int = s_v
+		var bust := 880 * s / 100
+		var waist := 620 * s / 100
+		var hip := 900 * s / 100
+		var shape := TfMeasure.figure_shape(bust, waist, hip, std)
+		var build := TfMeasure.figure_build(waist, hip, std)
+		var desc := TfMeasure.figure_descriptors(bust, waist, hip, std)
+		var label := "%s|%s|%s" % [shape, build, ",".join(desc)]
+		if s == int(scales[0]):
+			shape0 = shape; desc0 = desc; label0 = label
+		elif label != label0:
+			consistent = false
+			print("    scale %d: %s  (base %s)" % [s, label, label0])
+	_ok(consistent, "same B:W:H ratio at every scale (0.1×..3×) reads the IDENTICAL figure descriptor (%s)" % label0)
+	_ok(shape0 == "hourglass", "scaled hourglass proportions read hourglass at every scale")
+	_ok("slim-waisted" in desc0, "scaled slim-waisted proportions read slim-waisted at every scale")
+	# A genuinely PEAR-proportioned body stays pear at every scale too (including sprite).
+	var pear_ok := true
+	for s_v in scales:
+		var s: int = s_v
+		if TfMeasure.figure_shape(800 * s / 100, 620 * s / 100, 1000 * s / 100, std) != "pear":
+			pear_ok = false
+	_ok(pear_ok, "pear proportions read pear at every scale")
+
+
+# (c') Build word follows the hip-to-waist FLARE ratio (a proportion); descriptors follow
+# the targeted RATIO cut-points. Build/descriptors take (waist, hip) / (bust, waist, hip).
 func _test_build_and_descriptors() -> void:
 	var std := TfMeasure.METRIC
-	_ok(TfMeasure.figure_build(80, std) == "slim", "narrow hips read slim")
-	_ok(TfMeasure.figure_build(95, std) == "curvy", "mid hips read curvy")
-	_ok(TfMeasure.figure_build(120, std) == "thick", "wide hips read thick")
-	_ok("wide-hipped" in TfMeasure.figure_descriptors(62, 110, std), "wide hips -> wide-hipped")
-	_ok("slim-waisted" in TfMeasure.figure_descriptors(60, 90, std), "narrow waist -> slim-waisted")
-	_ok(TfMeasure.figure_descriptors(80, 90, std).is_empty(), "average figure has no targeted descriptor")
+	# build = hip/waist flare ratio: slim < 130, thick >= 160, else curvy.
+	_ok(TfMeasure.figure_build(70, 80, std) == "slim", "low flare (80/70=114) reads slim")
+	_ok(TfMeasure.figure_build(65, 95, std) == "curvy", "mid flare (95/65=146) reads curvy")
+	_ok(TfMeasure.figure_build(62, 110, std) == "thick", "high flare (110/62=177) reads thick")
+	_ok("wide-hipped" in TfMeasure.figure_descriptors(90, 62, 110, std), "strong flare -> wide-hipped")
+	_ok("slim-waisted" in TfMeasure.figure_descriptors(90, 60, 90, std), "narrow waist -> slim-waisted")
+	_ok(TfMeasure.figure_descriptors(90, 84, 90, std).is_empty(), "average figure has no targeted descriptor")
 
 
-# (c''/standard) Figure words are STANDARD-dependent: the same body can read a different
-# build word under metric vs imperial because the cut-points live in each standard.
+# (c''/standard) Figure words are now PROPORTION-based, so they are UNIT-FREE: a ratio reads
+# the same in cm or inches. The figure thresholds are therefore identical across standards,
+# and the SAME body reads the SAME figure word under metric and imperial (only the rendered
+# triple differs by unit). This is correct: a proportion has no unit.
 func _test_standard_dependent() -> void:
-	# A hip that is "thick" by metric cm cut-points must convert to the imperial cut so the
-	# read is consistent — verify the cut-points are actually different numbers per standard
-	# (configurable, like cup letters), and that the same physical hip lands in the same band.
-	var met_cut := int(TfMeasure.METRIC["figure"]["spread_thick_cm"])
-	var imp_cut := int(TfMeasure.IMPERIAL["figure"]["spread_thick_cm"])
-	_ok(met_cut != imp_cut, "spread cut-points differ per standard (cm vs in)")
-	# the SAME 120cm hip reads "thick" under both standards (band-consistent across units).
-	_ok(TfMeasure.figure_build(120, TfMeasure.METRIC) == "thick", "120cm hip thick (metric)")
-	_ok(TfMeasure.figure_build(120, TfMeasure.IMPERIAL) == "thick", "120cm hip thick (imperial)")
-	# and a borderline body reads differently across standards (rounding at the unit edge):
-	# whatever the exact boundary, the descriptor set is computed per standard, not shared.
-	var a := TfMeasure.figure_descriptors(62, 104, TfMeasure.METRIC)
-	var b := TfMeasure.figure_descriptors(62, 104, TfMeasure.IMPERIAL)
-	_ok(typeof(a) == TYPE_ARRAY and typeof(b) == TYPE_ARRAY, "descriptors derived per standard")
+	# The figure block is the shared unit-free ratio table — same thresholds both standards.
+	_ok(TfMeasure.METRIC["figure"] == TfMeasure.IMPERIAL["figure"],
+		"figure thresholds are unit-free ratios, identical across standards")
+	# the SAME physical figure reads the SAME build/shape under either standard (a proportion
+	# is unit-independent — that is the whole point of the ratio model).
+	_ok(TfMeasure.figure_build(62, 110, TfMeasure.METRIC)
+		== TfMeasure.figure_build(62, 110, TfMeasure.IMPERIAL), "build word unit-independent")
+	_ok(TfMeasure.figure_shape(88, 62, 90, TfMeasure.METRIC)
+		== TfMeasure.figure_shape(88, 62, 90, TfMeasure.IMPERIAL), "shape word unit-independent")
+	# but the rendered TRIPLE still differs by unit (cm vs inches). Inputs are mm.
+	_ok(TfMeasure.figure_triple(880, 620, 900, TfMeasure.METRIC)
+		!= TfMeasure.figure_triple(880, 620, 900, TfMeasure.IMPERIAL), "triple still renders per unit")
 
 
-# (d) Triple renders integer measurements in the standard's BWH unit.
+# (d) Triple renders integer mm measurements in the standard's BWH unit.
 func _test_triple_units() -> void:
-	# 90-62-90 in cm; in inches each /2.54 rounded -> 35-24-35.
-	_ok(TfMeasure.figure_triple(90, 62, 90, TfMeasure.METRIC) == "90-62-90", "metric triple")
-	_ok(TfMeasure.figure_triple(90, 62, 90, TfMeasure.IMPERIAL) == "35-24-35",
-		"imperial triple (got %s)" % TfMeasure.figure_triple(90, 62, 90, TfMeasure.IMPERIAL))
+	# 880-620-900 mm -> 88-62-90 cm (mm/10); in inches each mm/25.4 rounded -> 35-24-35.
+	_ok(TfMeasure.figure_triple(880, 620, 900, TfMeasure.METRIC) == "88-62-90",
+		"metric triple (got %s)" % TfMeasure.figure_triple(880, 620, 900, TfMeasure.METRIC))
+	_ok(TfMeasure.figure_triple(880, 620, 900, TfMeasure.IMPERIAL) == "35-24-35",
+		"imperial triple (got %s)" % TfMeasure.figure_triple(880, 620, 900, TfMeasure.IMPERIAL))
 
 
 # (e) The figure-changing TFs visibly change the rendered figure line.
@@ -166,17 +212,17 @@ func _test_figure_tfs_change_line() -> void:
 		h.advance_time(600 * 4)
 		var after := _figure_line(h.body)
 		_ok(after != base_line, "%s changed the figure line (%s)" % [tf_id, after])
-	# widen_hips raises hip_cm; cinch_waist lowers waist_cm — directional, integer.
+	# widen_hips raises hip_mm; cinch_waist lowers waist_mm — directional, integer.
 	var hw := TfHolder.new(TfContent.biped(), 0xA0D17, reg)
-	var hip0 := int(BodyGraph.find_by_id(hw.body["root"], "torso_upper")["props"]["hip_cm"])
+	var hip0 := int(BodyGraph.find_by_id(hw.body["root"], "torso_upper")["props"]["hip_mm"])
 	hw.start_tf("widen_hips"); hw.advance_time(600 * 4)
-	var hip1 := int(BodyGraph.find_by_id(hw.body["root"], "torso_upper")["props"]["hip_cm"])
-	_ok(hip1 > hip0, "widen_hips raised hip_cm (%d -> %d)" % [hip0, hip1])
+	var hip1 := int(BodyGraph.find_by_id(hw.body["root"], "torso_upper")["props"]["hip_mm"])
+	_ok(hip1 > hip0, "widen_hips raised hip_mm (%d -> %d)" % [hip0, hip1])
 	var cw := TfHolder.new(TfContent.biped(), 0xA0D17, reg)
-	var w0 := int(BodyGraph.find_by_id(cw.body["root"], "torso_upper")["props"]["waist_cm"])
+	var w0 := int(BodyGraph.find_by_id(cw.body["root"], "torso_upper")["props"]["waist_mm"])
 	cw.start_tf("cinch_waist"); cw.advance_time(600 * 4)
-	var w1 := int(BodyGraph.find_by_id(cw.body["root"], "torso_upper")["props"]["waist_cm"])
-	_ok(w1 < w0, "cinch_waist lowered waist_cm (%d -> %d)" % [w0, w1])
+	var w1 := int(BodyGraph.find_by_id(cw.body["root"], "torso_upper")["props"]["waist_mm"])
+	_ok(w1 < w0, "cinch_waist lowered waist_mm (%d -> %d)" % [w0, w1])
 
 
 # (clean prose) The base figure line reads like prose, with a proper article and triple,
@@ -198,7 +244,7 @@ func _test_taur_carries_own_hip() -> void:
 	var h := TfHolder.new(TfContent.biped(), 0xA0D17, lreg)
 	h.apply_instant("biped_to_taur")
 	var barrel = BodyGraph.find_by_id(h.body["root"], "barrel")
-	_ok(barrel != null and barrel["props"].has("hip_cm"), "taur barrel carries its own hip_cm")
+	_ok(barrel != null and barrel["props"].has("hip_mm"), "taur barrel carries its own hip_mm")
 	var line := _figure_line(h.body)
 	# the barrel's hips (110) read in the triple, not the torso's (90).
 	_ok("-110" in line, "taur figure triple reads the barrel's hips (got %s)" % line)

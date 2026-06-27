@@ -8,6 +8,7 @@ extends Node
 ##   - Character Creator (scenes/character_creator.tscn) — 3rd-person body viewer/editor.
 ##   - Parkour Sandbox   (scenes/test_level.tscn)        — captures the mouse for FP look.
 ##   - Text Sandbox      (scenes/text_sandbox.tscn)      — transcript + input scaffold.
+##   - TF Playground     (tools/tf_play.tscn)            — drives the transformation system live.
 ##
 ## Mouse-capture handoff: the parkour mode captures the mouse on its own _ready and
 ## recaptures on left-click. While captured the GUI bar isn't clickable, so the launcher
@@ -23,6 +24,7 @@ const MODES := [
 	{ "label": "Character Creator", "scene": "res://scenes/character_creator.tscn" },
 	{ "label": "Parkour Sandbox", "scene": "res://scenes/test_level.tscn" },
 	{ "label": "Text Sandbox", "scene": "res://scenes/text_sandbox.tscn" },
+	{ "label": "TF Playground", "scene": "res://tools/tf_play.tscn" },
 ]
 
 const DEFAULT_MODE := 0  # Character Creator — sensible default (no mouse capture).

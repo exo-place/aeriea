@@ -41,6 +41,8 @@ func _ready() -> void:
 	_test_commitment_gate()
 	_test_validator_opt_in()
 	_test_material_nulls_covering()
+	_test_chitin_progressive()
+	_test_staged_graft()
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
 
@@ -251,6 +253,45 @@ func _test_validator_opt_in() -> void:
 	var tf := {"id": "x", "ops": [{"effect": "tag_add", "target_node": "head", "value": "Z"}]}
 	var eff := TfApplier.apply_stage(h.body, tf, 0, 1, 1)
 	_ok(not eff.is_empty(), "applier transforms an 'odd' body without ever consulting the validator")
+
+
+# The lower-body chitin TF must PROGRESS one segment per stage (not convert everything
+# in stage 0). Regression guard for the staged-fan bug.
+func _test_chitin_progressive() -> void:
+	var reg := TfContent.registry()
+	var h := TfHolder.new(TfContent.biped(), 1, reg)
+	h.apply_instant("graft_quadruped_lower")
+	h.start_tf("set_lower_material_chitin")
+	var counts: Array = []
+	for i in 5:
+		h.advance_time(1200)   # one stage per advance
+		var n := 0
+		for seg in BodyGraph.all_segments(h.body["root"]):
+			if seg.get("material", "") == "chitin":
+				n += 1
+		counts.append(n)
+	_ok(counts == [1, 2, 3, 4, 5],
+		"chitin hardens ONE lower segment per stage (progressive), got %s" % str(counts))
+	_ok(not h.has_active(), "chitin staged TF deactivates after all 5 segments converted")
+
+
+# Form edits (graft/remove) are stageable: a staged graft lands its form change on the
+# due stage, not instantly, and progresses on the clock (§4.2).
+func _test_staged_graft() -> void:
+	var reg := TfContent.registry()
+	var h := TfHolder.new(TfContent.biped(), 1, reg)
+	h.start_tf("graft_quadruped_lower_staged")
+	_ok(BodyGraph.find_by_id(h.body["root"], "barrel") == null,
+		"staged graft: nothing grafted before the clock advances")
+	h.advance_time(1200)   # stage 0 due — the form edit lands
+	_ok(BodyGraph.find_by_id(h.body["root"], "barrel") != null,
+		"staged graft: form edit lands on the first due stage (barrel grafted)")
+	_ok(BodyGraph.find_by_id(h.body["root"], "pelvis") == null,
+		"staged graft: the biped pelvis was removed as part of the staged form edit")
+	var len0: float = float(BodyGraph.find_by_id(h.body["root"], "barrel")["props"]["length_cm"])
+	h.advance_time(1200 * 4)   # remaining grow stages
+	var len1: float = float(BodyGraph.find_by_id(h.body["root"], "barrel")["props"]["length_cm"])
+	_ok(len1 > len0, "staged graft: grafted lower body grows over subsequent stages (%.1f -> %.1f)" % [len0, len1])
 
 
 func _test_material_nulls_covering() -> void:

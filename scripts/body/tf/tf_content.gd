@@ -65,14 +65,25 @@ static func registry() -> Dictionary:
 			],
 		},
 
-		# (b) MATERIAL set, staged, fans over the lower_body subtree -> chitin.
-		# Setting chitin nulls covering. 3 stages (re-fires harmlessly; idempotent).
+		# (b) MATERIAL set, staged, ONE segment per stage, lowest-first (chitin creeps up
+		# the lower body the same way fur-creep advances a covering boundary). Ordered ops,
+		# each guarded by `material != chitin`; `one_op_per_stage` fires only the FIRST
+		# effective op per stage so exactly one segment hardens per clock step. Setting
+		# chitin nulls covering (§3.2). 5 segments (4 legs + barrel) -> 5 stages.
 		"set_lower_material_chitin": {
 			"id": "set_lower_material_chitin", "name": "harden the lower body to chitin",
-			"staged": true, "stage_seconds": 1200, "max_stages": 3,
+			"staged": true, "stage_seconds": 1200, "max_stages": 5, "one_op_per_stage": true,
 			"gate": {"op": "has_tag", "tag": "lower_body"},
 			"ops": [
-				{"effect": "set_material", "subtree_tag": "lower_body", "value": "chitin",
+				{"effect": "set_material", "target_node": "leg_bl", "value": "chitin",
+					"when": {"op": "ne", "path": "#leg_bl.material", "v": "chitin"}},
+				{"effect": "set_material", "target_node": "leg_br", "value": "chitin",
+					"when": {"op": "ne", "path": "#leg_br.material", "v": "chitin"}},
+				{"effect": "set_material", "target_node": "leg_fl", "value": "chitin",
+					"when": {"op": "ne", "path": "#leg_fl.material", "v": "chitin"}},
+				{"effect": "set_material", "target_node": "leg_fr", "value": "chitin",
+					"when": {"op": "ne", "path": "#leg_fr.material", "v": "chitin"}},
+				{"effect": "set_material", "target_node": "barrel", "value": "chitin",
 					"when": {"op": "ne", "path": "#barrel.material", "v": "chitin"}},
 			],
 		},
@@ -106,6 +117,37 @@ static func registry() -> Dictionary:
 			"ops": [
 				{"effect": "prop_delta", "target_node": "tail", "prop": "length_cm",
 					"amount": {"roll": "uniform", "lo": 2.0, "hi": 5.0}, "clamp": [0.0, 120.0]},
+			],
+		},
+
+		# (a2) FORM graft, STAGED: the same biped -> taur graft, but progressive. Form
+		# edits (remove/graft) are stageable like any op (§4.2) — there's no reason a graft
+		# must be instant. Stage 0 removes the biped pelvis and grafts the quadruped barrel
+		# (one_op_per_stage off, so both form ops fire together as the single "graft" stage);
+		# stages 1-4 then GROW the newly-grafted legs, so the lower body is grafted then
+		# grows in over the clock. Gate: not already taur. The grow op's `when` guard makes
+		# the trailing stages no-op cleanly once legs reach length.
+		"graft_quadruped_lower_staged": {
+			"id": "graft_quadruped_lower_staged",
+			"name": "graft a quadruped lower body (gradual)",
+			"staged": true, "stage_seconds": 1200, "max_stages": 5,
+			# NB: no TF-level `gate` here. The "not already taur" guard lives on the graft op
+			# as a `when` instead — a TF-level gate is re-checked every stage and would FALSE
+			# out (and kill the staged TF) the moment the barrel's `spine` tag lands. Op-level
+			# `when` lets the form fire once in stage 0 while the grow stages keep running.
+			"ops": [
+				# stage 0: the form edit (remove pelvis, graft barrel). On later stages these
+				# no-op (pelvis already gone / `when` keeps the graft from re-firing).
+				{"effect": "remove_subtree", "target_node": "pelvis",
+					"when": {"op": "not", "of": {"op": "has_tag", "tag": "spine"}}},
+				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
+					"subtree": quadruped_lower(),
+					"when": {"op": "not", "of": {"op": "has_tag", "tag": "spine"}}},
+				# stages 1-4: grow the grafted barrel a little each step (visible progression
+				# after the form lands). Guarded so it stops once grown.
+				{"effect": "prop_delta", "target_node": "barrel", "prop": "length_cm",
+					"amount": {"roll": "uniform", "lo": 3.0, "hi": 8.0}, "clamp": [0.0, 130.0],
+					"when": {"op": "lt", "path": "#barrel.props.length_cm", "v": 130.0}},
 			],
 		},
 

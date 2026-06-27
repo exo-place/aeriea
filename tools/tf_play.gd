@@ -22,7 +22,7 @@ const TfContent := preload("res://scripts/body/tf/tf_content.gd")
 const TfDescribe := preload("res://scripts/body/tf/tf_describe.gd")
 const BodyGraph := preload("res://scripts/body/tf/body_graph.gd")
 
-const TIME_STEP := 900   # seconds per "Advance time" click (matches staged stage_seconds)
+const TIME_STEP := 300   # fallback fine step (seconds) when no staged TF is in flight
 
 var _registry: Dictionary
 var _holder                       # TfHolder (primary body)
@@ -142,7 +142,8 @@ func _build_ui() -> void:
 
 	# time
 	actions.add_child(_section("TIME"))
-	actions.add_child(_button("Advance time (+%ds)" % TIME_STEP, _on_advance))
+	actions.add_child(_button("Advance to next stage", _on_advance))
+	actions.add_child(_button("Advance time (fine, +%ds)" % TIME_STEP, _on_advance_fine.bind(TIME_STEP)))
 	_active_label = RichTextLabel.new()
 	_active_label.bbcode_enabled = true
 	_active_label.fit_content = true
@@ -291,11 +292,38 @@ func _on_tf(tf_id: String) -> void:
 	_refresh()
 
 
+# Primary time button: advance EXACTLY to the soonest pending staged-TF stage, so each
+# press lands one meaningful step. With no staged TF in flight, fall back to a fine step.
 func _on_advance() -> void:
+	var step := _next_event_step()
+	_advance_by(step)
+
+
+# Secondary: advance a fixed fine step regardless of pending stages.
+func _on_advance_fine(seconds: int) -> void:
+	_advance_by(seconds)
+
+
+# Seconds from now to the soonest pending staged-TF stage due time, or TIME_STEP if none.
+func _next_event_step() -> int:
+	var now: int = _holder.clock.full_time()
+	var soonest := -1
+	for atf in _holder.active:
+		var due: int = int(atf["due_full_time"])
+		if soonest < 0 or due < soonest:
+			soonest = due
+	if soonest < 0:
+		return TIME_STEP
+	# Always move forward at least 1s even if a stage is already overdue (shouldn't happen,
+	# but keeps the press meaningful and the clock monotonic).
+	return max(1, soonest - now)
+
+
+func _advance_by(seconds: int) -> void:
 	var pre := {}
 	for atf in _holder.active:
 		pre[atf["tf_id"]] = atf["next_stage"]
-	_holder.advance_time(TIME_STEP)
+	_holder.advance_time(seconds)
 	var notes: Array = []
 	# report stage advances by comparing (active may have dropped completed ones)
 	var seen := {}
@@ -312,7 +340,7 @@ func _on_advance() -> void:
 	if tail != null and tail["props"].has("length_cm"):
 		measure = "  tail=%.1fcm" % float(tail["props"]["length_cm"])
 	_logline("advance +%ds  (day %d, t=%d)%s%s" % [
-		TIME_STEP, _holder.clock.day, _holder.clock.time_of_day, measure,
+		seconds, _holder.clock.day, _holder.clock.time_of_day, measure,
 		("  | " + ", ".join(notes)) if not notes.is_empty() else ""])
 	_refresh()
 
@@ -515,20 +543,35 @@ func _run_self_playtest() -> void:
 
 	await _shot(out, "00_start")
 
-	# biped -> taur (instant)
-	_on_tf("graft_quadruped_lower")
+	# FIX 4 — STAGED graft (biped -> taur, gradual). Each advance-to-next-stage press
+	# should land exactly one stage. Stage 0 lands the form (barrel appears).
+	_on_tf("graft_quadruped_lower_staged")
+	if BodyGraph.find_by_id(_holder.body["root"], "barrel") != null:
+		errors.append("staged graft fired before clock advanced")
+	_on_advance()   # -> stage 0 due: form lands
+	if BodyGraph.find_by_id(_holder.body["root"], "barrel") == null:
+		errors.append("staged graft: barrel never grafted after first stage")
+	else:
+		print("[pt] staged graft stage0: barrel present, len=%.1f" % float(BodyGraph.find_by_id(_holder.body["root"], "barrel")["props"]["length_cm"]))
 	await _shot(out, "01_taur")
-	print("[pt] after taur prose:\n" + _describe(_holder.body))
+	# advance the remaining grow stages, one press = one stage
+	var prev_stage := _active_stage("graft_quadruped_lower_staged")
+	_on_advance()
+	var now_stage := _active_stage("graft_quadruped_lower_staged")
+	if now_stage != -1 and now_stage != prev_stage + 1:
+		errors.append("advance-to-next-stage did not advance exactly one stage (%d -> %d)" % [prev_stage, now_stage])
+	for i in 4:
+		_on_advance()
+	print("[pt] after staged graft prose:\n" + _describe(_holder.body))
 
-	# staged fur creep — start + step twice (mid-progress)
+	# staged fur creep — start + step (one stage per press)
 	_on_tf("set_covering_fur_upward")
 	_on_advance()
 	await _shot(out, "02_furcreep_mid")
 	print("[pt] mid-staged active:")
 	for atf in _holder.active:
 		print("   %s stage %d/%d" % [atf["tf_id"], atf["next_stage"], int(_registry[atf["tf_id"]].get("max_stages", 1))])
-	_on_advance()
-	for i in 6:
+	for i in 4:
 		_on_advance()
 
 	# tail graft + grow (seeded staged)
@@ -546,10 +589,20 @@ func _run_self_playtest() -> void:
 	if _describe(_holder.body) != pre_load:
 		errors.append("save/load diverged")
 
-	# chitin staged
+	# FIX 2 — chitin staged: must convert ONE segment per stage, not all at once.
 	_on_tf("set_lower_material_chitin")
-	for i in 4:
+	var chitin_counts: Array = []
+	for i in 5:
 		_on_advance()
+		chitin_counts.append(_count_material("chitin"))
+	print("[pt] chitin per-stage counts: %s" % str(chitin_counts))
+	# Each stage should harden exactly one more lower segment (strictly increasing by 1).
+	var progressive := true
+	for i in chitin_counts.size():
+		if chitin_counts[i] != i + 1:
+			progressive = false
+	if not progressive:
+		errors.append("chitin did not progress one segment per stage: %s" % str(chitin_counts))
 	await _shot(out, "03_chitin")
 
 	# undo
@@ -574,6 +627,23 @@ func _run_self_playtest() -> void:
 	else:
 		print("[pt] SELF-PLAYTEST ISSUES: " + ", ".join(errors))
 	get_tree().quit()
+
+
+# next_stage of the named active staged TF, or -1 if it's no longer active.
+func _active_stage(tf_id: String) -> int:
+	for atf in _holder.active:
+		if atf["tf_id"] == tf_id:
+			return int(atf["next_stage"])
+	return -1
+
+
+# count of segments whose material == `mat`.
+func _count_material(mat: String) -> int:
+	var n := 0
+	for seg in BodyGraph.all_segments(_holder.body["root"]):
+		if seg.get("material", "") == mat:
+			n += 1
+	return n
 
 
 func _determinism_check() -> bool:

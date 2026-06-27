@@ -56,6 +56,11 @@ static func describe(body: Dictionary, std: Dictionary = {}) -> String:
 	var coat := _body_coat_line(root)
 	if coat != "":
 		lines.append("  " + coat + ".")
+	# The figure line: a derived BWH read (shape/build/descriptors + the triple), woven as
+	# clean prose. Sits right under the form/coat lines, before the notable-part bullets.
+	var figure := _figure_line(root, std)
+	if figure != "":
+		lines.append("  " + figure)
 	for phrase in _part_phrases(root, std):
 		lines.append("  " + phrase + ".")
 	# Transition zones, de-duplicated (symmetric parts share one seam description).
@@ -334,6 +339,116 @@ static func _trunk_segment(root: Dictionary):
 		if "body_core" in tags and "upper_body" in tags:
 			return seg
 	return null
+
+
+# --- figure (BWH) line ----------------------------------------------------------
+# The figure is a MEASUREMENT, never a part: waist_cm/hip_cm are stored on the body-core
+# carrier (the `groin_mount` segment — the torso for a biped, the barrel/serpent lower for
+# a taur/naga), the bust is derived from the ribcage band + total breast volume. NONE of
+# this ever becomes a "hips"/"pelvis" bullet — it reads as one prose sentence about the
+# overall figure, with the descriptive bands owned by the active standard (configurable).
+
+# The segment that carries the lower-body measurements: the `groin_mount` segment (the
+# part the legs/genitals hang off — a biped's torso, a taur's barrel, a naga's serpent).
+# Falls back to the upright trunk, then null.
+static func _figure_carrier(root: Dictionary):
+	# Prefer a dedicated lower-body carrier (a taur barrel / naga serpent) when one exists —
+	# it owns the lower figure once the body has a distinct lower body. A plain biped has no
+	# such part, so it falls back to its torso (the groin_mount it carries directly).
+	var fallback = null
+	for seg in BodyGraph.all_segments(root):
+		var tags: Array = seg.get("tags", [])
+		if "groin_mount" not in tags:
+			continue
+		if "lower_body" in tags:
+			return seg
+		if fallback == null:
+			fallback = seg
+	if fallback != null:
+		return fallback
+	return _trunk_segment(root)
+
+
+# The plain-prose figure sentence (or "" when the carrier has no waist/hip to read). Reads
+# like "An hourglass figure, wide-hipped — 90-62-90." — a shape/build clause, optional
+# targeted descriptors, then the measurement triple in the standard's unit.
+static func _figure_line(root: Dictionary, std: Dictionary) -> String:
+	var carrier = _figure_carrier(root)
+	if carrier == null:
+		return ""
+	var props: Dictionary = carrier.get("props", {})
+	if not (props.has("waist_cm") and props.has("hip_cm")):
+		return ""
+	var waist := int(round(float(props["waist_cm"])))
+	var hip := int(round(float(props["hip_cm"])))
+	var band := _ribcage_band(root)
+	var bust := TfMeasure.bust_cm(band, _total_breast_volume(root))
+	var shape := TfMeasure.figure_shape(bust, waist, hip, std)
+	var build := TfMeasure.figure_build(hip, std)
+	var descriptors := TfMeasure.figure_descriptors(waist, hip, std)
+	# Head clause: the shape noun-phrase leads, qualified by the build word (slim/thick)
+	# when it adds something the shape doesn't already imply.
+	var sentence := _figure_head(shape, build)
+	if not descriptors.is_empty():
+		sentence += ", " + _join_and(descriptors)
+	sentence += " — " + TfMeasure.figure_triple(bust, waist, hip, std) + "."
+	return sentence
+
+
+# The leading clause naming shape (+ build qualifier), articled and capitalized:
+# "An hourglass figure", "A slim, straight figure", "A thick, pear-shaped figure".
+static func _figure_head(shape: String, build: String) -> String:
+	var noun := _shape_noun(shape)
+	if build != "" and build != "curvy":
+		return _capitalize(_figure_article(build) + " " + build + ", " + noun)
+	return _capitalize(_figure_article(noun_first_word(noun)) + " " + noun)
+
+
+# Article for a figure-clause leading word — like `_article`, but "hourglass" takes a
+# vowel sound ("an hourglass") despite its leading consonant letter.
+static func _figure_article(word: String) -> String:
+	if word == "hourglass":
+		return "an"
+	return _article(word)
+
+
+# The shape rendered as a figure noun-phrase ("hourglass figure", "pear-shaped figure").
+static func _shape_noun(shape: String) -> String:
+	match shape:
+		"hourglass": return "hourglass figure"
+		"pear": return "pear-shaped figure"
+		"apple": return "apple-shaped figure"
+		"straight": return "straight figure"
+		_:
+			return "figure"
+
+
+# First word of a phrase (for picking the article by its leading sound).
+static func noun_first_word(phrase: String) -> String:
+	var sp := phrase.find(" ")
+	return phrase if sp < 0 else phrase.substr(0, sp)
+
+
+# The ribcage band for the bust derivation: the band_cm shared by the breasts (the rib
+# band the cup already reads off). Falls back to the default 32 when no breast carries one.
+static func _ribcage_band(root: Dictionary) -> int:
+	for seg in BodyGraph.all_segments(root):
+		if "breast" in seg.get("tags", []):
+			var p: Dictionary = seg.get("props", {})
+			if p.has("band_cm"):
+				return int(round(float(p["band_cm"])))
+	return 32
+
+
+# Total breast volume across every breast segment (the bust derivation's volume term).
+static func _total_breast_volume(root: Dictionary) -> int:
+	var total := 0
+	for seg in BodyGraph.all_segments(root):
+		if "breast" in seg.get("tags", []):
+			var p: Dictionary = seg.get("props", {})
+			if p.has("volume_ml"):
+				total += int(round(float(p["volume_ml"])))
+	return total
 
 
 # One segment's player phrase: { text (singular, no article), plural }. Size and fluids

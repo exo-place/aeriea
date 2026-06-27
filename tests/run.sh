@@ -54,6 +54,7 @@ SUITES=(
   tf_system_test
   tf_fluids_test
   tf_size_test
+  tf_figure_test
   tf_library_test
   memory_test
   relationship_mood_test

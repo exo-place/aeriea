@@ -235,6 +235,10 @@ func _target_phrase(op: Dictionary) -> String:
 			return "the genitals and rear"
 		if kind == null and tagstr == "lower_body":
 			return "the lower body"
+		# `groin_mount` is the body-core carrier of the figure (waist/hips) — read it as
+		# "the figure", not the engine tag name.
+		if kind == null and tagstr == "groin_mount":
+			return "the figure"
 		var noun := _kind_noun(str(kind)) if kind != null else _word(tagstr)
 		if sel.get("select", "") == "nth_tagged":
 			return "the first %s" % noun
@@ -318,6 +322,8 @@ func _prop_word(prop: String) -> String:
 		"girth_cm": return "girth"
 		"depth_cm": return "depth"
 		"band_cm": return "rib band"
+		"waist_cm": return "waist"
+		"hip_cm": return "hips"
 		"width_cm": return "width"
 		_:
 			return prop.replace("_", " ")

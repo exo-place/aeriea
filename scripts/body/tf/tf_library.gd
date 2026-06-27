@@ -130,7 +130,8 @@ static func _quad_barrel(id: String, covering: String) -> Dictionary:
 	# tag) + `lower_body`; `barrel` role tag so a graft can guard on "barrel absent". The
 	# `groin_mount` tag marks it as the carrier the genitals/butt/tail dock onto (the role
 	# a biped's torso plays, since a biped has no separate lower-body part).
-	return _seg(id, "flesh", covering, {"length_cm": 90.0}, ["barrel", "body_core", "lower_body", "groin_mount"], [
+	return _seg(id, "flesh", covering, {"length_cm": 90.0, "waist_cm": 70, "hip_cm": 110},
+		["barrel", "body_core", "lower_body", "groin_mount"], [
 		_child("leg_fl", _seg("leg_fl", "flesh", covering, {"length_cm": 80.0}, ["leg", "front"], [])),
 		_child("leg_fr", _seg("leg_fr", "flesh", covering, {"length_cm": 80.0}, ["leg", "front"], [])),
 		_child("leg_bl", _seg("leg_bl", "flesh", covering, {"length_cm": 80.0}, ["leg", "hind"], [])),
@@ -141,7 +142,8 @@ static func _quad_barrel(id: String, covering: String) -> Dictionary:
 static func _serpent_tail(id: String) -> Dictionary:
 	# A long legless lower body (naga): a body-core lower segment, no legs. Carries
 	# `groin_mount` so the genitals reparent onto it (a naga keeps its sex, just no legs).
-	return _seg(id, "flesh", "scales", {"length_cm": 240.0}, ["body_core", "lower_body", "serpentine", "groin_mount"], [])
+	return _seg(id, "flesh", "scales", {"length_cm": 240.0, "waist_cm": 64, "hip_cm": 80},
+		["body_core", "lower_body", "serpentine", "groin_mount"], [])
 
 
 # =============================================================================== records
@@ -223,6 +225,42 @@ static func _size_tfs() -> Dictionary:
 			"gate": {"op": "has_tag", "tag": "vaginal"},
 			"ops": [{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "genital", "kind": "vaginal"},
 				"prop": "depth_cm", "amount": {"v": 6.0}, "clamp": [0.0, 40.0]}],
+		},
+		"widen_hips": {
+			"id": "widen_hips", "name": "Widen hips", "cat": "Size and scale",
+			"blurb": "Broadens the hips for a wider, curvier lower figure.",
+			"staged": false,
+			"gate": {"op": "has_tag", "tag": "groin_mount"},
+			"ops": [{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
+				"prop": "hip_cm", "amount": {"v": 22.0}, "clamp": [40.0, 160.0]}],
+		},
+		"cinch_waist": {
+			"id": "cinch_waist", "name": "Cinch waist", "cat": "Size and scale",
+			"blurb": "Pulls the waist in for a tighter, more hourglass shape.",
+			"staged": false,
+			"gate": {"op": "has_tag", "tag": "groin_mount"},
+			"ops": [{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
+				"prop": "waist_cm", "amount": {"v": -14.0}, "clamp": [30.0, 140.0]}],
+		},
+		"thicken_waist": {
+			"id": "thicken_waist", "name": "Thicken waist", "cat": "Size and scale",
+			"blurb": "Thickens the midsection toward a straighter, sturdier build.",
+			"staged": false,
+			"gate": {"op": "has_tag", "tag": "groin_mount"},
+			"ops": [{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
+				"prop": "waist_cm", "amount": {"v": 26.0}, "clamp": [30.0, 140.0]}],
+		},
+		"hourglass_figure": {
+			"id": "hourglass_figure", "name": "Hourglass figure", "cat": "Size and scale",
+			"blurb": "Cinches the waist and widens the hips together for a pronounced hourglass.",
+			"staged": false,
+			"gate": {"op": "has_tag", "tag": "groin_mount"},
+			"ops": [
+				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
+					"prop": "waist_cm", "amount": {"v": -12.0}, "clamp": [30.0, 140.0]},
+				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
+					"prop": "hip_cm", "amount": {"v": 18.0}, "clamp": [40.0, 160.0]},
+			],
 		},
 		"grow_taller": {
 			"id": "grow_taller", "name": "Grow taller", "cat": "Size and scale",

@@ -293,7 +293,7 @@ static func recast_fluid_ints(seg: Dictionary) -> void:
 # Props that are CANONICAL INTEGERS (the size model — compound-parts-and-fluids.md §4.3).
 # They are stored and round-tripped as ints; JSON reload turns them to float so they must
 # be recast, exactly like fluid amounts.
-const INT_PROPS := ["volume_ml", "band_cm"]
+const INT_PROPS := ["volume_ml", "band_cm", "waist_cm", "hip_cm"]
 
 
 ## Re-cast every segment's canonical integer size props (`volume_ml`, `band_cm`) back to

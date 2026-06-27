@@ -20,7 +20,8 @@ static func biped() -> Dictionary:
 	var seg := BodyGraph.segment
 	var c := BodyGraph.child
 	var fl := BodyGraph.fluid
-	var root: Dictionary = seg.call("torso_upper", "flesh", "skin", {"length_cm": 55.0},
+	var root: Dictionary = seg.call("torso_upper", "flesh", "skin",
+		{"length_cm": 55.0, "waist_cm": 62, "hip_cm": 90},
 		["torso", "body_core", "upper_body", "groin_mount"], [
 			c.call("neck", seg.call("head", "flesh", "skin", {}, ["head"], [])),
 			c.call("shoulder_l", seg.call("arm_l", "flesh", "skin", {"length_cm": 62.0}, ["arm"], [])),
@@ -68,7 +69,7 @@ static func breast_seg(id: String) -> Dictionary:
 static func quadruped_lower() -> Dictionary:
 	var seg := BodyGraph.segment
 	var c := BodyGraph.child
-	return seg.call("barrel", "flesh", "skin", {"length_cm": 90.0},
+	return seg.call("barrel", "flesh", "skin", {"length_cm": 90.0, "waist_cm": 70, "hip_cm": 110},
 		["barrel", "body_core", "lower_body", "groin_mount"], [
 			c.call("leg_fl", seg.call("leg_fl", "flesh", "skin", {"length_cm": 80.0}, ["leg"], [])),
 			c.call("leg_fr", seg.call("leg_fr", "flesh", "skin", {"length_cm": 80.0}, ["leg"], [])),
@@ -338,6 +339,64 @@ static func registry() -> Dictionary:
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "breast"},
 					"prop": "band_cm",
 					"amount": {"v": 6.0}, "clamp": [20.0, 60.0]},
+			],
+		},
+
+		# === FIGURE (BWH) TFs (compound-parts-and-fluids.md §4.3) — prop_delta on the
+		# canonical integer waist_cm / hip_cm stored on the body-core carrier (the
+		# `groin_mount` segment). The derived figure line (shape/build/triple) re-reads off
+		# the new measurements for free. Authored against the `groin_mount` tag, not a node
+		# id, so they work whether the carrier is a biped torso or a taur barrel.
+
+		# (o) widen the hips — raise hip_cm; widens the figure toward pear/wide-hipped.
+		"widen_hips": {
+			"id": "widen_hips", "name": "Widen hips", "staged": true,
+			"stage_seconds": 600, "max_stages": 4,
+			"gate": {"op": "has_tag", "tag": "groin_mount"},
+			"ops": [
+				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
+					"prop": "hip_cm",
+					"amount": {"roll": "uniform", "lo": 4.0, "hi": 8.0}, "clamp": [40.0, 160.0]},
+			],
+		},
+
+		# (p) cinch the waist — shrink waist_cm; deepens the hourglass / slims the waist.
+		"cinch_waist": {
+			"id": "cinch_waist", "name": "Cinch waist", "staged": true,
+			"stage_seconds": 600, "max_stages": 4,
+			"gate": {"op": "has_tag", "tag": "groin_mount"},
+			"ops": [
+				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
+					"prop": "waist_cm",
+					"amount": {"roll": "uniform", "lo": -6.0, "hi": -3.0}, "clamp": [30.0, 140.0]},
+			],
+		},
+
+		# (q) thicken the waist — grow waist_cm toward a straighter / apple figure.
+		"thicken_waist": {
+			"id": "thicken_waist", "name": "Thicken waist", "staged": true,
+			"stage_seconds": 600, "max_stages": 4,
+			"gate": {"op": "has_tag", "tag": "groin_mount"},
+			"ops": [
+				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
+					"prop": "waist_cm",
+					"amount": {"roll": "uniform", "lo": 4.0, "hi": 8.0}, "clamp": [30.0, 140.0]},
+			],
+		},
+
+		# (r) hourglass figure — cinch the waist AND widen the hips together for a pronounced
+		# hourglass. Two integer deltas, both clamped, both on the carrier.
+		"hourglass_figure": {
+			"id": "hourglass_figure", "name": "Hourglass figure", "staged": true,
+			"stage_seconds": 600, "max_stages": 4,
+			"gate": {"op": "has_tag", "tag": "groin_mount"},
+			"ops": [
+				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
+					"prop": "waist_cm",
+					"amount": {"roll": "uniform", "lo": -5.0, "hi": -3.0}, "clamp": [30.0, 140.0]},
+				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "groin_mount"},
+					"prop": "hip_cm",
+					"amount": {"roll": "uniform", "lo": 3.0, "hi": 6.0}, "clamp": [40.0, 160.0]},
 			],
 		},
 

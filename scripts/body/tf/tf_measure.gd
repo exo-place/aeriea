@@ -41,6 +41,15 @@ static func diff_mm(volume_ml: int, band_cm: int) -> int:
 # `length_unit`/`volume_unit`/`band_render` name the unit conventions a standard renders
 # under; the conversion helpers below apply them.
 
+# `figure` block: the configurable banding for the BWH figure read (the size analog of
+# the cup `letters`/`step_mm` — thresholds live in the standard, NOT hardcoded in describe).
+#   - `whr_*`: waist-to-hip RATIO cut-points (× WHR_SCALE, integer fixed-point) that pick
+#     the shape word (hourglass / pear / straight / apple). Lower ratio = curvier waist.
+#   - `spread_*_cm`: hip-circumference cut-points (in the standard's BWH unit) for the
+#     overall build word (slim / curvy / thick).
+#   - `wide_hip_cm` / `slim_waist_cm`: cut-points (BWH unit) for the targeted descriptors.
+# Imperial cuts are the metric ones converted to inches; the SAME body reads consistently
+# in either system because the comparison happens in the standard's own unit.
 const IMPERIAL := {
 	"id": "imperial",
 	"name": "Imperial (in / floz)",
@@ -49,6 +58,12 @@ const IMPERIAL := {
 	"length_unit": "in",
 	"volume_unit": "floz",
 	"band_render": "in",
+	"bwh_unit": "in",
+	"figure": {
+		"whr_hourglass": 75, "whr_pear": 80, "whr_straight": 92,
+		"spread_slim_cm": 35, "spread_thick_cm": 41,
+		"wide_hip_cm": 41, "slim_waist_cm": 26,
+	},
 }
 
 const METRIC := {
@@ -59,7 +74,17 @@ const METRIC := {
 	"length_unit": "cm",
 	"volume_unit": "ml",
 	"band_render": "cm",
+	"bwh_unit": "cm",
+	"figure": {
+		"whr_hourglass": 75, "whr_pear": 80, "whr_straight": 92,
+		"spread_slim_cm": 88, "spread_thick_cm": 104,
+		"wide_hip_cm": 104, "slim_waist_cm": 64,
+	},
 }
+
+# Fixed-point scale for the integer waist-to-hip ratio (so WHR is computed/compared with
+# no float in the decision path): ratio = waist * WHR_SCALE / hip.
+const WHR_SCALE := 100
 
 
 ## All shipped standards, in a stable order (for the playground's cycle control).
@@ -141,3 +166,90 @@ static func butt_phrase(volume_ml: int, std: Dictionary) -> String:
 ## A genital's length phrase under a standard, e.g. "15cm" / "6in".
 static func length_phrase(length_cm: float, std: Dictionary) -> String:
 	return "%d%s" % [length_in_unit(length_cm, std), std["length_unit"]]
+
+
+# --- BWH figure measurements (the size analog of cup, for the whole figure) ------
+# Canonical state: waist_cm + hip_cm are STORED integers on the body-core carrier; the
+# bust is DERIVED (never stored) from the ribcage band + total breast volume — the same
+# concave isqrt projection the cup uses, so a bigger chest reads as a bigger bust for
+# free. All three are integer-only; the figure WORDS are derived per standard from the
+# numbers and their ratios, with the cut-points living in the standard (configurable).
+
+# Bust projection constant: bust_cm = band_cm + K_BUST * isqrt(total_breast_volume_ml).
+# Concave in volume (via isqrt) so the bust grows but tapers, like the cup difference.
+const K_BUST := 1
+
+
+## Derived bust CIRCUMFERENCE in cm (canonical unit): ribcage band + a concave function
+## of total breast volume. Integer-only; 0-volume (flat) reads as the bare band.
+static func bust_cm(band_cm: int, total_breast_volume_ml: int) -> int:
+	return band_cm + K_BUST * isqrt(maxi(0, total_breast_volume_ml))
+
+
+## A measurement rendered in the standard's BWH unit (cm as-is, or inches = cm/2.54
+## rounded). Integer result — shared by all three of B/W/H.
+static func bwh_in_unit(cm: int, std: Dictionary) -> int:
+	if std.get("bwh_unit", "cm") == "in":
+		return int(round(float(cm) / 2.54))
+	return cm
+
+
+## The measurement TRIPLE string under a standard, e.g. "90-62-90" (metric) or
+## "35-24-35" (imperial). Pure integers in the standard's unit.
+static func figure_triple(bust_cm_v: int, waist_cm: int, hip_cm: int, std: Dictionary) -> String:
+	return "%d-%d-%d" % [bwh_in_unit(bust_cm_v, std), bwh_in_unit(waist_cm, std),
+		bwh_in_unit(hip_cm, std)]
+
+
+## Integer waist-to-hip ratio × WHR_SCALE (no float in the decision path). 0 hip -> 0.
+static func whr_scaled(waist_cm: int, hip_cm: int) -> int:
+	if hip_cm <= 0:
+		return 0
+	return waist_cm * WHR_SCALE / hip_cm
+
+
+## The SHAPE word from the waist-to-hip ratio, cut by the standard's `figure` thresholds.
+## hourglass (curvy waist) / pear (wide hips, fuller below) / straight / apple (waist >=
+## hips). Returns "" when no figure data is meaningful (hips absent).
+static func figure_shape(bust_cm_v: int, waist_cm: int, hip_cm: int, std: Dictionary) -> String:
+	if hip_cm <= 0 or waist_cm <= 0:
+		return ""
+	var fig: Dictionary = std.get("figure", {})
+	var whr := whr_scaled(waist_cm, hip_cm)
+	if whr >= int(fig.get("whr_straight", 92)):
+		return "apple" if whr >= WHR_SCALE else "straight"
+	if whr >= int(fig.get("whr_pear", 80)):
+		# A defined waist over notably wider hips reads pear; a fuller bust balances it
+		# back toward hourglass.
+		if bust_cm_v >= hip_cm:
+			return "hourglass"
+		return "pear"
+	if whr >= int(fig.get("whr_hourglass", 75)):
+		return "hourglass"
+	return "hourglass"
+
+
+## The overall BUILD word from the hip spread (the standard's spread_* cut-points, in the
+## standard's BWH unit): slim / curvy / thick. "" when hips absent.
+static func figure_build(hip_cm: int, std: Dictionary) -> String:
+	if hip_cm <= 0:
+		return ""
+	var fig: Dictionary = std.get("figure", {})
+	var h := bwh_in_unit(hip_cm, std)
+	if h < int(fig.get("spread_slim_cm", 88)):
+		return "slim"
+	if h >= int(fig.get("spread_thick_cm", 104)):
+		return "thick"
+	return "curvy"
+
+
+## Targeted figure descriptors (wide-hipped / slim-waisted), cut by the standard's
+## `figure` thresholds in its BWH unit. Returns an Array of words (possibly empty).
+static func figure_descriptors(waist_cm: int, hip_cm: int, std: Dictionary) -> Array:
+	var fig: Dictionary = std.get("figure", {})
+	var out: Array = []
+	if hip_cm > 0 and bwh_in_unit(hip_cm, std) >= int(fig.get("wide_hip_cm", 104)):
+		out.append("wide-hipped")
+	if waist_cm > 0 and bwh_in_unit(waist_cm, std) <= int(fig.get("slim_waist_cm", 64)):
+		out.append("slim-waisted")
+	return out

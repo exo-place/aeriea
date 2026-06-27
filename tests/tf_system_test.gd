@@ -150,24 +150,25 @@ func _test_reversibility() -> void:
 	var reg := TfContent.registry()
 	var h := TfHolder.new(TfContent.biped(), 1, reg)
 	var before := JSON.stringify(h.body)
-	h.apply_instant("graft_quadruped_lower")   # removes pelvis subtree + grafts barrel
+	h.apply_instant("graft_quadruped_lower")   # removes the biped lower body + grafts barrel
 	var after := JSON.stringify(h.body)
 	_ok(before != after, "graft changed the graph")
 	h.undo_last()
-	_ok(JSON.stringify(h.body) == before, "undo restored the EXACT prior graph (incl. re-grafted pelvis)")
+	_ok(JSON.stringify(h.body) == before, "undo restored the EXACT prior graph (incl. re-grafted lower body)")
 
 
 func _test_reversibility_regraft() -> void:
 	# A remove_subtree undo must re-graft the removed subtree byte-identically.
 	var reg := TfContent.registry()
 	var h := TfHolder.new(TfContent.biped(), 1, reg)
-	var pelvis_before := JSON.stringify(BodyGraph.find_by_id(h.body["root"], "pelvis"))
-	var tf := {"id": "x", "ops": [{"effect": "remove_subtree", "target_node": "pelvis"}]}
+	var lower_before := JSON.stringify(BodyGraph.find_by_id(h.body["root"], "lower_body"))
+	var tf := {"id": "x", "ops": [{"effect": "remove_subtree",
+		"target": {"select": "all_tagged", "tag": "groin"}}]}
 	var eff := TfApplier.apply_stage(h.body, tf, 0, 1, 1)
-	_ok(BodyGraph.find_by_id(h.body["root"], "pelvis") == null, "remove dropped the pelvis subtree")
+	_ok(BodyGraph.find_by_id(h.body["root"], "lower_body") == null, "remove dropped the lower-body subtree")
 	TfApplier.undo_effects(h.body, eff)
-	var pelvis_after := JSON.stringify(BodyGraph.find_by_id(h.body["root"], "pelvis"))
-	_ok(pelvis_after == pelvis_before, "undo re-grafted the removed subtree byte-identically")
+	var lower_after := JSON.stringify(BodyGraph.find_by_id(h.body["root"], "lower_body"))
+	_ok(lower_after == lower_before, "undo re-grafted the removed subtree byte-identically")
 
 
 func _test_save_load_roundtrip() -> void:
@@ -286,8 +287,8 @@ func _test_staged_graft() -> void:
 	h.advance_time(1200)   # stage 0 due — the form edit lands
 	_ok(BodyGraph.find_by_id(h.body["root"], "barrel") != null,
 		"staged graft: form edit lands on the first due stage (barrel grafted)")
-	_ok(BodyGraph.find_by_id(h.body["root"], "pelvis") == null,
-		"staged graft: the biped pelvis was removed as part of the staged form edit")
+	_ok(BodyGraph.find_by_id(h.body["root"], "lower_body") == null,
+		"staged graft: the biped lower body was removed as part of the staged form edit")
 	var len0: float = float(BodyGraph.find_by_id(h.body["root"], "barrel")["props"]["length_cm"])
 	h.advance_time(1200 * 4)   # remaining grow stages
 	var len1: float = float(BodyGraph.find_by_id(h.body["root"], "barrel")["props"]["length_cm"])

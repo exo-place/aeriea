@@ -8,11 +8,13 @@ const BodyGraph := preload("res://scripts/body/tf/body_graph.gd")
 
 
 # --- the starting biped (§7) ----------------------------------------------------
-# torso_upper (root) -> head, arm_l, arm_r, breast_l, breast_r, pelvis -> leg_l,
+# torso_upper (root) -> head, arm_l, arm_r, breast_l, breast_r, lower_body -> leg_l,
 # leg_r, genital_1 (phallic), genital_2 (vaginal). Breasts + the phallic genital carry
-# fluid reservoirs (milk / seed / nectar), all amount 0 with capacity set. The pelvis
-# is the groin region exposing genital mounts. All flesh + skin, conventionally tagged;
-# genitalia/compound parts are ORDINARY tagged segments — no special-casing (§3).
+# fluid reservoirs (milk / seed / nectar), all amount 0 with capacity set. The lower body
+# is the groin region exposing genital mounts — an ORDINARY tagged segment carrying the
+# `lower_body` region tag + `groin` mount tag (NOT `body_core`, so a biped never reads as
+# a taur; NOT a special `pelvis` id/tag — content targets it by tag/relation, §3). Legs,
+# butt and genital mounts hang off it exactly as a barrel/naga lower carries its own legs.
 static func biped() -> Dictionary:
 	var seg := BodyGraph.segment
 	var c := BodyGraph.child
@@ -26,8 +28,8 @@ static func biped() -> Dictionary:
 				["breast"], [], [fl.call("milk", 0, 400)])),
 			c.call("chest_r", seg.call("breast_r", "flesh", "skin", {"volume_ml": 650, "band_cm": 32},
 				["breast"], [], [fl.call("milk", 0, 400)])),
-			c.call("hip", seg.call("pelvis", "flesh", "skin", {"length_cm": 25.0},
-				["pelvis", "groin", "lower_body"], [
+			c.call("hip", seg.call("lower_body", "flesh", "skin", {"length_cm": 25.0, "width_cm": 36.0},
+				["groin", "lower_body"], [
 					c.call("leg_l", seg.call("leg_l", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
 					c.call("leg_r", seg.call("leg_r", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
 					c.call("rear", seg.call("butt", "flesh", "skin", {"volume_ml": 800}, ["butt"], [])),
@@ -85,15 +87,17 @@ static func tail_seg() -> Dictionary:
 # --- the TF registry (id -> TF record) ------------------------------------------
 static func registry() -> Dictionary:
 	return {
-		# (a) FORM graft, instant: biped -> taur. Remove the biped legs+pelvis first,
-		# then graft the quadruped-lower structure at the hip. Gate: not already taur.
+		# (a) FORM graft, instant: biped -> taur. Remove the biped lower body first
+		# (targeted by its `lower_body` region tag, not a global id), then graft the
+		# quadruped-lower structure at the hip. Gate: a biped lower body present and not
+		# already a barrel.
 		"graft_quadruped_lower": {
 			"id": "graft_quadruped_lower",
 			"name": "Graft quadruped lower body",
 			"staged": false,
-			"gate": {"op": "has_tag", "tag": "pelvis"},
+			"gate": {"op": "not", "of": {"op": "has_tag", "tag": "barrel"}},
 			"ops": [
-				{"effect": "remove_subtree", "target_node": "pelvis"},
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "groin"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
 					"subtree": quadruped_lower()},
 			],
@@ -156,24 +160,26 @@ static func registry() -> Dictionary:
 
 		# (a2) FORM graft, STAGED: the same biped -> taur graft, but progressive. Form
 		# edits (remove/graft) are stageable like any op (§4.2) — there's no reason a graft
-		# must be instant. Stage 0 removes the biped pelvis and grafts the quadruped barrel
-		# (one_op_per_stage off, so both form ops fire together as the single "graft" stage);
-		# stages 1-4 then GROW the newly-grafted legs, so the lower body is grafted then
-		# grows in over the clock. Gate: not already taur. The grow op's `when` guard makes
-		# the trailing stages no-op cleanly once legs reach length.
+		# must be instant. Stage 0 removes the biped lower body and grafts the quadruped
+		# barrel (one_op_per_stage off, so both form ops fire together as the single "graft"
+		# stage); stages 1-4 then GROW the newly-grafted legs, so the lower body is grafted
+		# then grows in over the clock. Gate: not already taur. The grow op's `when` guard
+		# makes the trailing stages no-op cleanly once legs reach length.
 		"graft_quadruped_lower_staged": {
 			"id": "graft_quadruped_lower_staged",
 			"name": "Graft quadruped lower body, gradual",
 			"staged": true, "stage_seconds": 1200, "max_stages": 5,
 			# NB: no TF-level `gate` here. The "not already taur" guard lives on the graft op
 			# as a `when` instead — a TF-level gate is re-checked every stage and would FALSE
-			# out (and kill the staged TF) the moment the barrel's `spine` tag lands. Op-level
-			# `when` lets the form fire once in stage 0 while the grow stages keep running.
+			# out (and kill the staged TF) the moment the barrel lands. Op-level `when` lets
+			# the form fire once in stage 0 while the grow stages keep running.
 			"ops": [
-				# stage 0: the form edit (remove pelvis, graft barrel). On later stages these
-				# no-op (pelvis already gone / `when` keeps the graft from re-firing).
-				{"effect": "remove_subtree", "target_node": "pelvis",
-					"when": {"op": "has_tag", "tag": "pelvis"}},
+				# stage 0: the form edit (remove the biped lower body by its `groin` mount
+				# tag — only the biped lower carries it, never a barrel; graft the barrel).
+				# On later stages these no-op (the groin-tagged lower is gone / the graft
+				# `when` keeps it from re-firing).
+				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "groin"},
+					"when": {"op": "has_tag", "tag": "groin"}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "hip",
 					"subtree": quadruped_lower(),
 					"when": {"op": "not", "of": {"op": "has_tag", "tag": "barrel"}}},
@@ -203,7 +209,7 @@ static func registry() -> Dictionary:
 			"id": "add_phallic_genital", "name": "Graft a phallic genital", "staged": false,
 			"gate": {"op": "has_tag", "tag": "groin"},
 			"ops": [
-				{"effect": "graft_subtree", "target_node": "pelvis", "at": "genital_mount_c",
+				{"effect": "graft_subtree", "parent_tag": "groin", "at": "genital_mount_c",
 					"subtree": phallic_genital("genital_3")},
 			],
 		},
@@ -269,18 +275,22 @@ static func registry() -> Dictionary:
 
 		# (j) feminize — pure PART OPS that shift the DERIVED sex (no gender field, §6.2):
 		# remove every phallic genital, graft a vaginal one if absent, graft a 3rd breast
-		# row, and open milk capacity. Derived sex flips male/herm -> female for free.
+		# row if not already present, and open milk capacity. Derived sex flips
+		# male/herm -> female for free. Every graft is GUARDED by a `when` so re-applying
+		# the TF is idempotent — a second pass adds no duplicate-id parts (the breast graft
+		# fires only while fewer than three breasts are present).
 		"feminize": {
 			"id": "feminize", "name": "Feminize", "staged": false,
 			"ops": [
 				{"effect": "remove_subtree",
 					"target": {"select": "all_tagged", "tag": "genital", "kind": "phallic"},
 					"when": {"op": "has_tag", "tag": "phallic"}},
-				{"effect": "graft_subtree", "target_node": "pelvis", "at": "genital_mount_v",
+				{"effect": "graft_subtree", "parent_tag": "groin", "at": "genital_mount_v",
 					"subtree": vaginal_genital("genital_v"),
 					"when": {"op": "not", "of": {"op": "has_tag", "tag": "vaginal"}}},
 				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "chest_c",
-					"subtree": breast_seg("breast_c")},
+					"subtree": breast_seg("breast_c"),
+					"when": {"op": "not", "of": {"op": "eq", "path": "#breast_c.id", "v": "breast_c"}}},
 				{"effect": "fluid_delta",
 					"target": {"select": "all_tagged", "tag": "breast"}, "fluid": "milk",
 					"amount": {"v": 0}, "capacity_delta": 100, "clamp_amount": [0]},

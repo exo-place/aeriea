@@ -25,9 +25,10 @@ const TfMeasure := preload("res://scripts/body/tf/tf_measure.gd")
 # Optional form aliases: a structural predicate -> short label. Open, conventional,
 # unenforced (§3.6). They key off a SECOND body-core lower segment — a node tagged both
 # `body_core` AND `lower_body` (a horizontal barrel or a serpentine lower carrying the
-# weight, distinct from the upright torso). A plain biped never has such a segment (its
-# lower body is the pelvis, which is not body_core), so these never false-match a biped.
-# No special `spine` tag: a barrel and a torso are both body-core.
+# weight, distinct from the upright torso). A plain biped's lower body carries `lower_body`
+# but NOT `body_core` (it is an ordinary groin-bearing segment, uniform with how a barrel/
+# naga lower is just a tag arrangement), so these never false-match a biped. No special
+# `spine` tag: a barrel and a torso are both body-core.
 #   - a serpentine (legless) lower  -> "naga"
 #   - any other body-core lower      -> "taur"
 static func _form_alias(root: Dictionary):
@@ -262,7 +263,11 @@ static func _part_phrases(root: Dictionary, std: Dictionary) -> Array:
 	for key in order:
 		var n: int = counts[key]
 		if n == 1:
-			out.append("- " + _capitalize(_article(key) + " " + key))
+			# Inherently-plural part nouns ("hips") take no article and read bare.
+			if _is_plural_noun_phrase(key):
+				out.append("- " + _capitalize(key))
+			else:
+				out.append("- " + _capitalize(_article(key) + " " + key))
 		else:
 			out.append("- %s %s" % [_num_word(n).capitalize(), pluralizers[key]])
 	return out
@@ -323,6 +328,12 @@ static func _plural(noun: String) -> String:
 	if noun.ends_with("y") and noun.length() > 1:
 		return noun.substr(0, noun.length() - 1) + "ies"
 	return noun + "s"
+
+
+# True if the phrase's head noun is inherently plural (reads bare, no "a"/"an"). The
+# biped lower body reads as "hips" — a pair-shaped noun with no singular here.
+static func _is_plural_noun_phrase(phrase: String) -> bool:
+	return phrase.ends_with("hips")
 
 
 # Indefinite article for a phrase ("a"/"an") by its leading sound (vowel heuristic).
@@ -559,9 +570,13 @@ static func _noun_for_tags(tags: Array) -> String:
 		return "butt"
 	# Prefer the most specific conventional tag; structural fallback if none.
 	for pref in ["head", "tail", "ear", "horn", "wing", "hoof", "claw", "udder",
-			"nipple", "teat", "arm", "leg", "hand", "pelvis", "torso"]:
+			"nipple", "teat", "arm", "leg", "hand", "torso"]:
 		if pref in tags:
 			return pref
+	# A biped lower body (the groin-bearing `lower_body` region, NOT a body_core
+	# barrel/naga lower) reads as "hips" — a uniform tag-driven noun, no `pelvis` id/tag.
+	if ("lower_body" in tags or "groin" in tags) and not ("body_core" in tags):
+		return "hips"
 	# A body-core trunk with no more-specific noun. A serpentine lower (naga) reads as a
 	# serpentine lower body; a horizontal barrel (taur) reads as a barrel; an upright
 	# trunk reads as a torso.
@@ -599,6 +614,15 @@ static func _size_band(seg: Dictionary) -> String:
 		if v < 700: return ""
 		if v < 1200: return "large"
 		return "huge"
+	# Hips read a width band off width_cm so widen_hips is VISIBLE (the base lower body is
+	# ~36 cm; widen_hips raises it). Below the generic length band so it wins for the lower
+	# body. (§4.3 — a real prop the describer reads, replacing the old no-op width_cm.)
+	if ("lower_body" in tags or "groin" in tags) and props.has("width_cm"):
+		var w := float(props["width_cm"])
+		if w < 30: return "narrow"
+		if w < 44: return ""
+		if w < 58: return "wide"
+		return "broad"
 	if props.has("length_cm"):
 		var l: float = float(props["length_cm"])
 		if l <= 0:

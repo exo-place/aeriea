@@ -228,7 +228,11 @@ func _target_phrase(op: Dictionary) -> String:
 	if op.has("target") and typeof(op["target"]) == TYPE_DICTIONARY:
 		var sel: Dictionary = op["target"]
 		var kind = sel.get("kind", null)
-		var noun := _kind_noun(str(kind)) if kind != null else _word(str(sel.get("tag", "part")))
+		# A region tag ("groin"/"lower_body") names the lower body, not a per-item "every X".
+		var tagstr := str(sel.get("tag", "part"))
+		if kind == null and (tagstr == "groin" or tagstr == "lower_body"):
+			return "the lower body"
+		var noun := _kind_noun(str(kind)) if kind != null else _word(tagstr)
 		if sel.get("select", "") == "nth_tagged":
 			return "the first %s" % noun
 		return "every %s" % noun
@@ -249,7 +253,7 @@ func _kind_noun(kind: String) -> String:
 func _node_phrase(id: String) -> String:
 	match id:
 		"torso_upper": return "the torso"
-		"pelvis": return "the lower body"
+		"lower_body": return "the lower body"
 		"barrel": return "the barrel"
 		"head": return "the head"
 		"butt": return "the butt"
@@ -267,7 +271,7 @@ func _node_phrase(id: String) -> String:
 func _part_phrase(sub: Dictionary) -> String:
 	var tags: Array = sub.get("tags", [])
 	var noun := "a part"
-	if "pelvis" in tags:
+	if "lower_body" in tags and not ("body_core" in tags):
 		return "a two-legged lower body"
 	for role in ["wing", "horn", "ear", "tail", "arm", "leg", "claw", "hoof", "udder",
 			"teat", "nipple", "breast", "serpentine", "barrel"]:

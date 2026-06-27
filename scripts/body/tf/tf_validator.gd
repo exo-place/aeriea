@@ -29,8 +29,8 @@ static func validate(body: Dictionary) -> Array:
 			issues.append({"kind": "spurious_covering", "node": seg["id"],
 						"detail": "non-flesh material carries a covering"})
 	# A MULTI-LEGGED lower body (4+ legs) with no body-core barrel to carry them (the
-	# §3.8 example). A normal biped pelvis (2 legs) is unremarkable and NOT flagged — the
-	# heuristic targets a grafted quadruped lower that lost its body-core barrel.
+	# §3.8 example). A normal biped lower body (2 legs) is unremarkable and NOT flagged —
+	# the heuristic targets a grafted quadruped lower that lost its body-core barrel.
 	var leg_count := 0
 	var has_lower_core := false
 	for seg in BodyGraph.all_segments(root):

@@ -131,13 +131,33 @@ static func _target_id(root: Dictionary, op: Dictionary) -> String:
 	return ""
 
 
+# Resolve a graft's PARENT mount id: a literal `target_node` (stable upper-body mount),
+# or `parent_tag` resolving to the first node carrying that region tag (id order). "" if
+# nothing resolves (the graft no-ops — §3.7).
+static func _graft_parent_id(root: Dictionary, op: Dictionary) -> String:
+	if op.has("target_node"):
+		return str(op["target_node"])
+	if op.has("parent_tag"):
+		var nodes := BodyGraph.resolve_targets(root, {"tag": op["parent_tag"]})
+		if not nodes.is_empty():
+			return str(nodes[0]["id"])
+	return ""
+
+
 static func _apply_op(root: Dictionary, op: Dictionary, rng: DetRng):
 	match op.get("effect", ""):
 		"graft_subtree":
-			var ok := BodyGraph.graft(root, op["target_node"], op["at"], op["subtree"])
+			# The graft names a PARENT mount. By a stable mount id (`target_node`) for the
+			# fixed upper-body mounts (torso_upper / head / arm_l …), OR by a region TAG
+			# (`parent_tag`) so a graft onto "the groin/lower body" generalizes without a
+			# global node id — resolving to the first tagged node in id order (§3.7).
+			var gp := _graft_parent_id(root, op)
+			if gp == "":
+				return null
+			var ok := BodyGraph.graft(root, gp, op["at"], op["subtree"])
 			if not ok:
 				return null
-			return {"effect": "graft_subtree", "parent_id": op["target_node"],
+			return {"effect": "graft_subtree", "parent_id": gp,
 					"node_id": op["subtree"]["id"]}
 		"remove_subtree":
 			# An `all_tagged` select fans the removal across every matching member,

@@ -465,7 +465,7 @@ func _rebuild_split_buttons() -> void:
 	var hdr := _section("Split off a part:")
 	_split_buttons.add_child(hdr)
 	# offer a handful of splittable (non-root) nodes that actually exist now.
-	var candidates := ["pelvis", "barrel", "tail", "leg_fl", "arm_r", "head"]
+	var candidates := ["lower_body", "barrel", "tail", "leg_fl", "arm_r", "head"]
 	var root: Dictionary = _holder.body["root"]
 	var row: HBoxContainer = null
 	var n := 0

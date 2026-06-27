@@ -417,6 +417,7 @@ static func _shape_noun(shape: String) -> String:
 	match shape:
 		"hourglass": return "hourglass figure"
 		"pear": return "pear-shaped figure"
+		"top-heavy": return "top-heavy figure"
 		"apple": return "apple-shaped figure"
 		"straight": return "straight figure"
 		_:
@@ -430,14 +431,15 @@ static func noun_first_word(phrase: String) -> String:
 
 
 # The ribcage band for the bust derivation: the band_cm shared by the breasts (the rib
-# band the cup already reads off). Falls back to the default 32 when no breast carries one.
+# band the cup already reads off — a realistic ribcage circumference in cm, ~81 for an
+# average adult). Falls back to ~81 cm when no breast carries one.
 static func _ribcage_band(root: Dictionary) -> int:
 	for seg in BodyGraph.all_segments(root):
 		if "breast" in seg.get("tags", []):
 			var p: Dictionary = seg.get("props", {})
 			if p.has("band_cm"):
 				return int(round(float(p["band_cm"])))
-	return 32
+	return 81
 
 
 # Total breast volume across every breast segment (the bust derivation's volume term).

@@ -234,31 +234,42 @@ model here.
 
 **Deterministic integer cup derivation** (`scripts/body/tf/tf_measure.gd`):
 
+`band_cm` is the **ribcage / underbust circumference in CM at a realistic value** — a "32
+band" adult is ~81 cm, NOT 32 cm. (The bare-32 era read a ~27 in bust off a child-sized
+ribcage; the canonical value is now the real circumference.)
+
 ```
 isqrt(n)               = integer floor sqrt (Newton iteration, integer-only)
-diff_mm(volume, band)  = max(0, K_V*isqrt(volume) - K_B*band)     # K_V=8, K_B=4
+diff_mm(volume, band)  = max(0, K_V*isqrt(volume) - K_B*(band - BAND_ANCHOR))
+                                                   # K_V=8, K_B=4, BAND_ANCHOR=49
 ```
 
 `diff_mm` is **increasing in volume** (concave, via `isqrt`) and **decreasing in band** — both
 monotonicities hold by construction, so a bigger volume grows the cup while a wider rib band
-shrinks it at fixed volume. No float touches the decision path.
+shrinks it at fixed volume. The band term is anchored at `BAND_ANCHOR` so it stays a gentle
+correction on a realistic (~81 cm) ribcage rather than swamping the volume term as a bare-cm
+subtraction would; a ~650 ml breast on an ~81 cm ribcage still reads ~C. No float touches the
+decision path.
 
 **A measurement standard** = `(step_mm, letters[], length_unit, volume_unit, band_render)`:
 
 - **IMPERIAL**: `step_mm=25`, letters `[AA,A,B,C,D,DD,DDD,G,H,I,J]`, lengths in inches
-  (cm/2.54 rounded), volume in floz (cc/29.57 rounded), band shown in inches (band_cm/2.54).
+  (cm/2.54 rounded), volume in floz (cc/29.57 rounded), band shown as the bra-band number —
+  ribcage inches rounded to the nearest EVEN (bands run 30/32/34/…), so 81 cm → 32.
 - **METRIC** (default): `step_mm=20`, letters `[AA,A,B,C,D,E,F,G,H,I,J,K,L]`, lengths in cm,
-  volume in ml/cc, band shown in cm.
+  volume in ml/cc, band shown as the ribcage cm.
 
 ```
 cup_letter(volume,band,std) = std.letters[ clamp(diff_mm(volume,band)/std.step_mm, 0, n-1) ]
 cup_label(volume,band,std)  = str(band_in_std_unit) + cup_letter(...)
 ```
 
-**Worked example** (asserted in `tests/tf_size_test.gd`): `volume_ml=1200, band_cm=32` →
-`diff=max(0, 8*34 - 4*32)=144`. Imperial: idx `144/25=5` → "DD", band 32cm→13in → **"13DD"**.
-Metric: idx `144/20=7` → "G", band "32" → **"32G"**. The *same body* renders "13DD" (imperial)
-vs "32G" (metric); cm↔in and ml↔floz flip with the standard.
+**Worked example** (asserted in `tests/tf_size_test.gd`): `volume_ml=1200, band_cm=81` (a
+realistic adult ribcage) → `diff=max(0, 8*34 - 4*(81-49))=max(0, 272-128)=144`. Imperial: idx
+`144/25=5` → "DD", band 81 cm→32 in (even) → **"32DD"**. Metric: idx `144/20=7` → "G", band
+"81" → **"81G"**. The *same body* renders "32DD" (imperial) vs "81G" (metric); cm↔in and
+ml↔floz flip with the standard. (The cup LETTER is exactly the bare-32 era's value — the band
+term is anchored so 81 cm behaves as the old bare-32 did — only the band NUMBER is now real.)
 
 **Where the standard lives.** It is a parameter of the describe layer — `TfDescribe.describe(
 body, std)` with a default standard and an override arg — **never stored on the body**. The
@@ -532,9 +543,10 @@ Genuinely open (everything else is decided above):
 
 3. ~~**Banding thresholds are content, but someone owns the defaults.**~~ **RESOLVED (§4.4).**
    The engine owns a deterministic **default** size model: canonical integer `volume_ml`/
-   `band_cm`, a derived cup via `diff_mm` (K_V=8, K_B=4) clamped into a standard's letter table,
-   and two shipped standards (IMPERIAL / METRIC). The standard is a describe-layer *parameter*
-   (default + override), not body state, so the same body re-renders "13DD" ↔ "32G". Authors
+   `band_cm` (the realistic ribcage cm), a derived cup via `diff_mm` (K_V=8, K_B=4, anchored
+   band term) clamped into a standard's letter table, and two shipped standards (IMPERIAL /
+   METRIC). The standard is a describe-layer *parameter* (default + override), not body state,
+   so the same body re-renders "32DD" ↔ "81G". Authors
    still override bands downstream; the engine just ships a sensible, configurable default —
    the same answer the parent's prop-banding question wants.
 

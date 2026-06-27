@@ -101,7 +101,7 @@ static func _vagina(id: String) -> Dictionary:
 
 
 static func _breast(id: String, volume: int = 500) -> Dictionary:
-	return _seg(id, "flesh", "skin", {"volume_ml": volume, "band_cm": 32},
+	return _seg(id, "flesh", "skin", {"volume_ml": volume, "band_cm": 81},
 		["breast"], [], [BodyGraph.fluid("milk", 0, 400)])
 
 

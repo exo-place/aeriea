@@ -14,8 +14,17 @@
 
 # Cup derivation constants (§4.3). diff_mm is increasing in volume (concave, via isqrt)
 # and decreasing in band — both monotonicities hold by construction.
+#
+# The band is the ribcage/underbust circumference stored canonically in CM at a REALISTIC
+# value (a "32 band" person ≈ 81 cm ribcage, NOT 32 cm). The cup difference is the bust
+# projection OVER that ribcage, so it must be measured against the ribcage span, not the
+# bare cm: BAND_ANCHOR is the ribcage at which the volume term alone sets the cup (a person
+# with a small/average ribcage); larger ribcages spread the same volume into a smaller cup.
+# Anchored so a ~650 ml breast on an ~81 cm ribcage still reads ~C — the value the model
+# carried before the unit correction, just on the corrected (realistic) ribcage.
 const K_V := 8
 const K_B := 4
+const BAND_ANCHOR := 49
 
 
 ## Integer floor sqrt — deterministic, integer-only (no float sqrt in the decision path).
@@ -30,10 +39,13 @@ static func isqrt(n: int) -> int:
 	return x
 
 
-## The cup "difference" in mm: K_V * isqrt(volume_ml) - K_B * band_cm, floored at 0.
-## Bigger volume -> bigger cup; bigger band (at fixed volume) -> smaller cup.
+## The cup "difference" in mm: K_V * isqrt(volume_ml) - K_B * (band_cm - BAND_ANCHOR),
+## floored at 0. Bigger volume -> bigger cup; bigger ribcage (at fixed volume) -> smaller
+## cup (the same breast spread over a wider chest reads a smaller cup). The band term is
+## anchored to BAND_ANCHOR so it stays gentle on a realistic ribcage (~81 cm) rather than
+## swamping the volume term as a bare-cm subtraction would.
 static func diff_mm(volume_ml: int, band_cm: int) -> int:
-	return maxi(0, K_V * isqrt(volume_ml) - K_B * band_cm)
+	return maxi(0, K_V * isqrt(volume_ml) - K_B * (band_cm - BAND_ANCHOR))
 
 
 # --- measurement standards ------------------------------------------------------
@@ -43,8 +55,13 @@ static func diff_mm(volume_ml: int, band_cm: int) -> int:
 
 # `figure` block: the configurable banding for the BWH figure read (the size analog of
 # the cup `letters`/`step_mm` — thresholds live in the standard, NOT hardcoded in describe).
-#   - `whr_*`: waist-to-hip RATIO cut-points (× WHR_SCALE, integer fixed-point) that pick
-#     the shape word (hourglass / pear / straight / apple). Lower ratio = curvier waist.
+#   - `whr_defined`: the waist-to-hip RATIO (× WHR_SCALE) BELOW which the waist counts as
+#     "clearly smaller than the hips" — the definition gate. At/above it the figure is
+#     low-definition and reads straight/rectangle (or apple when the waist meets the hips).
+#   - `whr_apple`: WHR at/above which the (undefined) figure reads apple rather than straight.
+#   - `balance_cm`: the bust-vs-hip margin (in the standard's BWH unit). Bust and hips within
+#     this margin count as "balanced" (hourglass-eligible); hips bigger by more read pear;
+#     bust bigger by more read top-heavy.
 #   - `spread_*_cm`: hip-circumference cut-points (in the standard's BWH unit) for the
 #     overall build word (slim / curvy / thick).
 #   - `wide_hip_cm` / `slim_waist_cm`: cut-points (BWH unit) for the targeted descriptors.
@@ -60,7 +77,8 @@ const IMPERIAL := {
 	"band_render": "in",
 	"bwh_unit": "in",
 	"figure": {
-		"whr_hourglass": 75, "whr_pear": 80, "whr_straight": 92,
+		"whr_defined": 88, "whr_apple": 100,
+		"balance_cm": 2,
 		"spread_slim_cm": 35, "spread_thick_cm": 41,
 		"wide_hip_cm": 41, "slim_waist_cm": 26,
 	},
@@ -76,7 +94,8 @@ const METRIC := {
 	"band_render": "cm",
 	"bwh_unit": "cm",
 	"figure": {
-		"whr_hourglass": 75, "whr_pear": 80, "whr_straight": 92,
+		"whr_defined": 88, "whr_apple": 100,
+		"balance_cm": 5,
 		"spread_slim_cm": 88, "spread_thick_cm": 104,
 		"wide_hip_cm": 104, "slim_waist_cm": 64,
 	},
@@ -140,11 +159,14 @@ static func volume_in_unit(volume_ml: int, std: Dictionary) -> int:
 	return int(volume_ml)
 
 
-## The band number shown for the bra size, in the standard's band-render unit (cm as-is,
-## or inches = band_cm/2.54 rounded). Integer.
+## The band number shown for the bra size, in the standard's band-render unit. Metric is
+## the ribcage cm as-is; imperial is the bra-band convention: ribcage inches rounded to the
+## nearest EVEN number (bra bands run 30/32/34/…). So an ~81 cm ribcage reads "32".
 static func band_in_unit(band_cm: int, std: Dictionary) -> int:
 	if std["band_render"] == "in":
-		return int(round(float(band_cm) / 2.54))
+		var inches := int(round(float(band_cm) / 2.54))
+		# Round to the nearest even band number (the bra-band convention).
+		return inches + (inches & 1)
 	return int(band_cm)
 
 
@@ -175,15 +197,18 @@ static func length_phrase(length_cm: float, std: Dictionary) -> String:
 # free. All three are integer-only; the figure WORDS are derived per standard from the
 # numbers and their ratios, with the cut-points living in the standard (configurable).
 
-# Bust projection constant: bust_cm = band_cm + K_BUST * isqrt(total_breast_volume_ml).
-# Concave in volume (via isqrt) so the bust grows but tapers, like the cup difference.
-const K_BUST := 1
+# Bust projection: bust_cm = ribcage_cm + isqrt(total_breast_volume_ml) / BUST_DIV.
+# Concave in volume (via isqrt) so the bust grows but tapers, like the cup difference. The
+# ribcage is a realistic circumference (~81 cm), so the projection is a small chest-depth
+# add-on (a ~1300 ml pair adds ~7 cm -> ~88 cm bust ≈ 35 in), NOT a doubling of the band.
+const BUST_DIV := 5
 
 
-## Derived bust CIRCUMFERENCE in cm (canonical unit): ribcage band + a concave function
-## of total breast volume. Integer-only; 0-volume (flat) reads as the bare band.
+## Derived bust CIRCUMFERENCE in cm (canonical unit): ribcage circumference + a small,
+## concave projection from total breast volume. Integer-only; 0-volume (flat) reads as the
+## bare ribcage.
 static func bust_cm(band_cm: int, total_breast_volume_ml: int) -> int:
-	return band_cm + K_BUST * isqrt(maxi(0, total_breast_volume_ml))
+	return band_cm + isqrt(maxi(0, total_breast_volume_ml)) / BUST_DIV
 
 
 ## A measurement rendered in the standard's BWH unit (cm as-is, or inches = cm/2.54
@@ -208,24 +233,33 @@ static func whr_scaled(waist_cm: int, hip_cm: int) -> int:
 	return waist_cm * WHR_SCALE / hip_cm
 
 
-## The SHAPE word from the waist-to-hip ratio, cut by the standard's `figure` thresholds.
-## hourglass (curvy waist) / pear (wide hips, fuller below) / straight / apple (waist >=
-## hips). Returns "" when no figure data is meaningful (hips absent).
+## The SHAPE word from the FULL bust-waist-hip figure, cut by the standard's `figure`
+## thresholds. Uses all three measurements, not the waist-to-hip ratio alone:
+##   - straight / rectangle: the waist is NOT clearly smaller than the hips (low definition;
+##     apple when the waist meets/exceeds the hips), regardless of bust≈hips.
+##   - pear / bottom-heavy: hips meaningfully larger than the bust.
+##   - top-heavy / inverted: bust meaningfully larger than the hips.
+##   - hourglass: bust ≈ hips (within the balance margin) AND a clearly defined waist.
+## Returns "" when no figure data is meaningful (hips absent). Comparisons happen in the
+## standard's own BWH unit so the read is unit-consistent.
 static func figure_shape(bust_cm_v: int, waist_cm: int, hip_cm: int, std: Dictionary) -> String:
 	if hip_cm <= 0 or waist_cm <= 0:
 		return ""
 	var fig: Dictionary = std.get("figure", {})
 	var whr := whr_scaled(waist_cm, hip_cm)
-	if whr >= int(fig.get("whr_straight", 92)):
-		return "apple" if whr >= WHR_SCALE else "straight"
-	if whr >= int(fig.get("whr_pear", 80)):
-		# A defined waist over notably wider hips reads pear; a fuller bust balances it
-		# back toward hourglass.
-		if bust_cm_v >= hip_cm:
-			return "hourglass"
+	# Definition gate first: an undefined waist reads straight/rectangle (apple if the waist
+	# meets the hips) no matter how bust and hips compare.
+	if whr >= int(fig.get("whr_defined", 88)):
+		return "apple" if whr >= int(fig.get("whr_apple", 100)) else "straight"
+	# A defined waist: the bust-vs-hip balance picks pear / top-heavy / hourglass. Compare in
+	# the standard's BWH unit, with the configurable balance margin.
+	var bust_u := bwh_in_unit(bust_cm_v, std)
+	var hip_u := bwh_in_unit(hip_cm, std)
+	var margin := int(fig.get("balance_cm", 5))
+	if hip_u - bust_u > margin:
 		return "pear"
-	if whr >= int(fig.get("whr_hourglass", 75)):
-		return "hourglass"
+	if bust_u - hip_u > margin:
+		return "top-heavy"
 	return "hourglass"
 
 

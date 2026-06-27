@@ -26,9 +26,9 @@ static func biped() -> Dictionary:
 			c.call("neck", seg.call("head", "flesh", "skin", {}, ["head"], [])),
 			c.call("shoulder_l", seg.call("arm_l", "flesh", "skin", {"length_cm": 62.0}, ["arm"], [])),
 			c.call("shoulder_r", seg.call("arm_r", "flesh", "skin", {"length_cm": 62.0}, ["arm"], [])),
-			c.call("chest_l", seg.call("breast_l", "flesh", "skin", {"volume_ml": 650, "band_cm": 32},
+			c.call("chest_l", seg.call("breast_l", "flesh", "skin", {"volume_ml": 650, "band_cm": 81},
 				["breast"], [], [fl.call("milk", 0, 400)])),
-			c.call("chest_r", seg.call("breast_r", "flesh", "skin", {"volume_ml": 650, "band_cm": 32},
+			c.call("chest_r", seg.call("breast_r", "flesh", "skin", {"volume_ml": 650, "band_cm": 81},
 				["breast"], [], [fl.call("milk", 0, 400)])),
 			c.call("leg_l", seg.call("leg_l", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
 			c.call("leg_r", seg.call("leg_r", "flesh", "skin", {"length_cm": 85.0}, ["leg"], [])),
@@ -57,7 +57,7 @@ static func vaginal_genital(id: String) -> Dictionary:
 
 
 static func breast_seg(id: String) -> Dictionary:
-	return BodyGraph.segment(id, "flesh", "skin", {"volume_ml": 500, "band_cm": 32},
+	return BodyGraph.segment(id, "flesh", "skin", {"volume_ml": 500, "band_cm": 81},
 		["breast"], [], [BodyGraph.fluid("milk", 0, 400)])
 
 
@@ -338,7 +338,7 @@ static func registry() -> Dictionary:
 			"ops": [
 				{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "breast"},
 					"prop": "band_cm",
-					"amount": {"v": 6.0}, "clamp": [20.0, 60.0]},
+					"amount": {"v": 6.0}, "clamp": [60.0, 120.0]},
 			],
 		},
 

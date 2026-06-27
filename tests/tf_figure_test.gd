@@ -48,15 +48,16 @@ func _ok(cond: bool, msg: String) -> void:
 
 # (a) Bust is DERIVED from band + a concave function of total breast volume.
 func _test_bust_derived() -> void:
-	# band only (flat) -> bust == band.
-	_ok(TfMeasure.bust_cm(32, 0) == 32, "flat bust == band")
-	# bigger volume -> bigger bust, but concave (isqrt): +1300ml adds isqrt(1300)=36.
-	_ok(TfMeasure.bust_cm(32, 1300) == 32 + 36, "bust adds isqrt(volume) (got %d)" % TfMeasure.bust_cm(32, 1300))
+	# ribcage only (flat) -> bust == ribcage.
+	_ok(TfMeasure.bust_cm(81, 0) == 81, "flat bust == ribcage")
+	# bigger volume -> bigger bust, but a small concave projection: +1300ml adds
+	# isqrt(1300)/5 = 36/5 = 7 cm (a realistic chest-depth add-on, not a doubled band).
+	_ok(TfMeasure.bust_cm(81, 1300) == 81 + 7, "bust adds concave projection (got %d)" % TfMeasure.bust_cm(81, 1300))
 	# monotonic non-decreasing in volume.
 	var prev := -1
 	var mono := true
 	for v in range(0, 5000, 50):
-		var b := TfMeasure.bust_cm(32, v)
+		var b := TfMeasure.bust_cm(81, v)
 		if b < prev:
 			mono = false
 		prev = b
@@ -96,18 +97,25 @@ func _test_no_bust_field_stored() -> void:
 	_ok(not any_bust, "no segment stores a bust_cm field (bust is derived)")
 
 
-# (c) Shape word follows the waist-to-hip RATIO, not raw values.
+# (c) Shape word follows the FULL bust-waist-hip figure, not the waist-to-hip ratio alone.
 func _test_shape_is_ratio_dependent() -> void:
 	var std := TfMeasure.METRIC
-	# low WHR -> hourglass; high WHR (waist near hip) -> straight; waist>=hip -> apple.
-	_ok(TfMeasure.figure_shape(90, 60, 95, std) == "hourglass", "low WHR reads hourglass")
-	_ok(TfMeasure.figure_shape(90, 88, 92, std) == "straight", "high WHR reads straight")
+	# bust ≈ hips + defined waist -> hourglass; undefined waist -> straight; waist>=hip -> apple.
+	_ok(TfMeasure.figure_shape(90, 60, 92, std) == "hourglass", "balanced + defined waist reads hourglass")
+	_ok(TfMeasure.figure_shape(90, 88, 92, std) == "straight", "undefined waist reads straight")
 	_ok(TfMeasure.figure_shape(90, 100, 90, std) == "apple", "waist>=hip reads apple")
-	# pear: defined waist, wide hips, modest bust.
-	_ok(TfMeasure.figure_shape(80, 66, 82, std) == "pear", "wide hips + modest bust reads pear")
-	# RATIO not raw: scaling waist+hip together keeps the same shape.
-	_ok(TfMeasure.figure_shape(90, 60, 95, std) == TfMeasure.figure_shape(90, 120, 190, std),
-		"shape depends on the ratio, not the raw magnitudes")
+	# pear: defined waist, hips meaningfully WIDER than the bust.
+	_ok(TfMeasure.figure_shape(80, 62, 95, std) == "pear", "hips wider than bust reads pear")
+	# top-heavy: defined waist, bust meaningfully WIDER than the hips.
+	_ok(TfMeasure.figure_shape(98, 62, 86, std) == "top-heavy", "bust wider than hips reads top-heavy")
+	# the SHAPE uses the bust, not the waist-to-hip ratio alone: same WHR, different bust,
+	# different shape (this is exactly the bug being fixed).
+	_ok(TfMeasure.figure_shape(80, 62, 95, std) != TfMeasure.figure_shape(110, 62, 95, std),
+		"shape responds to the bust, not the waist-to-hip ratio alone")
+	# the waist-definition gate is RATIO-based: with bust ≈ hips, scaling waist+hip together
+	# (same WHR) keeps the same hourglass/straight verdict regardless of raw waist cm.
+	_ok(TfMeasure.figure_shape(90, 60, 90, std) == TfMeasure.figure_shape(180, 120, 180, std),
+		"the waist-definition gate uses the ratio, not the raw waist magnitude")
 
 
 # (c') Build word follows hip spread; descriptors follow the targeted cut-points.

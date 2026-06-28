@@ -181,10 +181,11 @@ static func _form_summary(root: Dictionary) -> String:
 	return "She has the build of a %s: %s." % [alias, structural]
 
 
-# The structural form as a readable clause: arms, lower body, optional tail.
+# The structural form as a readable clause: upper limbs (arms/wings), lower body, tail.
 static func _structural_clause(root: Dictionary) -> String:
 	var legs := 0
 	var arms := 0
+	var wings := 0
 	var has_tail := false
 	for seg in BodyGraph.all_segments(root):
 		var tags: Array = seg.get("tags", [])
@@ -192,12 +193,28 @@ static func _structural_clause(root: Dictionary) -> String:
 			legs += 1
 		if "arm" in tags:
 			arms += 1
+		if "wing" in tags:
+			wings += 1
 		if "tail" in tags:
 			has_tail = true
-	var clause := "%s torso over %s" % [_count_word(arms, "armed", "armless"), _lower_clause(legs)]
+	var clause := "%s torso over %s" % [_upper_clause(arms, wings), _lower_clause(legs)]
 	if has_tail:
 		clause += ", with a tail"
 	return clause
+
+
+# The upper-limb half of the form clause, articled, reading what is ACTUALLY there. A
+# harpy's wings ARE its forelimbs, so a winged-but-armless torso reads "winged", never
+# "armless"; a six-limbed dragon (arms AND wings) reads as both; "armless" is reserved for
+# a torso with no upper limbs at all.
+static func _upper_clause(arms: int, wings: int) -> String:
+	if wings > 0 and arms > 0:
+		return "a winged, %s-armed" % _num_word(arms)
+	if wings > 0:
+		return "a winged"
+	if arms > 0:
+		return "a %s-armed" % _num_word(arms)
+	return "an armless"
 
 
 # The lower-body half of the form clause, reading from the leg count.
@@ -205,13 +222,6 @@ static func _lower_clause(legs: int) -> String:
 	if legs <= 0:
 		return "a legless lower body"
 	return "a %s-legged lower body" % _num_word(legs)
-
-
-# "two-armed" / "an armless" — count + adjective, with a sensible zero case.
-static func _count_word(n: int, plural_adj: String, zero_adj: String) -> String:
-	if n <= 0:
-		return "an %s" % zero_adj
-	return "a %s-%s" % [_num_word(n), plural_adj]
 
 
 # Small integers as words; falls back to the digit for large counts.
@@ -234,6 +244,7 @@ static func _form_summary_raw(root: Dictionary) -> String:
 static func _structural_form_raw(root: Dictionary) -> String:
 	var legs := 0
 	var arms := 0
+	var wings := 0
 	var has_tail := false
 	for seg in BodyGraph.all_segments(root):
 		var tags: Array = seg.get("tags", [])
@@ -241,10 +252,14 @@ static func _structural_form_raw(root: Dictionary) -> String:
 			legs += 1
 		if "arm" in tags:
 			arms += 1
+		if "wing" in tags:
+			wings += 1
 		if "tail" in tags:
 			has_tail = true
 	var bits: Array = []
 	bits.append("%d-armed upper body" % arms)
+	if wings > 0:
+		bits.append("%d-winged" % wings)
 	bits.append("%d-legged lower body" % legs)
 	if has_tail:
 		bits.append("tailed")
@@ -835,3 +850,660 @@ static func _walk_zones(seg: Dictionary, out: Array) -> void:
 			out.append("where the %s meets the body, %s gives way to %s"
 				% [where, parent_surface, child_surface])
 		_walk_zones(child_seg, out)
+
+
+# ================================================================================
+# TRANSITION / PROCESS describer (TF system §6) — narrate a TF AS IT HAPPENS.
+#
+# Where describe() reads the STATIC end-body, this reads the CHANGE between two body
+# states and narrates it in a process voice: what GREW IN, what SHRANK AWAY, what
+# changed material / covering / size / shape, in a sensible order. The end-body is a
+# noun; a transformation is a verb, and this is the verb layer.
+#
+# `describe_transition(before, after)` diffs two states by segment id:
+#   - ids present in AFTER but not BEFORE -> a part grew in / pushed out;
+#   - ids in BEFORE but not AFTER         -> a part shrank away / vanished;
+#   - ids in both                         -> compare material / covering / size / tags.
+# The diff is emitted in passes (gestalt scale, gestalt plan, vanish, appear, material,
+# covering, reshape, size, fluids) so the sentences land in a natural narrative order,
+# and a gestalt pass can CONSUME the segment ids it already narrated (the four legs of a
+# new barrel are part of "she settles onto four legs", not four separate bullets).
+#
+# `describe_progression(snapshots)` walks an ORDERED list of body states (captured stage
+# by stage as a staged TF advances on the sim clock) and narrates each step's change in
+# turn — literally the transformation unfolding over time, frame by frame.
+#
+# Plain and functional per the user-facing-text rule: no node ids, no raw deltas, no
+# dev-ese. The deep literary realizer is still deferred — this describes the actual
+# change clearly and in order, no faked purple prose.
+# ================================================================================
+
+## Ordered process narrative for a single TF: the sequence of changes from `before` to
+## `after`, each a plain sentence in a happening voice. Empty when nothing changed.
+static func describe_transition(before: Dictionary, after: Dictionary, std: Dictionary = {}) -> Array:
+	if std.is_empty():
+		std = TfMeasure.default_standard()
+	var b_map := _seg_map(before["root"])
+	var a_map := _seg_map(after["root"])
+	var parent_after := _parent_map(after["root"])
+	var consumed := {}
+	var out: Array = []
+	_emit_whole_scale(b_map, a_map, consumed, out)
+	_emit_plan_morph(b_map, a_map, consumed, out)
+	_emit_vanished(b_map, a_map, consumed, out)
+	_emit_appeared(b_map, a_map, parent_after, consumed, out)
+	_emit_material(b_map, a_map, consumed, out)
+	_emit_covering(b_map, a_map, consumed, out)
+	_emit_reshape(b_map, a_map, consumed, out)
+	_emit_size(b_map, a_map, consumed, out, std)
+	_emit_fluids(b_map, a_map, consumed, out)
+	return out
+
+
+## Walk an ordered list of body snapshots (state before, then after each stage) and
+## narrate each step's change in order — the transformation unfolding frame by frame.
+## Consecutive identical snapshots contribute nothing (a stage that no-ops is silent).
+static func describe_progression(snapshots: Array, std: Dictionary = {}) -> Array:
+	if std.is_empty():
+		std = TfMeasure.default_standard()
+	var lines: Array = []
+	for i in range(1, snapshots.size()):
+		for s in describe_transition(snapshots[i - 1], snapshots[i], std):
+			lines.append(s)
+	return lines
+
+
+# A short one-line "ends as" form summary (the build sentence), for an audit footer.
+static func form_line(body: Dictionary) -> String:
+	return _form_summary(body["root"])
+
+
+# --- diff scaffolding -----------------------------------------------------------
+
+static func _seg_map(root: Dictionary) -> Dictionary:
+	var m := {}
+	for seg in BodyGraph.all_segments(root):
+		m[seg["id"]] = seg
+	return m
+
+
+# child id -> parent id, for the AFTER graph (so an appeared child of an appeared parent
+# is recognized as part of that parent's graft, not a separate "grows in" line).
+static func _parent_map(root: Dictionary) -> Dictionary:
+	var m := {}
+	for seg in BodyGraph.all_segments(root):
+		for edge in seg.get("children", []):
+			m[edge["node"]["id"]] = seg["id"]
+	return m
+
+
+# Left/right/fore/hind qualifier read off a stable id suffix, so a creeping change can
+# name "her left hind leg" / "her right foreleg" instead of repeating a bare noun.
+static func _side_word(id: String) -> String:
+	if id.ends_with("_bl"): return "left hind"
+	if id.ends_with("_br"): return "right hind"
+	if id.ends_with("_fl"): return "left fore"
+	if id.ends_with("_fr"): return "right fore"
+	if id.ends_with("_ll"): return "lower left"
+	if id.ends_with("_rr"): return "lower right"
+	if id.ends_with("_l"): return "left"
+	if id.ends_with("_r"): return "right"
+	return ""
+
+
+# A possessive part label for one segment: a side qualifier (when the id carries one) +
+# the natural noun. "left hind leg", "right wing", "barrel", "torso".
+static func _part_label(seg: Dictionary) -> String:
+	var noun := _noun_for_tags(seg.get("tags", []))
+	var side := _side_word(str(seg.get("id", "")))
+	if side == "":
+		return noun
+	var label := side + " " + noun
+	return label.replace("fore leg", "foreleg")
+
+
+# --- pass 1: whole-body scale (fae / giant / taller) ----------------------------
+# A scale TF moves MANY limb lengths at once; narrate it as one gestalt, not a dozen
+# "her legs lengthen" lines, and CONSUME the limb/figure props it covers.
+static func _emit_whole_scale(b_map: Dictionary, a_map: Dictionary, consumed: Dictionary, out: Array) -> void:
+	var kinds := {}
+	var grew := false
+	var shrank := false
+	var limb_ids: Array = []
+	for id in a_map:
+		if not b_map.has(id):
+			continue
+		var tags: Array = a_map[id].get("tags", [])
+		var kind := ""
+		if "leg" in tags: kind = "leg"
+		elif "arm" in tags: kind = "arm"
+		elif "torso" in tags: kind = "torso"
+		if kind == "":
+			continue
+		var bl := float(b_map[id].get("props", {}).get("length_cm", 0.0))
+		var al := float(a_map[id].get("props", {}).get("length_cm", 0.0))
+		if al == bl or bl == 0.0:
+			continue
+		kinds[kind] = true
+		limb_ids.append(id)
+		if al > bl: grew = true
+		else: shrank = true
+	if kinds.size() < 2 or (grew and shrank):
+		return
+	# Proportional figure scaling (waist/hip/band/volume moved too) marks a true whole-body
+	# resize (fae/giant) rather than a plain height change (legs+torso only).
+	var fig_scaled := false
+	var fig_ids: Array = []
+	for id in a_map:
+		if not b_map.has(id):
+			continue
+		var tags: Array = a_map[id].get("tags", [])
+		if not ("breast" in tags or "groin_mount" in tags or "butt" in tags):
+			continue
+		var bp: Dictionary = b_map[id].get("props", {})
+		var ap: Dictionary = a_map[id].get("props", {})
+		for p in ["waist_mm", "hip_mm", "band_mm", "volume_ml"]:
+			if bp.has(p) and ap.has(p) and float(bp[p]) != float(ap[p]):
+				fig_scaled = true
+				if id not in fig_ids:
+					fig_ids.append(id)
+	if fig_scaled:
+		if shrank:
+			out.append("Her whole body shrinks down, dwindling to a tiny, delicate fae stature.")
+		else:
+			out.append("Her whole body swells outward, growing to a towering giant's frame.")
+		for id in limb_ids: consumed[id] = true
+		for id in fig_ids: consumed[id] = true
+	else:
+		# Plain height change (legs + torso lengthen/shorten, figure untouched).
+		if grew:
+			out.append("She grows taller, her legs and torso lengthening.")
+		else:
+			out.append("She shrinks shorter, her legs and torso drawing in.")
+		for id in limb_ids: consumed[id] = true
+
+
+# --- pass 2: whole-body plan morph (a lower-body core appears / vanishes) --------
+static func _emit_plan_morph(b_map: Dictionary, a_map: Dictionary, consumed: Dictionary, out: Array) -> void:
+	# A new body-core LOWER segment (a barrel / serpent) = the body re-planning around a
+	# new lower body. Fold the new legs and the lost biped legs into one gestalt sentence.
+	for id in a_map:
+		if b_map.has(id) or id in consumed:
+			continue
+		var tags: Array = a_map[id].get("tags", [])
+		if not ("body_core" in tags and "lower_body" in tags):
+			continue
+		if "serpentine" in tags:
+			out.append("Her legs fuse and flow together, drawing out into one long, sinuous serpentine tail.")
+		else:
+			out.append("Her legs give way as a heavy four-legged barrel grows out beneath her torso, and she settles onto all fours.")
+		consumed[id] = true
+		# Consume every appeared leg (the new barrel's legs) and every vanished leg.
+		for nid in a_map:
+			if not b_map.has(nid) and "leg" in a_map[nid].get("tags", []):
+				consumed[nid] = true
+		for oid in b_map:
+			if not a_map.has(oid) and "leg" in b_map[oid].get("tags", []):
+				consumed[oid] = true
+		return
+
+
+# --- pass 3: vanished parts -----------------------------------------------------
+static func _emit_vanished(b_map: Dictionary, a_map: Dictionary, consumed: Dictionary, out: Array) -> void:
+	var counts := {}
+	var seen: Array = []
+	for id in b_map:
+		if a_map.has(id) or id in consumed:
+			continue
+		# Only top-level losses: if this id's old parent also vanished, it left with the
+		# parent (a removed udder's teats are part of "her udder is gone").
+		var noun := _noun_for_tags(b_map[id].get("tags", []))
+		if not counts.has(noun):
+			counts[noun] = 0
+			seen.append(noun)
+		counts[noun] += 1
+	for noun in seen:
+		var line := _vanish_phrase(noun, counts[noun])
+		if line != "":
+			out.append(line)
+
+
+static func _vanish_phrase(noun: String, count: int) -> String:
+	match noun:
+		"penis":
+			return ("Her penis softens, shrinks, and is gone." if count == 1
+				else "Her penises soften, shrink, and are gone.")
+		"vagina":
+			return "Her sex closes over and smooths away."
+		"breast":
+			return ("A breast flattens away to nothing." if count == 1
+				else "Her breasts flatten away to nothing.")
+		"wing":
+			return "Her wings shrink and fall away."
+		"arm":
+			return "Her arms wither and pull away."
+		"leg":
+			return "Her legs give way beneath her."
+		"tail":
+			return "Her tail shrinks back and is gone."
+		"horn":
+			return "Her horns recede into her brow."
+		"udder":
+			return "Her udder shrinks back into her belly."
+		_:
+			return "Her %s draws back and is gone." % noun
+
+
+# --- pass 4: appeared parts -----------------------------------------------------
+static func _emit_appeared(b_map: Dictionary, a_map: Dictionary, parent_after: Dictionary,
+		consumed: Dictionary, out: Array) -> void:
+	# Group the TOP-LEVEL new parts (parent already existed) by noun, in graph order, so a
+	# symmetric pair reads as "a pair of wings", and a child of a new graft is not re-listed.
+	var counts := {}
+	var sample := {}
+	var order: Array = []
+	for id in a_map:
+		if b_map.has(id) or id in consumed:
+			continue
+		var par = parent_after.get(id, "")
+		# A child whose parent ALSO just appeared belongs to that parent's graft phrase.
+		if par != "" and not b_map.has(par) and par not in consumed:
+			continue
+		var noun := _noun_for_tags(a_map[id].get("tags", []))
+		if not counts.has(noun):
+			counts[noun] = 0
+			order.append(noun)
+			sample[noun] = a_map[id]
+		counts[noun] += 1
+	for noun in order:
+		out.append(_appear_phrase(sample[noun], counts[noun]))
+
+
+static func _appear_phrase(seg: Dictionary, count: int) -> String:
+	var noun := _noun_for_tags(seg.get("tags", []))
+	var surface := _surface_word(seg)
+	var size := _size_band(seg)
+	match noun:
+		"tail":
+			var s := (surface + " ") if surface != "" and surface != "bare-skinned" else ""
+			return "A long %stail grows in and settles at the base of her spine." % s
+		"wing":
+			var ws := (surface + " ") if surface != "" and surface != "bare-skinned" else ""
+			if count >= 2:
+				return "A pair of broad %swings unfurl from her back." % ws
+			return "A single %swing unfurls from her back." % ws
+		"horn":
+			var hs := (size + " ") if size != "" else ""
+			if count >= 2:
+				return "A pair of %shorns push up from her brow." % hs
+			return "A %shorn pushes up from her brow." % hs
+		"ear":
+			var es := (surface + " ") if surface != "" and surface != "bare-skinned" else ""
+			if count >= 2:
+				return "A pair of %sears prick up atop her head." % es
+			return "A %sear pricks up atop her head." % es
+		"arm":
+			if count >= 2:
+				return "A second pair of arms push out below the first."
+			return "Another arm pushes out from her side."
+		"leg":
+			if count >= 2:
+				return "A pair of new, clawed legs take shape and she rises onto them."
+			return "A new leg pushes out beneath her."
+		"claw":
+			return "Her fingertips harden and curl into sharp claws."
+		"hoof":
+			return "Her feet harden over into solid hooves."
+		"breast":
+			if count >= 2:
+				return "A second pair of breasts swell into being below the first."
+			return "Another breast swells into being on her chest."
+		"nipple":
+			return "A second nipple rises on each breast."
+		"teat":
+			return "A row of small teats forms along her lower belly."
+		"udder":
+			return "A heavy, teated udder swells in beneath her belly."
+		"penis":
+			var ps := (size + " ") if size != "" else ""
+			return "A %spenis grows in at her groin." % ps
+		"vagina":
+			return "A new sex opens between her legs."
+		_:
+			if count >= 2:
+				return "%s %s grow in." % [_num_word(count).capitalize(), _plural(noun)]
+			return "%s grows in." % _capitalize(_article(noun) + " " + noun)
+
+
+# --- pass 5: material changes ---------------------------------------------------
+static func _emit_material(b_map: Dictionary, a_map: Dictionary, consumed: Dictionary, out: Array) -> void:
+	# Group common segments whose MATERIAL changed by (from -> to). A change that sweeps the
+	# trunk (or many segments) reads once as body-wide; a local one names the part(s).
+	var groups := {}       # "from>to" -> [seg...]
+	var bodywide := {}     # "from>to" -> bool (touches the trunk)
+	for id in a_map:
+		if not b_map.has(id) or id in consumed:
+			continue
+		var bm := str(b_map[id].get("material", ""))
+		var am := str(a_map[id].get("material", ""))
+		if bm == am:
+			continue
+		var key := bm + ">" + am
+		if not groups.has(key):
+			groups[key] = []
+			bodywide[key] = false
+		groups[key].append(a_map[id])
+		var tags: Array = a_map[id].get("tags", [])
+		if "body_core" in tags and "upper_body" in tags:
+			bodywide[key] = true
+	for key in groups:
+		var segs: Array = groups[key]
+		var parts := str(key).split(">")
+		var verb := _material_verb(parts[0], parts[1])
+		if bodywide[key] or segs.size() >= 3:
+			out.append("Her body %s across her whole frame." % verb)
+		else:
+			for seg in segs:
+				out.append("Her %s %s." % [_part_label(seg), verb])
+
+
+static func _material_verb(from_m: String, to_m: String) -> String:
+	match to_m:
+		"chitin": return "hardens into a chitin shell"
+		"slime": return "softens into translucent slime"
+		"keratin": return "hardens to keratin"
+		"flesh": return "softens back to bare flesh"
+		_:
+			return "turns to %s" % _humanize(to_m)
+
+
+# --- pass 6: covering changes ---------------------------------------------------
+static func _emit_covering(b_map: Dictionary, a_map: Dictionary, consumed: Dictionary, out: Array) -> void:
+	var groups := {}
+	var bodywide := {}
+	for id in a_map:
+		if not b_map.has(id) or id in consumed:
+			continue
+		# A material change already narrated this segment's surface (chitin/slime null the
+		# covering) — don't also report a covering change on it.
+		if str(b_map[id].get("material", "")) != str(a_map[id].get("material", "")):
+			continue
+		var bc = b_map[id].get("covering")
+		var ac = a_map[id].get("covering")
+		if bc == ac or ac == null:
+			continue
+		var key := str(bc) + ">" + str(ac)
+		if not groups.has(key):
+			groups[key] = []
+			bodywide[key] = false
+		groups[key].append(a_map[id])
+		var tags: Array = a_map[id].get("tags", [])
+		if "body_core" in tags and "upper_body" in tags:
+			bodywide[key] = true
+	for key in groups:
+		var segs: Array = groups[key]
+		var parts := str(key).split(">")
+		if bodywide[key] or segs.size() >= 3:
+			out.append(_covering_bodywide(parts[0], parts[1]))
+		else:
+			for seg in segs:
+				out.append(_covering_local(parts[1], seg))
+
+
+static func _covering_bodywide(from_c: String, to_c: String) -> String:
+	match to_c:
+		"fur": return "Fur sweeps across her body in a soft coat."
+		"fur_red": return "A coat of russet-red fur sweeps across her body."
+		"scales": return "Scales sheet over her skin from head to foot."
+		"feathers": return "Feathers sprout and spread across her body."
+		"skin":
+			return "Her %s recedes, leaving bare skin behind." % _humanize(from_c)
+		_:
+			return "Her surface turns to %s across her body." % _humanize(to_c)
+
+
+static func _covering_local(to_c: String, seg: Dictionary) -> String:
+	var part := _part_label(seg)
+	# A trunk/barrel reads as the fur "spreading up over"; a limb reads as it "creeping over".
+	var tags: Array = seg.get("tags", [])
+	var spread := ("body_core" in tags or "torso" in tags)
+	match to_c:
+		"fur":
+			return ("Fur spreads up over her %s." % part) if spread else ("Fur creeps over her %s." % part)
+		"fur_red":
+			return "Her %s fur deepens to a russet red." % part
+		"scales":
+			return ("Scales spread over her %s." % part) if spread else ("Scales creep over her %s." % part)
+		"feathers":
+			return "Feathers spread over her %s." % part
+		"skin":
+			return "Her %s sheds back to bare skin." % part
+		_:
+			return "Her %s turns to %s." % [part, _humanize(to_c)]
+
+
+# --- pass 7: reshape (notable tag changes on a kept segment) ---------------------
+static func _emit_reshape(b_map: Dictionary, a_map: Dictionary, consumed: Dictionary, out: Array) -> void:
+	# Arms become wings IN PLACE — a harpy's wings ARE its forelimbs, so the kept arm
+	# segments are retagged to wings rather than removed-and-replaced. Narrate the limb
+	# reshaping, surfaced by what the new wing is covered in (feathers / slime / …), and
+	# consume the segments so no other pass double-reports them.
+	var wing_sample = null
+	var wing_count := 0
+	var digitigrade := false
+	for id in a_map:
+		if not b_map.has(id) or id in consumed:
+			continue
+		var before_tags: Array = b_map[id].get("tags", [])
+		var after_tags: Array = a_map[id].get("tags", [])
+		if "arm" in before_tags and "arm" not in after_tags and "wing" in after_tags:
+			wing_sample = a_map[id]
+			wing_count += 1
+			consumed[id] = true
+		if "digitigrade" in after_tags and "digitigrade" not in before_tags:
+			digitigrade = true
+	if wing_sample != null:
+		var surface := _surface_word(wing_sample)
+		var ws := (surface + " ") if surface != "" and surface != "bare-skinned" else ""
+		if wing_count >= 2:
+			out.append("Her arms broaden and reshape into a pair of %swings." % ws)
+		else:
+			out.append("Her arm broadens and reshapes into a single %swing." % ws)
+	if digitigrade:
+		out.append("Her legs reshape, the joints reversing into a digitigrade stance up on the balls of her feet.")
+
+
+# --- pass 8: size changes -------------------------------------------------------
+static func _emit_size(b_map: Dictionary, a_map: Dictionary, consumed: Dictionary, out: Array, std: Dictionary) -> void:
+	# Breasts: collapse the pair, read the cup band-aware, narrate the swell/subside.
+	var bsample = null
+	var asample = null
+	for id in a_map:
+		if not b_map.has(id) or id in consumed:
+			continue
+		if "breast" not in a_map[id].get("tags", []):
+			continue
+		var bv := float(b_map[id].get("props", {}).get("volume_ml", 0.0))
+		var av := float(a_map[id].get("props", {}).get("volume_ml", 0.0))
+		if bv != av and bsample == null:
+			bsample = b_map[id]
+			asample = a_map[id]
+	if bsample != null:
+		out.append(_breast_size_line(bsample, asample, std))
+
+	# Figure carrier (waist / hips). Combine when both move (the hourglass pinch).
+	for id in a_map:
+		if not b_map.has(id) or id in consumed:
+			continue
+		if "groin_mount" not in a_map[id].get("tags", []):
+			continue
+		var bp: Dictionary = b_map[id].get("props", {})
+		var ap: Dictionary = a_map[id].get("props", {})
+		var dw := float(ap.get("waist_mm", 0.0)) - float(bp.get("waist_mm", 0.0))
+		var dh := float(ap.get("hip_mm", 0.0)) - float(bp.get("hip_mm", 0.0))
+		if dw < 0 and dh > 0:
+			out.append("Her waist draws in as her hips flare wider — an hourglass deepening.")
+		elif dw > 0 and dh > 0:
+			out.append("Her waist and hips both thicken, filling out her lower frame.")
+		elif dw < 0:
+			out.append("Her waist cinches in, slimming her midriff.")
+		elif dw > 0:
+			out.append("Her waist thickens into a straighter line.")
+		elif dh > 0:
+			out.append("Her hips widen and flare outward.")
+		elif dh < 0:
+			out.append("Her hips draw in narrower.")
+
+	# Barrel (a taur lower) filling out over staged growth.
+	for id in a_map:
+		if not b_map.has(id) or id in consumed:
+			continue
+		var tags: Array = a_map[id].get("tags", [])
+		if not ("body_core" in tags and "lower_body" in tags and "serpentine" not in tags):
+			continue
+		var bl := float(b_map[id].get("props", {}).get("length_cm", 0.0))
+		var al := float(a_map[id].get("props", {}).get("length_cm", 0.0))
+		if al > bl and bl > 0.0:
+			out.append("Her barrel fills out, growing longer and heavier beneath her.")
+
+	# Phallic length / girth.
+	for id in a_map:
+		if not b_map.has(id) or id in consumed:
+			continue
+		var tags: Array = a_map[id].get("tags", [])
+		if "phallic" not in tags:
+			continue
+		var bp: Dictionary = b_map[id].get("props", {})
+		var ap: Dictionary = a_map[id].get("props", {})
+		var dl := float(ap.get("length_cm", 0.0)) - float(bp.get("length_cm", 0.0))
+		var dg := float(ap.get("girth_cm", 0.0)) - float(bp.get("girth_cm", 0.0))
+		if dl > 0 and dg > 0:
+			out.append("Her penis grows longer and thicker.")
+		elif dl > 0:
+			out.append("Her penis lengthens.")
+		elif dg > 0:
+			out.append("Her penis thickens.")
+		elif dl < 0:
+			out.append("Her penis shortens.")
+		break
+
+	# Vaginal depth.
+	for id in a_map:
+		if not b_map.has(id) or id in consumed:
+			continue
+		if "vaginal" not in a_map[id].get("tags", []):
+			continue
+		var dd := float(a_map[id].get("props", {}).get("depth_cm", 0.0)) - float(b_map[id].get("props", {}).get("depth_cm", 0.0))
+		if dd > 0:
+			out.append("Her sex deepens inside.")
+		break
+
+	# Butt volume.
+	for id in a_map:
+		if not b_map.has(id) or id in consumed:
+			continue
+		if "butt" not in a_map[id].get("tags", []):
+			continue
+		var dv := float(a_map[id].get("props", {}).get("volume_ml", 0.0)) - float(b_map[id].get("props", {}).get("volume_ml", 0.0))
+		if dv > 0:
+			out.append("Her rear swells fuller and rounder.")
+		elif dv < 0:
+			out.append("Her rear slims down.")
+		break
+
+	# Tail lengthening (e.g. a staged tail-grow).
+	for id in a_map:
+		if not b_map.has(id) or id in consumed:
+			continue
+		if "tail" not in a_map[id].get("tags", []):
+			continue
+		var dt := float(a_map[id].get("props", {}).get("length_cm", 0.0)) - float(b_map[id].get("props", {}).get("length_cm", 0.0))
+		if dt > 0:
+			out.append("Her tail lengthens, growing out behind her.")
+		elif dt < 0:
+			out.append("Her tail draws shorter.")
+		break
+
+	# A single limb-length change not caught by the whole-body scale gestalt.
+	var leg_dir := 0
+	for id in a_map:
+		if not b_map.has(id) or id in consumed:
+			continue
+		if "leg" not in a_map[id].get("tags", []):
+			continue
+		var dl := float(a_map[id].get("props", {}).get("length_cm", 0.0)) - float(b_map[id].get("props", {}).get("length_cm", 0.0))
+		if dl > 0: leg_dir = 1
+		elif dl < 0: leg_dir = -1
+	if leg_dir > 0:
+		out.append("Her legs lengthen.")
+	elif leg_dir < 0:
+		out.append("Her legs shorten.")
+
+
+static func _breast_size_line(before_seg: Dictionary, after_seg: Dictionary, std: Dictionary) -> String:
+	var bp: Dictionary = before_seg.get("props", {})
+	var ap: Dictionary = after_seg.get("props", {})
+	var bv := int(round(float(bp.get("volume_ml", 0.0))))
+	var av := int(round(float(ap.get("volume_ml", 0.0))))
+	var bband := int(round(float(bp.get("band_mm", 810.0))))
+	var aband := int(round(float(ap.get("band_mm", 810.0))))
+	var bl := TfMeasure.cup_letter(bv, bband, std)
+	var al := TfMeasure.cup_letter(av, aband, std)
+	var grew := av > bv
+	if bl != al:
+		var verb := "swell" if grew else "subside"
+		return "Her breasts %s from %s %s cup to %s %s cup." % [
+			verb, _letter_article(bl), bl, _letter_article(al), al]
+	# Same cup band but a real volume move (e.g. band widened with volume): keep it honest.
+	if grew:
+		return "Her breasts grow fuller and heavier."
+	return "Her breasts ease smaller."
+
+
+# --- pass 9: fluid changes ------------------------------------------------------
+static func _emit_fluids(b_map: Dictionary, a_map: Dictionary, consumed: Dictionary, out: Array) -> void:
+	var b_amt := 0
+	var a_amt := 0
+	var b_cap := 0
+	var a_cap := 0
+	var udder_filled := false
+	for id in a_map:
+		if not b_map.has(id) or id in consumed:
+			continue
+		var tags: Array = a_map[id].get("tags", [])
+		var is_breast := "breast" in tags
+		var is_udder := "udder" in tags
+		if not (is_breast or is_udder):
+			continue
+		var before := _milk(b_map[id])
+		var after := _milk(a_map[id])
+		if is_udder:
+			if after["amount"] > before["amount"]:
+				udder_filled = true
+			continue
+		b_amt += before["amount"]; a_amt += after["amount"]
+		b_cap += before["capacity"]; a_cap += after["capacity"]
+	if b_cap == 0 and a_cap > 0:
+		out.append("Her breasts begin to fill, milk coming in.")
+	elif a_amt > b_amt:
+		# Vary by how full she is now, so a staged refill reads as actually filling up
+		# stage by stage rather than the same line repeated.
+		var pct := float(a_amt) / float(a_cap) if a_cap > 0 else 0.0
+		if pct >= 1.0:
+			out.append("Her breasts swell full and tight with milk.")
+		elif pct >= 0.6:
+			out.append("Her breasts grow heavy with milk.")
+		else:
+			out.append("Her breasts fill further with milk.")
+	elif b_amt > 0 and a_amt == 0:
+		out.append("Her milk dries up and her breasts empty.")
+	if udder_filled:
+		out.append("Her udder swells heavy with milk.")
+
+
+# {amount, capacity} of the milk reservoir on a segment (zeroes if none).
+static func _milk(seg: Dictionary) -> Dictionary:
+	for f in seg.get("fluids", []):
+		if str(f.get("type", "")) == "milk":
+			return {"amount": int(f.get("amount", 0)), "capacity": int(f.get("capacity", 0))}
+	return {"amount": 0, "capacity": 0}

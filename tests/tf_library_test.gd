@@ -28,6 +28,8 @@ func _ready() -> void:
 	_test_no_spine_tag()
 	_test_categories_cover_registry()
 	_test_natural_genital_nouns()
+	_test_process_narratives()
+	_test_staged_progression()
 	print("\n=== RESULTS: %d passed, %d failed ===\n" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
 
@@ -134,3 +136,70 @@ func _test_natural_genital_nouns() -> void:
 			saw_vagina = true
 	_ok(not bad, "no description uses 'phallic genital' / 'vaginal genital'")
 	_ok(saw_penis and saw_vagina, "descriptions use natural nouns penis and vagina")
+
+
+# The PROCESS describer: every TF that actually changes the base must yield a non-empty,
+# ordered process narrative (a list of plain change sentences), and that narrative must be
+# clean — no node ids, no raw deltas, no clinical genital nouns.
+func _test_process_narratives() -> void:
+	var reg := TfLibrary.registry()
+	var base := TfContent.biped()
+	var any_nonempty := false
+	var clean := true
+	var deterministic := true
+	for tf_id in reg.keys():
+		var after := _apply(tf_id, 0xA0D17)
+		var lines: Array = TfDescribe.describe_transition(base, after)
+		# A TF that changes the body must narrate the change.
+		if JSON.stringify(after) != JSON.stringify(base):
+			if lines.is_empty():
+				_fail += 1
+				print("  FAIL: %s changes the body but yields an empty process narrative" % tf_id)
+				continue
+			any_nonempty = true
+		var joined := "\n".join(lines)
+		for bad_token in ["_mm", "_cm", "_ml", "volume_ml", "torso_upper", "leg_l",
+				"phallic genital", "vaginal genital", "{", "}", "->"]:
+			if bad_token in joined:
+				clean = false
+				print("  FAIL: %s narrative leaked dev-ese (%s): %s" % [tf_id, bad_token, joined])
+		# Determinism: same seed + log -> identical narrative.
+		var again: Array = TfDescribe.describe_transition(base, _apply(tf_id, 0xA0D17))
+		if "\n".join(again) != joined:
+			deterministic = false
+			print("  FAIL: %s narrative is non-deterministic" % tf_id)
+	_ok(any_nonempty, "changed TFs yield non-empty ordered process narratives")
+	_ok(clean, "process narratives stay clean (no ids, units, or raw deltas)")
+	_ok(deterministic, "process narratives are deterministic")
+
+
+# Staged progression: a staged TF walked stage by stage yields MULTIPLE ordered lines —
+# the change unfolding over time, not a single end-state line.
+func _test_staged_progression() -> void:
+	var content_reg := TfContent.registry()
+	# Fur creeping up a taur lower body: one part furs per stage, so the progression has
+	# several ordered lines (left hind leg, right hind leg, barrel, torso).
+	var taur := _apply("biped_to_taur", 0xA0D17)
+	var holder := TfHolder.new(taur, 0xA0D17, content_reg)
+	holder.start_tf("set_covering_fur_upward")
+	var snaps: Array = [BodyGraph.dup_state(holder.body)]
+	for i in 4:
+		holder.advance_time(900)
+		snaps.append(BodyGraph.dup_state(holder.body))
+	var prog: Array = TfDescribe.describe_progression(snaps)
+	_ok(prog.size() >= 3, "fur-creep progression yields several ordered stage lines (got %d)" % prog.size())
+	var all_fur := true
+	for line in prog:
+		if "ur" not in str(line).to_lower():   # "fur" / "Fur"
+			all_fur = false
+	_ok(all_fur, "fur-creep progression lines all describe fur advancing")
+
+	# Staged breast growth: each stage swells the breasts, so several distinct lines.
+	var h2 := TfHolder.new(TfContent.biped(), 0xA0D17, content_reg)
+	h2.start_tf("grow_breasts")
+	var snaps2: Array = [BodyGraph.dup_state(h2.body)]
+	for i in 4:
+		h2.advance_time(600)
+		snaps2.append(BodyGraph.dup_state(h2.body))
+	var prog2: Array = TfDescribe.describe_progression(snaps2)
+	_ok(prog2.size() >= 2, "staged breast-growth yields multiple progression lines (got %d)" % prog2.size())

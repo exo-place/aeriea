@@ -1,13 +1,17 @@
 ## tf_audit — a scrollable "TF audit" sandbox for aeriea's transformation library.
 ##
 ## The point: give the user a large, varied, AUDITABLE set of concrete transformations so
-## they can judge whether the model produces good bodies. For EVERY TF in the library
-## (tf_library.gd) this applies it to a single standard BASE body and shows, in one card:
+## they can judge whether the model narrates a transformation well — as a PROCESS OVER
+## TIME, not a static end-body. For EVERY TF in the library (tf_library.gd) this applies it
+## to a single standard BASE body and shows, in one card:
 ##   - a clean human name and a one-line plain description of what it does;
-##   - the resulting body DESCRIPTION (tf_describe), so you read the actual outcome;
-##   - the sequence of OPS it ran, in plain language, so you can audit what it did.
-## The whole set scrolls in one column, grouped by category. Every TF is applied from the
-## SAME fresh base body, so the cards are directly comparable.
+##   - the PROCESS NARRATIVE (tf_describe.describe_transition): the ordered sequence of
+##     changes — what grew in, shrank away, changed material / covering / size / shape —
+##     as the primary content, read as the transformation HAPPENING;
+##   - a small "ends as" form footer for context (the static end-form, one line).
+## A final "Over time (staged)" section walks a few STAGED TFs stage by stage as the sim
+## clock advances (describe_progression), so the card reads the change unfolding frame by
+## frame. The whole set scrolls in one column, grouped by category.
 ##
 ## This is a read-only auditing surface: it drives the existing engine and never modifies
 ## it. Run (headless render):
@@ -19,6 +23,7 @@ const TfHolder := preload("res://scripts/body/tf/tf_holder.gd")
 const TfContent := preload("res://scripts/body/tf/tf_content.gd")
 const TfLibrary := preload("res://scripts/body/tf/tf_library.gd")
 const TfDescribe := preload("res://scripts/body/tf/tf_describe.gd")
+const TfApplier := preload("res://scripts/body/tf/tf_applier.gd")
 const BodyGraph := preload("res://scripts/body/tf/body_graph.gd")
 
 const BASE_SEED := 0xA0D17   # fixed seed so the audit is fully deterministic
@@ -61,7 +66,7 @@ func _build_ui() -> void:
 	outer.add_child(title)
 
 	var sub := Label.new()
-	sub.text = "Every transformation applied to the same base body. Scroll to read each one."
+	sub.text = "Each card narrates the transformation as it happens — the change over time, not the end-body. Scroll to read each."
 	sub.add_theme_font_size_override("font_size", 13)
 	sub.add_theme_color_override("font_color", Color(0.62, 0.68, 0.78))
 	outer.add_child(sub)
@@ -80,13 +85,11 @@ func _build_ui() -> void:
 
 # ===================================================================== content
 
-# The base body description, shown once at the top as the reference point.
+# The audit body: a process narrative per TF (the transformation over time), grouped by
+# category, with a small "ends as" form footer for context.
 func _populate() -> void:
-	# Reference: the base body itself, so every "after" reads against a visible "before".
-	var base := _fresh_body()
 	_column.add_child(_category_header("Base body (every card starts here)"))
-	_column.add_child(_card("Base body", "The unmodified starting body.",
-		TfDescribe.describe(base), ["(no transformation applied)"], ""))
+	_column.add_child(_base_card())
 
 	for entry in TfLibrary.categories():
 		var cat_name: String = entry[0]
@@ -95,47 +98,51 @@ func _populate() -> void:
 		for tf_id in ids:
 			_column.add_child(_build_card(tf_id))
 
+	# Staged transformations: the same diff narration walked stage by stage as the sim
+	# clock advances, so the card reads the change UNFOLDING over time. These demo content
+	# lives in tf_content; the creep ones need a non-biped base, so each names its start.
+	_column.add_child(_category_header("Over time (staged progression)"))
+	for demo in STAGED_DEMOS:
+		_column.add_child(_build_staged_card(demo))
+
 
 func _fresh_body() -> Dictionary:
 	return TfContent.biped()
 
 
-# Apply one TF to a fresh base, returning {desc, ops_lines, changed}.
+# Apply one TF to a fresh base, returning the process narrative + an "ends as" footer.
 func _apply_one(tf_id: String) -> Dictionary:
 	var tf: Dictionary = _registry[tf_id]
+	var base := _fresh_body()
 	var holder := TfHolder.new(_fresh_body(), BASE_SEED, _registry)
-	var effect_count := 0
 	if bool(tf.get("staged", false)):
 		holder.start_tf(tf_id)
 		var step: int = int(tf.get("stage_seconds", 600))
 		var stages: int = int(tf.get("max_stages", 1))
 		for i in stages:
 			holder.advance_time(step)
-		effect_count = -1   # staged: count is per-stage, not meaningful as one number
 	else:
-		var effects: Array = holder.apply_instant(tf_id)
-		effect_count = effects.size()
-	# A staged TF reports per-stage; treat "changed" by comparing to the fresh base.
-	var changed := effect_count != 0
-	if effect_count == -1:
-		changed = TfDescribe.describe(holder.body) != TfDescribe.describe(_fresh_body())
+		holder.apply_instant(tf_id)
+	var process: Array = TfDescribe.describe_transition(base, holder.body)
+	var changed := not process.is_empty()
 	return {
-		"desc": TfDescribe.describe(holder.body),
-		"ops_lines": _ops_to_lines(tf),
+		"process": process,
+		"ends_as": TfDescribe.form_line(holder.body),
 		"changed": changed,
 		"note": _precondition_note(tf) if not changed else "",
 	}
 
 
-# When a TF no-ops on the plain base (its gate needs a part the base lacks, or it is
-# idempotent here), say so plainly so the card is still honest and auditable.
+# When a TF no-ops on the plain base, say so plainly so the card is still honest. Only
+# cite a missing part when the gate ACTUALLY fails on the base (otherwise the gate passes
+# and the no-op is because nothing visibly changes — e.g. draining milk that isn't there).
 func _precondition_note(tf: Dictionary) -> String:
 	var gate = tf.get("gate", null)
-	if typeof(gate) == TYPE_DICTIONARY:
+	if typeof(gate) == TYPE_DICTIONARY and not TfApplier.eval_predicate(gate, _fresh_body()):
 		var needs := _gate_need(gate)
 		if needs != "":
 			return "No change here: the base body has no %s to act on." % needs
-	return "No change here: the base body already matches this result."
+	return "No change here: this leaves the base body as it already is."
 
 
 func _gate_need(gate: Dictionary) -> String:
@@ -148,185 +155,80 @@ func _build_card(tf_id: String) -> Control:
 	var tf: Dictionary = _registry[tf_id]
 	var res := _apply_one(tf_id)
 	return _card(str(tf.get("name", tf_id)), str(tf.get("blurb", "")),
-		res["desc"], res["ops_lines"], str(res.get("note", "")))
+		res["process"], str(res["ends_as"]), str(res.get("note", "")))
 
 
-# Render a TF's ops as plain-language audit lines. Each op becomes one readable sentence
-# describing what it targets and does — no raw JSON, no engine keys in the player text.
-func _ops_to_lines(tf: Dictionary) -> Array:
-	var lines: Array = []
-	if bool(tf.get("staged", false)):
-		lines.append("Runs in %d stages over time." % int(tf.get("max_stages", 1)))
-	for op in tf.get("ops", []):
-		lines.append(_op_line(op))
-	return lines
+# The reference base card: no transformation, just the static form it starts from.
+func _base_card() -> Control:
+	var base := _fresh_body()
+	return _card("Base body", "The unmodified starting body — every card transforms this.",
+		["(no transformation — this is the starting point)"], TfDescribe.form_line(base), "")
 
 
-func _op_line(op: Dictionary) -> String:
-	var tgt := _target_phrase(op)
-	match str(op.get("effect", "")):
-		"graft_subtree":
-			var sub: Dictionary = op.get("subtree", {})
-			return "Add %s." % _part_phrase(sub)
-		"remove_subtree":
-			return "Remove %s." % tgt
-		"reparent":
-			return "Move %s to a new attachment." % tgt
-		"set_material":
-			return "Change %s material to %s." % [tgt, _word(op.get("value", ""))]
-		"set_covering":
-			return "Change %s surface to %s." % [tgt, _word(op.get("value", ""))]
-		"prop_delta":
-			return "%s %s of %s." % [_delta_verb(op), _prop_word(op.get("prop", "")), tgt]
-		"tag_add":
-			return "Mark %s as %s." % [tgt, _word(op.get("value", ""))]
-		"tag_remove":
-			return "Unmark %s as %s." % [tgt, _word(op.get("value", ""))]
-		"fluid_delta":
-			return _fluid_line(op, tgt)
-		"set_fluid_type":
-			return "Set the %s fluid on %s." % [_word(op.get("value", "")), tgt]
-		_:
-			return "Adjust %s." % tgt
+# ===================================================================== staged demos
+# Curated staged TFs (from tf_content) that show a transformation unfolding over time.
+# Each names the base body it needs: a creep up the lower body needs a taur to creep over;
+# a tail-grow needs a tail to grow. (id, base, display name, blurb).
+const STAGED_DEMOS := [
+	["graft_quadruped_lower_staged", "biped", "Become a taur, gradually",
+		"The lower body grafts on, then grows in over several beats."],
+	["set_covering_fur_upward", "taur", "Fur creeps up the body",
+		"Fur advances one part per beat, lowest first."],
+	["set_lower_material_chitin", "taur", "Chitin spreads up the lower body",
+		"Each lower segment hardens to chitin in turn."],
+	["grow_breasts", "biped", "Breasts grow over time",
+		"They swell a little each beat."],
+	["grow_tail_length", "biped_tail", "A tail lengthens over time",
+		"The tail grows a little each beat."],
+	["lactation_production", "biped", "Milk comes in over time",
+		"The reservoirs fill each beat."],
+	["grow_first_phallic", "biped", "A penis grows over time",
+		"It lengthens and thickens each beat."],
+]
 
 
-func _fluid_line(op: Dictionary, tgt: String) -> String:
-	var fluid := _word(op.get("fluid", ""))
-	var amount = op.get("amount", {})
-	var v := 0
-	if typeof(amount) == TYPE_DICTIONARY:
-		v = int(amount.get("v", 0))
-	var cap_d := int(op.get("capacity_delta", 0))
-	if cap_d > 0 and v >= 0:
-		return "Open %s capacity in %s and begin filling it." % [fluid, tgt]
-	if v < 0:
-		return "Drain %s from %s." % [fluid, tgt]
-	return "Add %s to %s." % [fluid, tgt]
-
-
-func _delta_verb(op: Dictionary) -> String:
-	var amount = op.get("amount", {})
-	var v := 0.0
-	if typeof(amount) == TYPE_DICTIONARY:
-		if amount.has("v"):
-			v = float(amount["v"])
-		elif amount.has("lo") and amount.has("hi"):
-			v = (float(amount["lo"]) + float(amount["hi"])) / 2.0
-	return "Increase the" if v >= 0 else "Decrease the"
-
-
-# A human phrase for what an op targets (a role/region tag, an ordinal, or a named node).
-func _target_phrase(op: Dictionary) -> String:
-	if op.has("target_node"):
-		return _node_phrase(str(op["target_node"]))
-	if op.has("subtree_under"):
-		return "everything from %s down" % _node_phrase(str(op["subtree_under"]))
-	if op.has("subtree_tag"):
-		return "the %s region" % _word(str(op["subtree_tag"]))
-	if op.has("tag"):
-		return "every %s" % _word(str(op["tag"]))
-	if op.has("target") and typeof(op["target"]) == TYPE_DICTIONARY:
-		var sel: Dictionary = op["target"]
-		var kind = sel.get("kind", null)
-		# The `groin` region tag names the genitals + rear (the parts that hang at the
-		# groin), not a separate lower-body part — a biped has none.
-		var tagstr := str(sel.get("tag", "part"))
-		if kind == null and tagstr == "groin":
-			return "the genitals and rear"
-		if kind == null and tagstr == "lower_body":
-			return "the lower body"
-		# `groin_mount` is the body-core carrier of the figure (waist/hips) — read it as
-		# "the figure", not the engine tag name.
-		if kind == null and tagstr == "groin_mount":
-			return "the figure"
-		var noun := _kind_noun(str(kind)) if kind != null else _word(tagstr)
-		if sel.get("select", "") == "nth_tagged":
-			return "the first %s" % noun
-		return "every %s" % noun
-	return "the targeted part"
-
-
-# Natural plural-friendly noun for a genital kind tag, for the ops audit.
-func _kind_noun(kind: String) -> String:
+# Build the base body a staged demo needs (a plain biped, or one pre-shaped via a library TF).
+func _staged_base(kind: String) -> Dictionary:
 	match kind:
-		"phallic": return "penis"
-		"vaginal": return "vagina"
+		"taur":
+			var h := TfHolder.new(_fresh_body(), BASE_SEED, _registry)
+			h.apply_instant("biped_to_taur")
+			return h.body
+		"biped_tail":
+			var h := TfHolder.new(_fresh_body(), BASE_SEED, _registry)
+			h.apply_instant("add_feline_tail")
+			return h.body
 		_:
-			return _word(kind)
+			return _fresh_body()
 
 
-# A readable, articled noun for a named node id (the stable base-body mounts/parts), so
-# it reads naturally after "of" / "Remove" etc. ("the butt", "the left leg").
-func _node_phrase(id: String) -> String:
-	match id:
-		"torso_upper": return "the torso"
-		"lower_body": return "the lower body"
-		"barrel": return "the barrel"
-		"head": return "the head"
-		"butt": return "the butt"
-		"leg_l": return "the left leg"
-		"leg_r": return "the right leg"
-		"arm_l": return "the left arm"
-		"arm_r": return "the right arm"
-		"breast_l": return "the left breast"
-		"breast_r": return "the right breast"
-		_:
-			return "the " + _word(id)
+# Run a staged TF on its base, capturing a snapshot per stage, and narrate the progression.
+func _run_staged(content_id: String, base_kind: String) -> Dictionary:
+	var content_reg := TfContent.registry()
+	var tf: Dictionary = content_reg[content_id]
+	var base := _staged_base(base_kind)
+	var holder := TfHolder.new(base, BASE_SEED, content_reg)
+	holder.start_tf(content_id)
+	var snaps: Array = [BodyGraph.dup_state(holder.body)]
+	var step: int = int(tf.get("stage_seconds", 600))
+	var stages: int = int(tf.get("max_stages", 1))
+	for i in stages:
+		holder.advance_time(step)
+		snaps.append(BodyGraph.dup_state(holder.body))
+	var process: Array = TfDescribe.describe_progression(snaps)
+	return {
+		"process": process,
+		"ends_as": TfDescribe.form_line(holder.body),
+		"changed": not process.is_empty(),
+	}
 
 
-# A readable phrase naming the part a graft adds (role tag + the part's surface).
-func _part_phrase(sub: Dictionary) -> String:
-	var tags: Array = sub.get("tags", [])
-	var noun := "a part"
-	if "lower_body" in tags and not ("body_core" in tags):
-		return "a two-legged lower body"
-	for role in ["wing", "horn", "ear", "tail", "arm", "leg", "claw", "hoof", "udder",
-			"teat", "nipple", "breast", "serpentine", "barrel"]:
-		if role in tags:
-			noun = _role_noun(role)
-			break
-	if "genital" in tags:
-		if "phallic" in tags:
-			noun = "a penis"
-		elif "vaginal" in tags:
-			noun = "a vagina"
-		else:
-			noun = "a genital"
-	return noun
-
-
-func _role_noun(role: String) -> String:
-	match role:
-		"wing": return "a wing"
-		"horn": return "a horn"
-		"ear": return "an ear"
-		"tail": return "a tail"
-		"arm": return "an arm"
-		"leg": return "a leg"
-		"claw": return "claws"
-		"hoof": return "a hoof"
-		"udder": return "an udder"
-		"teat": return "a teat"
-		"nipple": return "a nipple"
-		"breast": return "a breast"
-		"barrel": return "a four-legged barrel"
-		"serpentine": return "a serpentine lower body"
-		_:
-			return "a " + role
-
-
-func _prop_word(prop: String) -> String:
-	match prop:
-		"volume_ml": return "volume"
-		"length_cm": return "length"
-		"girth_cm": return "girth"
-		"depth_cm": return "depth"
-		"band_mm": return "rib band"
-		"waist_mm": return "waist"
-		"hip_mm": return "hips"
-		"width_cm": return "width"
-		_:
-			return prop.replace("_", " ")
+func _build_staged_card(demo: Array) -> Control:
+	var res := _run_staged(str(demo[0]), str(demo[1]))
+	var lines: Array = res["process"]
+	if lines.is_empty():
+		lines = ["(no staged change on this base)"]
+	return _card(str(demo[2]), str(demo[3]), lines, str(res["ends_as"]), "")
 
 
 func _word(value) -> String:
@@ -343,8 +245,9 @@ func _category_header(text: String) -> Control:
 	return l
 
 
-# One audit card: name (bold), blurb, the resulting description, and the ops it ran.
-func _card(name_text: String, blurb: String, desc: String, ops_lines: Array,
+# One audit card: name (bold), blurb, the PROCESS narrative (the transformation over
+# time — the primary content), and a small "ends as" form footer for context.
+func _card(name_text: String, blurb: String, process: Array, ends_as: String,
 		note: String) -> Control:
 	var pc := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
@@ -383,39 +286,30 @@ func _card(name_text: String, blurb: String, desc: String, ops_lines: Array,
 		note_l.add_theme_color_override("font_color", Color(0.85, 0.72, 0.55))
 		vb.add_child(note_l)
 
-	# Two columns: the resulting body description (left) and the ops audit (right).
-	var cols := HBoxContainer.new()
-	cols.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	cols.add_theme_constant_override("separation", 16)
-	vb.add_child(cols)
+	# The process narrative: one numbered step per change, so the order reads as a sequence
+	# happening over time rather than a flat list.
+	var proc := VBoxContainer.new()
+	proc.add_theme_constant_override("separation", 2)
+	proc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vb.add_child(proc)
+	for line in process:
+		var step_l := Label.new()
+		step_l.text = "  " + str(line)
+		step_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		step_l.add_theme_font_size_override("font_size", 13)
+		step_l.add_theme_color_override("font_color", Color(0.88, 0.90, 0.82))
+		step_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		proc.add_child(step_l)
 
-	cols.add_child(_labelled_block("Result", desc, Color(0.70, 0.86, 0.95),
-		Color(0.86, 0.88, 0.78), 2.0))
-	cols.add_child(_labelled_block("What it did", "\n".join(ops_lines),
-		Color(0.70, 0.86, 0.95), Color(0.74, 0.80, 0.86), 1.4))
+	if ends_as != "":
+		var foot := Label.new()
+		foot.text = "Ends as: " + ends_as
+		foot.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		foot.add_theme_font_size_override("font_size", 11)
+		foot.add_theme_color_override("font_color", Color(0.58, 0.64, 0.74))
+		vb.add_child(foot)
 
 	return pc
-
-
-func _labelled_block(heading: String, body: String, head_col: Color, body_col: Color,
-		ratio: float) -> Control:
-	var vb := VBoxContainer.new()
-	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vb.size_flags_stretch_ratio = ratio
-	vb.add_theme_constant_override("separation", 2)
-	var h := Label.new()
-	h.text = heading
-	h.add_theme_font_size_override("font_size", 12)
-	h.add_theme_color_override("font_color", head_col)
-	vb.add_child(h)
-	var b := Label.new()
-	b.text = body
-	b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	b.add_theme_font_size_override("font_size", 12)
-	b.add_theme_color_override("font_color", body_col)
-	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vb.add_child(b)
-	return vb
 
 
 # ===================================================================== self-playtest
@@ -424,23 +318,28 @@ func _labelled_block(heading: String, body: String, head_col: Color, body_col: C
 func _run_self_playtest() -> void:
 	var out := OS.get_environment("TF_AUDIT_SHOT")
 	DirAccess.make_dir_recursive_absolute(out)
-	# Sanity: every TF applies and yields a non-empty description.
-	var errors: Array = []
+	# Sanity: every changed TF yields a non-empty PROCESS narrative; print each so the
+	# render log doubles as a readable transcript of the transformation narratives.
 	var noops: Array = []
 	for tf_id in _registry.keys():
 		var res := _apply_one(tf_id)
-		if str(res["desc"]).strip_edges() == "":
-			errors.append("%s produced an empty description" % tf_id)
 		if not res["changed"]:
 			noops.append(tf_id)
+			continue
+		print("[narr] %s:" % tf_id)
+		for line in res["process"]:
+			print("         - " + str(line))
+		print("         ends as: " + str(res["ends_as"]))
+	for demo in STAGED_DEMOS:
+		var sres := _run_staged(str(demo[0]), str(demo[1]))
+		print("[staged] %s (base %s):" % [demo[0], demo[1]])
+		for line in sres["process"]:
+			print("         - " + str(line))
+		print("         ends as: " + str(sres["ends_as"]))
 	print("[audit] %d transformations in library" % _registry.size())
 	if not noops.is_empty():
 		print("[audit] no-op on the plain base (precondition not met, shown with a note): "
 			+ ", ".join(noops))
-	if errors.is_empty():
-		print("[audit] all transformations apply and describe non-empty on the base")
-	else:
-		print("[audit] ISSUES: " + ", ".join(errors))
 
 	# Page through the scroll region, capturing each screenful.
 	await get_tree().process_frame

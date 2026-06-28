@@ -52,6 +52,21 @@ static func _draconic_tail() -> Dictionary:
 
 
 # --- wings (role: wing; relation: left/right) ---
+# Arms BECOME wings IN PLACE — a harpy's wings ARE its forelimbs, so the harpy morphs
+# retag the existing arm segments into feathered wings (broadening them to wing length and
+# feathering them) rather than removing the arms and grafting separate wings. A harpy is
+# therefore winged, never armless. (Add-separate-wings creatures like the dragon keep their
+# arms and gain wings — six limbs — and use the _feathered_wing/_membrane_wing grafts.)
+static func _arms_to_wings_ops() -> Array:
+	return [
+		{"effect": "tag_add", "tag": "arm", "value": "wing"},
+		{"effect": "tag_remove", "tag": "arm", "value": "arm"},
+		{"effect": "set_covering", "tag": "wing", "value": "feathers"},
+		{"effect": "prop_delta", "target": {"select": "all_tagged", "tag": "wing"},
+			"prop": "length_cm", "amount": {"v": 48.0}, "clamp": [0.0, 200.0]},
+	]
+
+
 static func _feathered_wing(id: String) -> Dictionary:
 	return _seg(id, "flesh", "feathers", {"length_cm": 110.0}, ["wing"], [])
 
@@ -586,23 +601,21 @@ static func _plan_tfs() -> Dictionary:
 		},
 		"biped_to_harpy": {
 			"id": "biped_to_harpy", "name": "Become a harpy", "cat": "Whole-body plans",
-			"blurb": "Trades arms for feathered wings and legs for clawed bird legs.",
+			"blurb": "The arms broaden into feathered wings and the legs become clawed bird legs.",
 			"staged": false,
 			"gate": {"op": "has_tag", "tag": "leg"},
-			"ops": [
-				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "arm"}},
+			# Feather the body first so the clawed bird legs grafted afterward keep their scales.
+			# The arms BECOME the wings in place (a harpy's wings are its forelimbs) — not removed.
+			"ops": ([
+				{"effect": "set_covering", "subtree_under": "torso_upper", "value": "feathers",
+					"when": {"op": "has_tag", "tag": "torso"}},
+			] + _arms_to_wings_ops() + [
 				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
-				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_l",
-					"subtree": _feathered_wing("wing_l")},
-				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_r",
-					"subtree": _feathered_wing("wing_r")},
 				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "leg_l",
 					"subtree": _bird_leg("leg_bird_l")},
 				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "leg_r",
 					"subtree": _bird_leg("leg_bird_r")},
-				{"effect": "set_covering", "subtree_under": "torso_upper", "value": "feathers",
-					"when": {"op": "has_tag", "tag": "torso"}},
-			],
+			]),
 		},
 	}
 
@@ -681,23 +694,21 @@ static func _species_tfs() -> Dictionary:
 		},
 		"config_harpy": {
 			"id": "config_harpy", "name": "Harpy", "cat": "Species configurations",
-			"blurb": "A bird-folk: feathered body, winged arms, and clawed digitigrade bird legs.",
+			"blurb": "A bird-folk: feathered body, wings where the arms were, and clawed digitigrade bird legs.",
 			"staged": false,
 			"gate": {"op": "has_tag", "tag": "leg"},
-			"ops": [
+			# Feather the body first so the bird legs grafted afterward keep their scales; the
+			# arms BECOME the wings in place (a harpy's wings are its forelimbs) — not removed.
+			"ops": ([
 				{"effect": "set_covering", "subtree_under": "torso_upper", "value": "feathers",
 					"when": {"op": "has_tag", "tag": "torso"}},
-				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "arm"}},
+			] + _arms_to_wings_ops() + [
 				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
-				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_l",
-					"subtree": _feathered_wing("wing_l")},
-				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_r",
-					"subtree": _feathered_wing("wing_r")},
 				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "leg_l",
 					"subtree": _bird_leg("leg_bird_l")},
 				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "leg_r",
 					"subtree": _bird_leg("leg_bird_r")},
-			],
+			]),
 		},
 		"config_slime": {
 			"id": "config_slime", "name": "Slime-person", "cat": "Species configurations",
@@ -884,18 +895,15 @@ static func _hybrid_tfs() -> Dictionary:
 			"blurb": "A winged bird-legged harpy whose whole body is translucent slime.",
 			"staged": false,
 			"gate": {"op": "has_tag", "tag": "leg"},
-			"ops": [
-				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "arm"}},
+			# The arms BECOME the wings in place (a harpy's wings are its forelimbs) — not
+			# removed — then the whole body turns to slime, so the wings read as slime too.
+			"ops": (_arms_to_wings_ops() + [
 				{"effect": "remove_subtree", "target": {"select": "all_tagged", "tag": "leg"}},
-				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_l",
-					"subtree": _feathered_wing("wing_l")},
-				{"effect": "graft_subtree", "target_node": "torso_upper", "at": "back_r",
-					"subtree": _feathered_wing("wing_r")},
 				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "leg_l",
 					"subtree": _bird_leg("leg_bird_l")},
 				{"effect": "graft_subtree", "parent_tag": "groin_mount", "at": "leg_r",
 					"subtree": _bird_leg("leg_bird_r")},
 				{"effect": "set_material", "subtree_under": "torso_upper", "value": "slime"},
-			],
+			]),
 		},
 	}

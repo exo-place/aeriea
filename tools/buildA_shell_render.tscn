@@ -1,6 +1,0 @@
-[gd_scene load_steps=2 format=3 uid="uid://builda_shell_render_v1"]
-
-[ext_resource type="Script" path="res://tools/buildA_shell_render.gd" id="1_buildashell"]
-
-[node name="BuildAShellRender" type="Node"]
-script = ExtResource("1_buildashell")

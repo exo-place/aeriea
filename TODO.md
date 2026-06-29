@@ -18,6 +18,14 @@
 
 Context (not a thread): feature-gating + mandatory-playtesting + green-is-user-granted-only governance is now encoded in `CLAUDE.md`, `docs/FEATURES.md` (Green vs Not-green tiers), and a `.githooks/pre-commit` gate (`AERIEA_GREEN_APPROVED=1`, user-only). New work lands under Not green; only the user promotes to Green.
 
+## Architecture commitments
+
+Product commitments that shape how everything is built (moved here from CLAUDE.md):
+
+- **Simulation underneath, rendering on top** — deterministic state simulation drives the authored/rendered surfaces (pattern from `existence`).
+- **Self-hosted multiplayer** — no live-service obligations; communities run their own servers.
+- **Cross-platform parity** — flat (KB+M / gamepad) + PCVR + Quest standalone; VR is first-class, and a flat player and a VR player on the same server must see each other and play together.
+
 ## Immediate
 
 - Open `project.godot` in Godot 4.x editor; verify it loads.

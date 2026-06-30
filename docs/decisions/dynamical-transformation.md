@@ -18,17 +18,20 @@ amounts — which are **continuous**. These never interpolate into each other. A
 is **not** a topology interpolation: it is **grafted at ~zero extent in one discrete log event**,
 then a **continuous magnitude transition 0→full** carries its size up. Gradual structural
 appearance = **discrete graft + continuous scalar**, never a half-existing part. §9.1 generalizes
-this to arbitrary subtree changes via a **structural diff** driven by progress.
+this to arbitrary subtree changes as a **bundle of authored, per-part targeted transitions** — no
+whole-structure diff, no inferred correspondence.
 
 **State rides IDENTITY, not structure.** A transition transforms a part **in place**, preserving
 its **segment identity** (its stable id). Everything attached to that identity — fluid amounts,
 the drivers acting on it, any in-flight sub-transitions — **rides along** through the
 transformation. A breast resized while lactating keeps its milk and keeps producing. This is the
-core principle of §9.2, and it is why the structural-diff *correspondence* (§9.1) is load-bearing:
-corresponded parts are the **same identity transformed in place** (state carries); uncorresponded
-parts are add/remove (**replacement** semantics, which is a distinct operation that can lose
-state). This ties directly to the *stable identity / fact identity* crux of
-`simulation-depth-and-materialization.md`.
+core principle of §9.2. A structural change is authored as **targeted ops** (§9.1): an in-place
+change keeps the **same id** (state carries); an add is an explicit **graft of new ids** growing
+in from zero; a remove is an explicit **targeted shrink-to-zero-then-drop** on selector-resolved
+existing ids. There is **no graph-matching**: "which part" is always an authored selector (id,
+tag, ordinal, or structural query) resolved deterministically, never an inferred correspondence
+between two structures. This is the clean form of the *stable identity / fact identity* crux of
+`simulation-depth-and-materialization.md` — identity is **authored, not matched**.
 
 **The core unit is a driven TRANSITION.** A transformation is not "a property accruing under a
 rate"; it is a transition **`{from: state-snapshot, to: target-state, progress: driven_var ∈
@@ -112,7 +115,7 @@ it, and the discrete structural ops stay in the log as instantaneous events:
 | **rate-on-a-property** (the previous core: "a property evolves under a driver rate") | **A transition whose `to` is open-ended / far off** — `from` is the current value, `to` is the bound (or +∞ until a `clamp` bites), and `progress` accrues unboundedly so the rendered value tracks `from + rate·elapsed`. Demoted from the core to *this* special case. Closed-form §5 applies verbatim (the old "property rate" *is* the progress rate, with an affine interpolate). |
 | `prop_delta` (instantaneous step) | **A transition whose `progress` jumps `0→1` in one log event** — `from`=old value, `to`=old+delta, progress saturates instantly. The old Dirac-impulse case; identical result, recorded as one discrete log event. |
 | staged `prop_delta` growth over N ticks | **`progress` crossing thresholds over time** under a sustained driver — the smooth law the staircase approximated. The closed form gives the value at any `T`, not just at tick boundaries; describe-layer bands read off `progress` or the interpolated value. |
-| `graft_subtree` / `remove_subtree` / `reparent` | **UNCHANGED** — a discrete structural event in the log. **Topology is never a transition; it is a discrete add/remove.** A part *growing in* is a graft-at-zero-extent (one discrete event) + a continuous 0→full magnitude transition (§9.1); a part *shrinking out* is a continuous full→0 magnitude transition + a discrete drop at progress=1. The graft/drop themselves are each one log event. |
+| `graft_subtree` / `remove_subtree` / `reparent` | **UNCHANGED** — a discrete structural event in the log. **Topology is never a transition; it is a discrete add/remove.** A part *growing in* is a graft-at-zero-extent (one discrete event, a new id) + a continuous 0→full magnitude transition (§9.1); a part *shrinking out* is a continuous full→0 magnitude transition on a **selector-resolved existing id** + a discrete drop at progress=1. The graft/drop themselves are each one log event. |
 | `set_material` / `set_covering` (categorical, instant) | **UNCHANGED as a discrete categorical set.** A *gradual* material change (flesh→chitin) is instead a **qualitative transition** (§4.1): `from=flesh`, `to=chitin`, and the describe/render layer blends or threshold-crosses on `progress` ("60% chitinized"); the categorical `material` field flips discretely when progress crosses a pinned threshold (a discrete event content emits), so both coexist. |
 
 So: **structure/topology and instant categorical sets stay discrete events**; **everything
@@ -597,42 +600,104 @@ a different segment instead of transforming it in place, the milk would have fol
 operation. Identity-preserving transform is the default precisely so this concurrent case "just
 works."
 
-### 8.2 Worked example — structural transition: biped-lower → taur-lower via diff
+### 8.2 Worked example — structural transition: biped-lower → taur-lower via targeted ops
 
-A whole-subtree reshape exercises §9.1. The lower body transitions from a **biped lower**
-(`#hips` with two `#leg_l`/`#leg_r` children) to a **taur lower** (`#hips` with a `#barrel` and
-four `#leg_fl`/`#leg_fr`/`#leg_bl`/`#leg_br` children). The authored structural transition declares
-`{from-structure = biped-lower, to-structure = taur-lower}` and a **correspondence**:
+A whole-subtree reshape exercises §9.1. The lower body goes from a **biped lower** (`#hips` with
+two `#leg_l`/`#leg_r` children) to a **taur lower** (`#hips` with a `#barrel` and four
+`#leg_fl`/`#leg_fr`/`#leg_bl`/`#leg_br` children). There is **no `from-structure`/`to-structure`
+diff and no correspondence map.** The author writes the change as a **bundle of per-part targeted
+ops**, all sharing one progress driver `taurify`:
 
 ```
-correspondence = {
-  "#hips":  "#hips",          # present in BOTH → interpolate in place (identity carries)
-  "#leg_l": "#leg_bl",        # author maps the two existing legs to the rear pair
-  "#leg_r": "#leg_br"
-  # #barrel, #leg_fl, #leg_fr : only in `to`  → grow in from zero
-  # (nothing only in `from`)  : here both old legs are corresponded, so none drop
+biped_to_taur = {                       # an authored bundle, one shared progress driver
+  "driver": "taurify",
+  "ops": [
+    # 1. in-place change: existing #hips keeps its id, its scalars transition
+    { "kind":"transform", "target":{"id":"#hips"},
+      "affects":{"prop":"width_cm"}, "from":"snapshot", "to":{"value":...}, "interp":"lerp" },
+
+    # 2. in-place change: the two existing legs transition to rear-leg form (same ids)
+    { "kind":"transform", "target":{"id":"#leg_l"}, "affects":{"prop":"pose"}, ... },
+    { "kind":"transform", "target":{"id":"#leg_r"}, "affects":{"prop":"pose"}, ... },
+
+    # 3. add: graft a barrel + two front legs as NEW identities, each 0→full
+    { "kind":"graft", "parent":{"id":"#hips"}, "subtree":"barrel",  "grow_in":true },
+    { "kind":"graft", "parent":{"id":"#hips"}, "subtree":"leg_fl",  "grow_in":true },
+    { "kind":"graft", "parent":{"id":"#hips"}, "subtree":"leg_fr",  "grow_in":true }
+    # (no remove op here — the biped legs are reused in place by op 2, not dropped)
+  ]
 }
 ```
 
-Driven by one `progress`, the diff runs:
+Driven by the shared `taurify` progress, the bundle runs:
 
-- **`#hips`** (in both): scalars **interpolate** in place — same identity, any attached state (a
-  hip-tag, a driver) rides along (§9.2).
-- **`#leg_l → #leg_bl`, `#leg_r → #leg_br`** (corresponded): the two existing legs **transform in
-  place** to the rear-leg targets — repositioned/reshaped via scalar interpolation, **keeping their
-  identities** (and anything attached). They are *not* deleted and recreated.
-- **`#barrel`, `#leg_fl`, `#leg_fr`** (only in `to`): each **grafted at zero extent** in one
-  discrete log event at progress=0, then a continuous **0→full** magnitude transition grows them in
-  as progress climbs. The barrel and front legs appear at ~zero size and swell to full.
+- **`#hips`, `#leg_l`, `#leg_r`** (`transform` ops): each targets an **existing id**; its scalars
+  **interpolate** in place, identity preserved, any attached state riding along (§9.2). The author
+  *chose* to reuse the two biped legs as the rear legs — these are not deleted and recreated.
+- **`#barrel`, `#leg_fl`, `#leg_fr`** (`graft` ops with `grow_in`): each is a **new identity**,
+  grafted at zero extent in one discrete log event at progress=0, then a continuous **0→full**
+  magnitude transition swells it as progress climbs.
 
-(If instead the author had mapped the old legs to the *front* pair and left the rear pair as
-add-only and the front pair's old form as remove-only, the unmapped old legs would **shrink to zero
-and drop at progress=1** — the third bucket. The chosen correspondence decides which parts carry
-identity and which are add/remove.) Reverse the driver and progress falls: the front legs and
-barrel **shrink back toward zero** and **drop at progress=0**, the corresponded legs interpolate
-back to biped form — the structural transition undoes itself, graft/drop events firing at the
+Had the author instead wanted the biped legs **dropped** (a true four-new-legs taur), they would
+write three `graft` ops for the new legs plus a `remove` op targeting the old legs by selector —
+e.g. `{ "kind":"remove", "target":{"select":"all_tagged","tag":"biped_leg"} }` — which runs a
+full→0 shrink on those resolved ids and drops them at progress=1. **The author's ops say exactly
+which parts are reused, added, and dropped; nothing is matched or inferred.** Reverse the driver
+and progress falls: grafted parts shrink back toward zero and drop at progress=0, transformed parts
+interpolate back to biped form — the bundle undoes itself, graft/drop events firing at the
 boundaries. Every magnitude move is the closed-form §5 progress read; every graft/drop is a
-discrete log event; the correspondence is authored data — all replay-exact (§9.3).
+discrete log event; every selector resolves deterministically — all replay-exact (§9.3).
+
+### 8.3 Worked example — more / fewer breasts (add = graft new ids, remove = nth_tagged + drop)
+
+Changing breast *count* is two targeted ops, no diff. Start with two `breast` segments under
+`#torso`; the author wants **four**, then later **back to two**.
+
+```
+# add two: graft two NEW identities under the torso, each growing in from zero
+add_breasts = { "driver":"polymastia", "ops":[
+  { "kind":"graft", "parent":{"id":"#torso"}, "subtree":"breast", "grow_in":true },
+  { "kind":"graft", "parent":{"id":"#torso"}, "subtree":"breast", "grow_in":true } ] }
+
+# remove two: target the LAST two by ordinal, shrink to zero, drop at progress=1
+remove_breasts = { "driver":"polymastia", "ops":[
+  { "kind":"remove", "target":{"select":"nth_tagged","tag":"breast","nth":[2,3]} } ] }
+```
+
+- **Add** = an explicit graft of new identities. Each new breast is in the graph from progress=0⁺
+  at ~zero volume, its `volume_ml` a 0→full transition. Existing breasts are **untouched** — they
+  keep their ids, their milk, their in-flight transitions.
+- **Remove** = a **`nth_tagged`** selector (`nth:[2,3]`, ordered deterministically by id —
+  `transformation-system.md`'s ordinal targeting) resolving to **exactly** the two the author
+  named; each runs a full→0 `volume_ml` shrink and is dropped at progress=1. The selector says
+  precisely which two go; there is no "which of the four corresponds to which of the two" question
+  because there is no diff.
+
+If `add_breasts` and `remove_breasts` ran with **overlapping** progress, the shrinking pair and the
+growing pair would briefly both be present (four-ish breasts mid-transition). **That is an authoring
+choice, not an edge case:** share one progress driver to overlap them, or **stagger** the drivers
+(remove completes before add starts) to sequence them cleanly. The model imposes neither.
+
+### 8.4 Worked example — a breast nested under a specific torso segment (query + identity)
+
+Nesting is native. A breast can be a child of a *specific* torso segment (say `#torso_upper`, a
+sub-segment of a segmented torso) rather than the torso root. It is reached and targeted by a
+**structural query**, and its identity survives re-segmenting the parent:
+
+```
+# target: the breasts whose parent is the upper-torso segment
+{ "kind":"transform",
+  "target":{"select":"query","where":{"tag":"breast","parent":{"tag":"torso_upper"}}},
+  "affects":{"prop":"volume_ml"}, "from":"snapshot", "to":{"value":...}, "interp":"lerp" }
+```
+
+- The breast is just a **child in the graph**, identified by its stable id and **reachable by the
+  structural query** (`tag:breast` under `parent: torso_upper`) — no special "nested part" case.
+- If a later op **re-segments the parent** (splits `#torso_upper`, or re-tags it), the breast's
+  **id is unchanged** — it is **reparented** to the appropriate new parent segment by a discrete
+  `reparent` log event, and **keeps its identity** (and its milk, drivers, in-flight transitions,
+  §9.2). The child is never lost when the parent changes shape; nesting is native, not a special
+  case, and identity rides through reparenting exactly as it rides an in-place transform.
 
 ---
 
@@ -668,45 +733,60 @@ the staircase model. (Note: driver-driven *reversal* §2.2 — progress falling 
 dropped — is distinct from *undo*; reversal is forward replay under new drivers, undo rewinds
 the log itself.)
 
-### 9.1 Structural transitions via a progress-driven structural DIFF
+### 9.1 Structural transitions as a bundle of authored, per-part TARGETED transitions
 
 A *single* part growing in (graft-at-zero + a 0→full magnitude transition, §2.1) generalizes to
-**arbitrary part changes on arbitrary subtrees** through one uniform mechanism: a **structural
-diff** of a `from`-structure against a `to`-structure, **driven by the same progress variable**
-(§5). A *structural transition* declares `{from-structure, to-structure}` (two subtree shapes)
-plus a **correspondence**, and progress drives the whole reshape. The diff classifies every part
-into exactly one of three buckets, each handled by an already-established mechanism:
+**arbitrary part changes on arbitrary subtrees** with **no new mechanism and no whole-structure
+diff.** A *structural transformation is a bundle of per-part TARGETED transitions* — the same
+targeted ops the engine already has (`transformation-system.md`'s structural/ordinal/query
+targeting), optionally sharing one progress driver. **There is no `from-structure` vs.
+`to-structure` comparison and no inferred correspondence between two graphs.** Each op names what
+it acts on by an authored **selector**: a stable segment id, tags, an ordinal (`nth_tagged`,
+ordered deterministically by id), or a structural query. There are exactly three op kinds:
 
-- **Present in BOTH** (corresponded): the part **persists in place** — its scalars **interpolate**
-  via the ordinary per-part magnitude transition (§4.1 lerp). Same identity throughout; attached
-  state rides along (§9.2). Topology does not change for these parts.
-- **Only in `to`** (added): the part **grows in from zero extent** — a discrete **graft-at-zero**
-  log event when the structural transition starts, then a continuous **0→full** magnitude
-  transition keyed off progress. It is in the graph from progress=0⁺ at ~zero size, never
-  half-existing.
-- **Only in `from`** (removed): the part **shrinks to zero extent** — a continuous **full→0**
-  magnitude transition keyed off progress — and is then **dropped in one discrete log event at
-  progress=1** (`remove_subtree`). It is in the graph, shrinking, until the drop; the drop is the
-  topology change, the shrink is the magnitude change. The two are never conflated.
+- **Add parts (`graft`)** — an explicit graft of **N new identities**, each growing in from zero
+  extent: the new part is in the graph from progress=0⁺ via a discrete **graft-at-zero** log
+  event, and its size is a continuous **0→full** magnitude transition (§2.1). Existing parts are
+  **untouched**.
+- **Remove parts (`remove`)** — an explicit **targeted shrink-to-zero-then-drop** on
+  **selector-resolved existing identities** (e.g. `nth_tagged` on the last two, deterministic by
+  id). The resolved parts run a continuous **full→0** magnitude transition and are **dropped in
+  one discrete log event at progress=1** (`remove_subtree`). The author's selector says **exactly**
+  which parts go.
+- **Change parts in place (`transform`)** — target an **existing identity**; its properties
+  transition (§4.1). **Identity is preserved** — and thus every attached fluid, driver, and
+  in-flight sub-transition is preserved (§9.2).
 
-That is the **whole** mechanism, for any subtree change: discrete graft/drop events at the
-boundaries (progress 0 for grafts, progress 1 for drops), continuous magnitude transitions
-filling the interior, corresponded parts interpolating. No part is ever topologically
-half-present; "gradual structural appearance" is always discrete-topology + continuous-scalar.
+A whole "form A → form B" (e.g. biped→taur, §8.2) is authored **as such targeted ops** — drop
+these legs, graft this barrel + these legs as new identities, resize this — optionally all sharing
+**one progress driver** so they move together. It is **never** a structure diff. So a transition's
+`from`/`to` is **per-property on a targeted identity**, not per-whole-structure.
 
-**HONEST CATCH — the diff requires a CORRESPONDENCE, and that is a real constraint, not free.**
-The three buckets are only well-defined once we know **which `from`-part maps to which
-`to`-part**. For **authored** transitions this correspondence is **given** — by id, or by a
-stable tag/role the author assigns (`#breast_l` in `from` ↔ `#breast_l` in `to`). That is the
-normal case and it is unambiguous. A **fully arbitrary "diff any two graphs"** is **not** solved
-here: deciding the correspondence between two unlabeled graphs is graph matching, which is
-ambiguous (multiple valid matchings, no canonical choice) and would make the buckets — and hence
-which state rides along (§9.2) — non-deterministic. So **"arbitrary part changes" means "arbitrary
-changes with a SPECIFIED correspondence,"** and unspecified parts on either side default to
-add/remove (replacement, §9.2). We flag this as a **constraint we impose**, not a capability we
-claim. This is the local instance of the **stable identity / fact identity** crux that
-`simulation-depth-and-materialization.md` names as open: the correspondence *is* the identity
-map, and we require it to be authored rather than inferred.
+**"Correspondence" = authored targeting, deterministic, no matching/inference.** The question "which
+old part becomes which new part" does not arise, because the author never describes a *new whole
+structure* to be matched against the old one — they describe **ops on selected identities**. An
+in-place change is the **same id** by construction; an add is a **new id**; a remove is a
+**selector-resolved existing id**. Which state rides along (§9.2) is therefore unambiguous and
+replay-deterministic: it follows the id the op named. The graph-matching ambiguity the old "diff
+two graphs" framing carried is **gone** — there is nothing to match.
+
+**Nesting is native, not a special case.** A part nested in a subpart (e.g. a breast under a
+specific torso segment, §8.4) is just a **child in the graph**, identified by id and reachable by
+a structural query. Re-segmenting the parent does **not** lose the child's identity: the child is
+**reparented** (a discrete `reparent` event) and keeps its id and everything riding it. Nesting
+needs no extra machinery; the same targeting reaches a child at any depth.
+
+That is the **whole** mechanism: discrete graft/drop events at the boundaries (progress 0 for
+grafts, progress 1 for drops), continuous magnitude transitions filling the interior, in-place
+changes interpolating on a preserved id. No part is ever topologically half-present; "gradual
+structural appearance" is always discrete-topology + continuous-scalar.
+
+**The overlap note (an authoring choice, not an edge case).** When a remove (shrinking) and an add
+(growing) share **overlapping** progress, both the old and new parts are briefly present together
+(§8.3). That is **chosen** by how the author wires progress: **share one driver** to overlap them,
+or **stagger** the drivers to sequence them (remove finishes before add starts). The model imposes
+neither and treats neither as special — overlap and staggering are both ordinary authored progress
+wiring.
 
 ### 9.2 State rides IDENTITY, not structure (the lactation-mid-TF case)
 
@@ -736,56 +816,58 @@ transition on the same identity; the milk rides it.
 *deletes* one part and *creates* a different one (different identity). It is the right operation
 when replacement is **actually meant** (a part is genuinely substituted, not morphed), and **only
 replacement loses or relocates attached state** — because the old identity, and everything riding
-it, is gone. We therefore **default to the identity-preserving transform** (corresponded parts,
-§9.1) and **reserve replacement** for when substitution is the real intent. When a transition
+it, is gone. We therefore **default to the identity-preserving transform** (a `transform` op
+on an existing id, §9.1) and **reserve replacement** for when substitution is the real intent. When a transition
 *does* replace a part, it MUST specify an explicit **fluid-handoff rule**: either **hand off** the
 attached fluid to the successor part (amount transferred, clamped to the successor's capacity), or
 **spill / lose** it (the fluid is released or discarded). There is no implicit default; replacement
 that drops state silently is a defect. (The transform-vs-replace boundary and this handoff rule
 are open questions — §12.)
 
-**The tie to §9.1.** This is exactly why the structural-diff correspondence is load-bearing:
+**The tie to §9.1.** This is why the authored-targeted structural model (§9.1) is clean rather
+than ambiguous — identity is decided by the op kind, not inferred:
 
-- **corresponded** parts (present in both) = **same identity transformed in place** → all attached
-  state (fluids, drivers, sub-transitions) **carries**, per this section;
-- **uncorresponded** parts (add-only / remove-only) = **add/remove** = **replacement semantics** →
-  added parts start with no attached state; removed parts' attached state follows the fluid-handoff
-  rule (handed to a corresponded successor if the author specifies one, else spilled/lost at the
-  drop).
+- a **`transform`** op targets an **existing id** = **same identity transformed in place** → all
+  attached state (fluids, drivers, sub-transitions) **carries**, per this section;
+- a **`graft`** op introduces a **new id** → the added part starts with no attached state;
+- a **`remove`** op targets a **selector-resolved existing id** → its attached state follows the
+  fluid-handoff rule (handed to a successor the author names, else spilled/lost at the drop).
 
-So the correspondence map *is* the identity map, and identity is what state rides. This is the
-local, concrete instance of `simulation-depth-and-materialization.md`'s **stable identity / fact
-identity** principle — *state rides identity, not structure* — applied to bodies: a fact (a milk
-amount, a driver, an in-flight progress) denotes the same thing across a transformation **because
-it is keyed to a stable segment identity**, not to a position or shape that the transformation
-changes.
+So the authored selector *is* the identity map, and identity is what state rides — **no graph
+matching decides it.** This is the local, concrete instance of
+`simulation-depth-and-materialization.md`'s **stable identity / fact identity** principle — *state
+rides identity, not structure* — applied to bodies: a fact (a milk amount, a driver, an in-flight
+progress) denotes the same thing across a transformation **because it is keyed to a stable segment
+identity** the author targeted by id/tag/ordinal/query, not to a position or shape that the
+transformation changes.
 
-### 9.3 Why the diff + identity model does not break replay
+### 9.3 Why the targeted-ops + identity model does not break replay
 
-Both refinements are **fully inside the existing determinism envelope** (§5):
+The whole model is **fully inside the existing determinism envelope** (§5):
 
 - **Progress is unchanged** — still the closed-form-over-piecewise-constant-drivers driven variable
-  of §5.2/§5.3, clamped to `[0,1]`, fixed-point (§6). A structural transition uses **one** progress
-  to drive its whole diff; corresponded parts' interpolations, added parts' 0→full, and removed
-  parts' full→0 all read the **same** progress(T). No new dynamical quantity is introduced.
-- **The structural-diff events are discrete log events** — exactly the graft/drop events §9 already
-  interleaves. A **graft-at-zero** fires once at the structural transition's start (progress=0); a
-  **drop** fires once when its part's shrink reaches progress=1. Each is a single logged
-  `graft_subtree` / `remove_subtree` with a full-time stamp, applied by `tf_applier.gd` unchanged,
-  and each commits fresh transition baselines on the parts it touches (§4) so the closed-form sum
-  stays clean.
-- **The correspondence is authored data** committed in the structural-transition record (the
-  identity map, §9.1) — a function of the action log, replayed exactly. It is **not** inferred at
-  read time (no graph matching in the hot path), so nothing about which part corresponds to which
-  depends on query order or runtime. Identity-preservation is therefore deterministic: the same id
-  carries the same attached state on every replay.
+  of §5.2/§5.3, clamped to `[0,1]`, fixed-point (§6). A structural transformation's ops may share
+  **one** progress driver; in-place transitions, added parts' 0→full, and removed parts' full→0 all
+  read the **same** progress(T). No new dynamical quantity is introduced.
+- **The graft/drop events are discrete log events** — exactly the graft/drop events §9 already
+  interleaves. A **graft-at-zero** fires once at an `graft` op's start (progress=0); a **drop**
+  fires once when a `remove` op's shrink reaches progress=1. Each is a single logged
+  `graft_subtree` / `remove_subtree` / `reparent` with a full-time stamp, applied by
+  `tf_applier.gd` unchanged, and each commits fresh transition baselines on the parts it touches
+  (§4) so the closed-form sum stays clean.
+- **Every op's target is an authored selector** resolved **deterministically** — an id, a tag, an
+  ordinal (`nth_tagged`, ordered by id), or a structural query — exactly as
+  `transformation-system.md`'s targeting already resolves, and committed in the op record. There is
+  **no graph matching anywhere** (not at author time, not at read time), so nothing about which part
+  an op acts on depends on query order or runtime. Identity-preservation is therefore deterministic:
+  the same id carries the same attached state on every replay.
 - **Replacement's fluid-handoff** is a discrete log event carrying its captured before/after
   (amount moved or spilled) — ordinary impulse bookkeeping (§4, §9), replay-exact and undoable.
 
-So a structural transition replays bit-for-bit: discrete graft/drop/handoff events from the log,
-continuous magnitude transitions from the closed-form progress sum, correspondence from authored
-data. The §5.5 guarantee holds verbatim — the diff and identity model add **no** new
-nondeterminism and **no** new per-tick stepping.
+So a structural transformation replays bit-for-bit: discrete graft/drop/reparent/handoff events
+from the log, continuous magnitude transitions from the closed-form progress sum, every target a
+deterministically-resolved authored selector. The §5.5 guarantee holds verbatim — the
+targeted-ops + identity model adds **no** new nondeterminism and **no** new per-tick stepping.
 
 ---
 
@@ -823,14 +905,16 @@ shape; `sim_clock.gd`; `det_rng.gd`. The save model (seed + action log) is uncha
    sub-transitions) is keyed to the **segment id** so it rides a transform in place. Mostly a
    discipline on the existing graph (segments already have stable ids), plus storing the resolved
    id set on the transition record.
-7. **Structural transitions via a progress-driven diff** (§9.1): a new structural-transition record
-   `{from-structure, to-structure, correspondence}`; a small **diff driver** that, on start, emits
-   graft-at-zero events for `to`-only parts and starts 0→full magnitude transitions; drives
-   corresponded parts' interpolation off the shared progress; and emits drop events for `from`-only
-   parts when their full→0 shrink reaches progress=1. Reuses `graft_subtree`/`remove_subtree`
-   (`tf_applier.gd`) unchanged for the discrete events — the new piece is the **diff orchestration**
-   keyed off progress, plus the authored **correspondence** map. **The correspondence is authored,
-   never inferred** (no graph matching).
+7. **Structural transformations as authored targeted-op bundles** (§9.1): a structural change is a
+   **bundle of per-part targeted ops** — `transform` (existing id, in place), `graft` (new id,
+   grow-in 0→full), `remove` (selector-resolved existing ids, shrink full→0 then drop) — optionally
+   sharing one progress driver. Each op's `target` is a **deterministically-resolved authored
+   selector** (id / tag / `nth_tagged` ordinal / structural query) — the existing targeting, reused.
+   A small **bundle orchestrator** emits each `graft` at progress=0, runs each part's magnitude
+   transition off the shared progress, and emits each `remove`'s drop at progress=1. Reuses
+   `graft_subtree`/`remove_subtree`/`reparent` (`tf_applier.gd`) unchanged for the discrete events.
+   **There is NO from/to-structure diff and NO correspondence map — nothing is matched or inferred**
+   (the graph-matching hazard is gone; "which part" is always an authored selector).
 8. **Transform-vs-replace + fluid-handoff** (§9.2): identity-preserving transform is the default;
    a **replace** op (delete one identity, create another) is a distinct, opt-in operation that MUST
    carry an explicit fluid-handoff rule (hand-to-successor or spill/lose), recorded as a discrete
@@ -908,11 +992,13 @@ effects, and the fixed-point quantities are **open vocabulary / few shipped valu
 closed enum. The closed-form progress reader and `interpolate` work unchanged as drivers,
 transitions, and effects are added.
 
-**Deferred:** the **full structural-diff transition** (§9.1) — a whole-subtree reshape like §8.2's
-biped→taur — and the **replace op + fluid-handoff** (§9.2); the MVP ships the **identity-carry
-property** (a single part transformed in place keeps its attached state, §8.1) and the
-single-part grow-in/shrink-out (graft-at-zero + 0→full; full→0 + drop) it already needs, but the
-*multi-part diff orchestration with an authored correspondence* is the next slice, not the first.
+**Deferred:** the **multi-part structural-transformation bundle** (§9.1) — a whole-subtree reshape
+like §8.2's biped→taur, or §8.3's breast-count change — and the **replace op + fluid-handoff**
+(§9.2); the MVP ships the **identity-carry property** (a single part transformed in place keeps its
+attached state, §8.1) and the single-part grow-in/shrink-out (graft-at-zero + 0→full; full→0 +
+drop) it already needs, but the *multi-op bundle orchestration sharing one progress driver* (each
+op a deterministically-resolved authored selector — no diff, no matching) is the next slice, not
+the first.
 Also deferred: the `coupled` nonlinear fallback (§5.4) and its materialization cadence; the
 soft/hard driver-count cap question (§7); cross-body shared/ambient drivers (the
 simulation-depth `G` problem); the 3D rendering of continuous morphing (the parent's deferred
@@ -966,19 +1052,7 @@ simulation-depth `G` problem); the 3D rendering of continuous morphing (the pare
    single-record `Segment.transitions[prop]` shape presumes (a) until it is. Flagged, not
    over-designed.
 
-6. **(NEW — structural diff) The correspondence rule for diffs.** §9.1 requires an authored
-   correspondence (which `from`-part maps to which `to`-part); a fully arbitrary "diff any two
-   graphs" is graph-matching-ambiguous and explicitly **not** solved. Open: what the
-   correspondence is keyed on (raw segment id, an authored stable *role*/tag, or an ordinal within
-   a tag group), and how partial correspondences (some parts mapped, others left to add/remove)
-   are expressed cleanly. Also open: whether *any* limited inference is ever acceptable (e.g.
-   "same tag + same ordinal ⇒ corresponded" as a convenience default) without reintroducing the
-   ambiguity/non-determinism the authored map exists to avoid. This is the local instance of
-   `simulation-depth-and-materialization.md`'s open **stable identity / fact identity** crux. Lean:
-   authored-only for now; no inference until a real case demands a default and a deterministic rule
-   for it is proven.
-
-7. **(NEW — transform vs. replace) The transform/replace boundary and the fluid-handoff rule.**
+6. **(NEW — transform vs. replace) The transform/replace boundary and the fluid-handoff rule.**
    Identity-preserving **transform** is the default (§9.2); **replace** (delete one identity,
    create another) is the distinct, lossy operation reserved for genuine substitution. Open: where
    exactly the boundary sits — is a part that changes *material* (flesh→chitin) and *role*

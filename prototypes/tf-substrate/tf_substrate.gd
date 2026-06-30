@@ -71,6 +71,32 @@ class Expr:
 		priority = prio
 
 
+## A SAME-KEY FOLD cell: more than one expression bound to a SINGLE (part,key),
+## folded LEFT over one shared value. Added in the second prototype pass because
+## the original cell model (one Dict key -> one value/Expr) physically cannot
+## hold two expressions at the same key — a Dictionary key is unique — so the
+## floor's "fold every (part,key) expression, folding LEFT, a later expression
+## reading an already-evaluated value sees the new one" had no representable
+## same-key form. See friction log (forced invention #1).
+##
+## `value` is the shared running value; each member Expr in `exprs` reads it as
+## `ctx.current` and writes the next running value back. mget resolves a Fold to
+## its current shared `value`, exactly like an Expr resolves to its `.value` —
+## readers never see either wrapper. Members carry their own priority/aidx so
+## they take independent positions in the global total order.
+class Fold:
+	extends RefCounted
+	var exprs: Array = []  ## ordered Array[Expr], folded left over `value`
+	var value  ## shared running value (Variant)
+
+	func _init(initial) -> void:
+		value = initial
+
+	func add(e: Expr) -> Fold:
+		exprs.append(e)
+		return self
+
+
 var seed: int = 0
 var _aidx_counter: int = 0
 
@@ -96,6 +122,8 @@ static func mget(part: Part, key: String):
 		return null
 	var v = part.meta.get(key)
 	if v is Expr:
+		return v.value
+	if v is Fold:
 		return v.value
 	return v
 
@@ -139,8 +167,12 @@ func draw(coord) -> float:
 ## total order, fold left mutating in place.
 func tick(root: Part) -> void:
 	var order := _preorder(root)
-	# Collect expressions tagged with their preorder index.
-	var items: Array = []  # each: {pidx, priority, aidx, part, key, expr}
+	# Collect expressions tagged with their preorder index. Each item names the
+	# source `expr` (fn + priority + aidx) and the `cell` that holds the shared
+	# `.value` it reads and writes. For a plain Expr the cell IS the Expr; for a
+	# same-key Fold, every member Expr is a separate item that shares the one
+	# Fold cell — so two writers at one (part,key) fold left over one value.
+	var items: Array = []  # each: {pidx, priority, aidx, part, key, expr, cell}
 	for pidx in order.size():
 		var part: Part = order[pidx]
 		for key in part.meta.keys():  # insertion (authoring) order
@@ -148,20 +180,29 @@ func tick(root: Part) -> void:
 			if v is Expr:
 				items.append({
 					"pidx": pidx, "priority": v.priority, "aidx": v.aidx,
-					"part": part, "key": key, "expr": v,
+					"part": part, "key": key, "expr": v, "cell": v,
 				})
+			elif v is Fold:
+				for sub in v.exprs:
+					items.append({
+						"pidx": pidx, "priority": sub.priority, "aidx": sub.aidx,
+						"part": part, "key": key, "expr": sub, "cell": v,
+					})
 	# Deterministic total order: (preorder index, priority, authoring index).
 	items.sort_custom(func(a, b):
 		if a.pidx != b.pidx: return a.pidx < b.pidx
 		if a.priority != b.priority: return a.priority < b.priority
 		return a.aidx < b.aidx)
 	# Fold left, mutating in place. A later read of an already-evaluated cell
-	# sees the new value; not-yet-evaluated reads see last tick's value.
+	# sees the new value; not-yet-evaluated reads see last tick's value. Two
+	# members of one Fold share `cell.value`: the second reads what the first
+	# just wrote — same-tick, same-key, no buffer.
 	for it in items:
 		var e: Expr = it.expr
+		var cell = it.cell  # holds the shared `.value` (Expr or Fold)
 		var part: Part = it.part
 		var ctx := {
-			"current": e.value,
+			"current": cell.value,
 			"host": part,
 			"root": root,
 			"seed": seed,
@@ -169,4 +210,4 @@ func tick(root: Part) -> void:
 			"draw": func(coord): return draw(coord),
 			"mget": func(p, k): return mget(p, k),
 		}
-		e.value = e.fn.call(ctx)
+		cell.value = e.fn.call(ctx)

@@ -56,6 +56,7 @@ SUITES=(
   tf_size_test
   tf_figure_test
   tf_library_test
+  tf_substrate_test
   memory_test
   relationship_mood_test
   body_asset_test

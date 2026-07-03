@@ -1,29 +1,37 @@
-## TF SUBSTRATE test — the plain struct + stateless function transformation model.
+## TF SUBSTRATE test — transformations as MARINADA EXPRESSIONS over the plain-struct
+## part tree, evaluated by the GDScript marinada core evaluator (tf_marinada.gd).
 ##
-## Exercises the whole substrate against the seven contract cases:
+## Every transformation is now authored DATA (an entry in the authored marinada
+## module lib:tf-core, resolved by TFLibrary.build) — proving transformations are
+## content, not engine code. The engine calls each definition and writes back its
+## pure result record. The suite covers:
+##   0. Evaluator conformance on marinada snippets taken from the spec.
 ##   1. Gradual transformation over N ticks.
 ##   2. Two parallel out-of-step transitions on one part (independent progress).
 ##   3. Pause + resume (condition written by an action).
 ##   4. Pause-the-most-recent (recency = list position) with two parallel transitions.
 ##   5. Cross-part dependency by field: a tail transition reading a breast's size.
 ##   6. Relational disambiguation on a HUMAN-TAUR with two identical torsos,
-##      distinguished ONLY by structure (no id, no location field).
-##   7. Replay determinism: same seed + action log ⇒ identical tree; a different
-##      seed differs.
+##      distinguished ONLY by structure — the queries authored as marinada exprs.
+##   7. Replay determinism: same seed + action log => identical tree; different seed
+##      differs.
 ##
 ## Run: xvfb-run -a godot4 --path . res://tests/tf_substrate_test.tscn --quit-after 2000
 extends Node
 
-# TFPart / TFTree / TFRng / TFEngine are globally registered via class_name.
+# TFPart / TFTree / TFRng / TFEngine / TFMarinada / TFLibrary are globally
+# registered via class_name.
 
 var _pass := 0
 var _fail := 0
-var _transforms: Dictionary = {}
+var _lib: Dictionary = {}
 
 
 func _ready() -> void:
 	print("\n=== aeriea tf-substrate test ===\n")
-	_transforms = _build_transforms()
+	# The transformation library, resolved once from the authored marinada module.
+	_lib = TFLibrary.build()
+	_case0_evaluator()
 	_case1_gradual()
 	_case2_parallel()
 	_case3_pause()
@@ -44,59 +52,42 @@ func _ok(cond: bool, msg: String) -> void:
 
 
 # ---------------------------------------------------------------------------
-# The stateless transformation functions. Each reads current field values and
-# writes the next. They live entirely OUTSIDE the parts (data/computation split);
-# a transition record just names its `kind`.
+# CASE 0 — the evaluator itself, on marinada snippets from the spec.
 # ---------------------------------------------------------------------------
-func _build_transforms() -> Dictionary:
-	return {
-		"accrue": _xf_accrue,
-		"accrue_pausable": _xf_accrue_pausable,
-		"accrue_recent": _xf_accrue_recent,
-		"track_breast": _xf_track_breast,
-		"maybe_grow": _xf_maybe_grow,
-	}
+func _case0_evaluator() -> void:
+	# Arithmetic / nesting (spec: ["+", a, b]).
+	_ok(TFMarinada.eval_top(["+", 1, 2]) == 3, "case0: [+ 1 2] == 3")
+	_ok(TFMarinada.eval_top(["*", ["+", 1, 2], 4]) == 12, "case0: nested arithmetic == 12")
 
+	# let binds names in scope of the body (spec: let).
+	_ok(TFMarinada.eval_top(["let", [["x", 5], ["y", 3]], ["+", "x", "y"]]) == 8,
+		"case0: let binding == 8")
 
-# Accumulate progress and interpolate a field from `from` to `to`.
-func _xf_accrue(_root: TFPart, part: TFPart, tr: Dictionary, _ctx: Dictionary) -> void:
-	tr["prog"] = minf(1.0, tr["prog"] + tr["rate"])
-	part.fields[tr["field"]] = lerpf(tr["from"], tr["to"], tr["prog"])
+	# A bare string in arg position is a string literal when unbound.
+	_ok(TFMarinada.eval_top(["str-concat", "hello ", "world"]) == "hello world",
+		"case0: unbound bare strings are literals")
 
+	# get / get-in over records (spec: data access).
+	var rec := {"a": {"b": 7}}
+	_ok(TFMarinada.eval_with(["get-in", "r", ["array", "a", "b"]], {"r": rec}) == 7,
+		"case0: get-in nested == 7")
+	# set returns a NEW record; the original is untouched (immutability).
+	var rec2: Dictionary = TFMarinada.eval_with(["set", "r", "a", 99], {"r": {"a": 1}})
+	_ok(rec2["a"] == 99, "case0: set returns updated record")
 
-# Like accrue, but DECLINES to advance while the part's `held` field is set
-# (pause is a transformation reading a condition, not a substrate flag).
-func _xf_accrue_pausable(_root: TFPart, part: TFPart, tr: Dictionary, _ctx: Dictionary) -> void:
-	if part.fields.get("held", false):
-		return
-	tr["prog"] = minf(1.0, tr["prog"] + tr["rate"])
-	part.fields[tr["field"]] = lerpf(tr["from"], tr["to"], tr["prog"])
+	# match on a DU constructor (spec: Shape / Circle area).
+	var area: Variant = TFMarinada.eval_top(
+		["match", ["Circle", 2.0],
+			[["Circle", "r"], ["*", 3.0, ["*", "r", "r"]]],
+			[["Rect", "w", "h"], ["*", "w", "h"]]])
+	_ok(is_equal_approx(area, 12.0), "case0: match Circle area == 12.0 (%s)" % str(area))
 
-
-# Pauses ONLY when this transition is the MOST RECENT (last in the list).
-# Recency is list position; identity via is_same, not content equality.
-func _xf_accrue_recent(_root: TFPart, part: TFPart, tr: Dictionary, _ctx: Dictionary) -> void:
-	var is_most_recent := is_same(part.transitions().back(), tr)
-	if part.fields.get("held", false) and is_most_recent:
-		return
-	tr["prog"] = minf(1.0, tr["prog"] + tr["rate"])
-
-
-# Cross-part: read a breast's `size` by KIND-match and write our thickness.
-func _xf_track_breast(root: TFPart, part: TFPart, tr: Dictionary, _ctx: Dictionary) -> void:
-	var breast := TFTree.find_first(root, TFTree.field_is("kind", "breast"))
-	if breast != null:
-		part.fields[tr["field"]] = breast.fields.get("size", 0.0) * tr["factor"]
-
-
-# Probabilistic: with probability `p`, bump a counter. The draw is keyed off
-# (seed, coord, per-transition draw counter) — no clock, replay-exact.
-func _xf_maybe_grow(_root: TFPart, _part: TFPart, tr: Dictionary, ctx: Dictionary) -> void:
-	var d: int = tr.get("_draws", 0)
-	tr["_draws"] = d + 1
-	var coord := TFRng.mix2(ctx["coord"], d)
-	if TFRng.chance(ctx["seed"], coord, tr["p"]):
-		tr["count"] = tr.get("count", 0) + 1
+	# letrec + fn + call: recursive factorial (spec: letrec for recursion).
+	var fact: Variant = TFMarinada.eval_top(
+		["letrec", [["fact", ["fn", ["n"],
+			["if", ["==", "n", 0], 1, ["*", "n", ["call", "fact", ["-", "n", 1]]]]]]],
+			["call", "fact", 5]])
+	_ok(fact == 120, "case0: letrec factorial 5 == 120 (%s)" % str(fact))
 
 
 # ---------------------------------------------------------------------------
@@ -109,9 +100,8 @@ func _case1_gradual() -> void:
 	var seen: Array = []
 	for i in range(6):
 		seen.append(tail.fields["size"])
-		TFEngine.tick(tail, _transforms)
+		TFEngine.tick(tail, _lib)
 
-	# Monotonic non-decreasing, strictly grows early, reaches full by tick 5.
 	var monotonic := true
 	for i in range(1, seen.size()):
 		if seen[i] < seen[i - 1]:
@@ -126,18 +116,19 @@ func _case1_gradual() -> void:
 # ---------------------------------------------------------------------------
 func _case2_parallel() -> void:
 	var part := TFPart.make({"kind": "torso"})
-	var a := {"kind": "accrue", "field": "a_out", "from": 0.0, "to": 1.0, "rate": 0.10, "prog": 0.0}
-	var b := {"kind": "accrue", "field": "b_out", "from": 0.0, "to": 1.0, "rate": 0.25, "prog": 0.60}
-	part.transitions().append(a)
-	part.transitions().append(b)
+	part.transitions().append({"kind": "accrue", "field": "a_out", "from": 0.0, "to": 1.0, "rate": 0.10, "prog": 0.0})
+	part.transitions().append({"kind": "accrue", "field": "b_out", "from": 0.0, "to": 1.0, "rate": 0.25, "prog": 0.60})
 
 	for i in range(3):
-		TFEngine.tick(part, _transforms)
+		TFEngine.tick(part, _lib)
 
-	# Each advanced by its OWN rate from its OWN start — no shared clock.
-	_ok(is_equal_approx(a["prog"], 0.30), "case2: A progress independent (%f, want 0.30)" % a["prog"])
-	_ok(is_equal_approx(b["prog"], 1.00), "case2: B progress independent+clamped (%f, want 1.00)" % b["prog"])
-	_ok(a["prog"] != b["prog"], "case2: the two transitions are out of step")
+	# Each advanced by its OWN rate from its OWN start — the engine writes back the
+	# pure result, so we read current state from the live transition list.
+	var a_prog: float = part.transitions()[0]["prog"]
+	var b_prog: float = part.transitions()[1]["prog"]
+	_ok(is_equal_approx(a_prog, 0.30), "case2: A progress independent (%f, want 0.30)" % a_prog)
+	_ok(is_equal_approx(b_prog, 1.00), "case2: B progress independent+clamped (%f, want 1.00)" % b_prog)
+	_ok(a_prog != b_prog, "case2: the two transitions are out of step")
 
 
 # ---------------------------------------------------------------------------
@@ -149,28 +140,19 @@ func _case3_pause() -> void:
 		p.transitions().append({"kind": "accrue_pausable", "field": "len", "from": 0.0, "to": 1.0, "rate": 0.25, "prog": 0.0})
 		return p
 
-	# Log: 2 ticks, action holds, 3 ticks (frozen), action releases, 4 ticks.
-	var log: Array = [
-		{"op": "tick"}, {"op": "tick"},
-		{"op": "set_field", "field": "held", "value": true},
-		{"op": "tick"}, {"op": "tick"}, {"op": "tick"},
-		{"op": "set_field", "field": "held", "value": false},
-		{"op": "tick"}, {"op": "tick"}, {"op": "tick"}, {"op": "tick"},
-	]
-	# Run manually so we can sample progress at the held boundary.
 	var p: TFPart = builder.call()
-	TFEngine.apply_action(p, {"op": "tick"}, _transforms, 0)
-	TFEngine.apply_action(p, {"op": "tick"}, _transforms, 0)
+	TFEngine.apply_action(p, {"op": "tick"}, _lib, 0)
+	TFEngine.apply_action(p, {"op": "tick"}, _lib, 0)
 	var before_hold: float = p.transitions()[0]["prog"]
-	TFEngine.apply_action(p, {"op": "set_field", "field": "held", "value": true}, _transforms, 0)
-	TFEngine.apply_action(p, {"op": "tick"}, _transforms, 0)
-	TFEngine.apply_action(p, {"op": "tick"}, _transforms, 0)
-	TFEngine.apply_action(p, {"op": "tick"}, _transforms, 0)
+	TFEngine.apply_action(p, {"op": "set_field", "field": "held", "value": true}, _lib, 0)
+	TFEngine.apply_action(p, {"op": "tick"}, _lib, 0)
+	TFEngine.apply_action(p, {"op": "tick"}, _lib, 0)
+	TFEngine.apply_action(p, {"op": "tick"}, _lib, 0)
 	var during_hold: float = p.transitions()[0]["prog"]
 	_ok(is_equal_approx(before_hold, 0.50), "case3: progressed to 0.50 before hold (%f)" % before_hold)
 	_ok(is_equal_approx(during_hold, before_hold), "case3: FROZEN while held (%f == %f)" % [during_hold, before_hold])
-	TFEngine.apply_action(p, {"op": "set_field", "field": "held", "value": false}, _transforms, 0)
-	TFEngine.apply_action(p, {"op": "tick"}, _transforms, 0)
+	TFEngine.apply_action(p, {"op": "set_field", "field": "held", "value": false}, _lib, 0)
+	TFEngine.apply_action(p, {"op": "tick"}, _lib, 0)
 	var after_release: float = p.transitions()[0]["prog"]
 	_ok(after_release > during_hold, "case3: RESUMES after release (%f > %f)" % [after_release, during_hold])
 
@@ -181,24 +163,22 @@ func _case3_pause() -> void:
 func _case4_pause_most_recent() -> void:
 	var part := TFPart.make({"kind": "torso", "held": false})
 	# First-started (earlier in list) then most-recent (last in list).
-	var older := {"kind": "accrue_recent", "field": "x", "rate": 0.10, "prog": 0.0}
-	var newer := {"kind": "accrue_recent", "field": "y", "rate": 0.10, "prog": 0.0}
-	part.transitions().append(older)
-	part.transitions().append(newer)
+	part.transitions().append({"kind": "accrue_recent", "field": "x", "rate": 0.10, "prog": 0.0})
+	part.transitions().append({"kind": "accrue_recent", "field": "y", "rate": 0.10, "prog": 0.0})
 
 	for i in range(2):
-		TFEngine.tick(part, _transforms)          # both advance
+		TFEngine.tick(part, _lib)                # both advance
 	part.fields["held"] = true
 	for i in range(3):
-		TFEngine.tick(part, _transforms)          # only OLDER advances; NEWER frozen
-	var older_held: float = older["prog"]
-	var newer_held: float = newer["prog"]
-	_ok(is_equal_approx(older["prog"], 0.50), "case4: older keeps advancing while held (%f, want 0.50)" % older["prog"])
-	_ok(is_equal_approx(newer["prog"], 0.20), "case4: most-recent FROZEN while held (%f, want 0.20)" % newer["prog"])
+		TFEngine.tick(part, _lib)                # only OLDER advances; NEWER frozen
+	var older_held: float = part.transitions()[0]["prog"]
+	var newer_held: float = part.transitions()[1]["prog"]
+	_ok(is_equal_approx(older_held, 0.50), "case4: older keeps advancing while held (%f, want 0.50)" % older_held)
+	_ok(is_equal_approx(newer_held, 0.20), "case4: most-recent FROZEN while held (%f, want 0.20)" % newer_held)
 	part.fields["held"] = false
-	TFEngine.tick(part, _transforms)
-	_ok(newer["prog"] > newer_held, "case4: most-recent resumes after release (%f > %f)" % [newer["prog"], newer_held])
-	_ok(older["prog"] > older_held, "case4: older also advances after release")
+	TFEngine.tick(part, _lib)
+	_ok(part.transitions()[1]["prog"] > newer_held, "case4: most-recent resumes after release (%f > %f)" % [part.transitions()[1]["prog"], newer_held])
+	_ok(part.transitions()[0]["prog"] > older_held, "case4: older also advances after release")
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +193,7 @@ func _case5_cross_part_by_field() -> void:
 	tail.transitions().append({"kind": "track_breast", "field": "thickness", "factor": 0.5})
 
 	for i in range(4):
-		TFEngine.tick(body, _transforms)
+		TFEngine.tick(body, _lib)
 
 	# tail.thickness == 0.5 * breast.size, tracked by KIND-match (no pointer/id).
 	_ok(breast.fields["size"] > 0.0, "case5: breast grew (%f)" % breast.fields["size"])
@@ -227,21 +207,20 @@ func _case5_cross_part_by_field() -> void:
 	var breast2 := body2.add_child(TFPart.make({"kind": "breast", "size": 0.0}))
 	breast2.transitions().append({"kind": "accrue", "field": "size", "from": 0.0, "to": 8.0, "rate": 0.5, "prog": 0.0})
 	tail2.transitions().append({"kind": "track_breast", "field": "thickness", "factor": 0.5})
-	TFEngine.tick(body2, _transforms)   # tail reads breast BEFORE breast grew this tick
+	TFEngine.tick(body2, _lib)   # tail reads breast BEFORE breast grew this tick
 	_ok(is_equal_approx(tail2.fields["thickness"], 0.0),
 		"case5: one-tick lag emergent from order when source sorts later (%f == 0)" % tail2.fields["thickness"])
 
 
 # ---------------------------------------------------------------------------
 # CASE 6 — relational disambiguation on a human-taur with TWO identical torsos.
-# No id, no location/region field: structure alone distinguishes them.
+# No id, no location/region field: structure alone distinguishes them. The queries
+# are authored as MARINADA EXPRESSIONS over the tree-navigation host ops.
 # ---------------------------------------------------------------------------
 func _case6_relational_disambiguation() -> void:
-	var is_torso := TFTree.field_is("kind", "torso")
-
 	# pelvis -> torso_rear -> torso_front (spine chained upward). Both torsos are
-	# byte-identical in fields (kind "torso", form "human"), each with head/arms/
-	# breasts. The ONLY difference is where they sit in the attachment structure.
+	# byte-identical in fields, each with head/arms/breasts. The ONLY difference is
+	# where they sit in the attachment structure.
 	var pelvis := TFPart.make({"kind": "pelvis"})
 	var torso_rear := pelvis.add_child(TFPart.make({"kind": "torso", "form": "human"}))
 	_add_human_parts(torso_rear)
@@ -249,22 +228,29 @@ func _case6_relational_disambiguation() -> void:
 	var torso_front := torso_rear.add_child(TFPart.make({"kind": "torso", "form": "human"}))
 	_add_human_parts(torso_front)
 
+	# A marinada predicate: a part whose kind == "torso".
+	var is_torso := ["fn", ["p"], ["==", ["part-field", "p", "kind"], "torso"]]
+	var binds := {"pelvis": pelvis, "tail": tail}
+
 	# "My torso" for the rear tail == the rear torso (nearest matching ancestor).
-	var my_torso := TFTree.nearest_ancestor(tail, is_torso)
+	var my_torso: Variant = TFMarinada.eval_with(["nearest-ancestor", "tail", is_torso], binds)
 	_ok(my_torso == torso_rear, "case6: tail's nearest torso is the REAR torso")
 
 	# "The other/front torso" via chain traversal: the topmost torso in the spine.
-	var top := TFTree.topmost_in_chain(pelvis, is_torso)
+	var top: Variant = TFMarinada.eval_with(["topmost-in-chain", "pelvis", is_torso], binds)
 	_ok(top == torso_front, "case6: topmost torso in the chain is the FRONT torso")
 
-	# Structural discriminator with NO id and NO region field: the front torso is
-	# the torso that itself has a torso ANCESTOR; the rear torso has none.
-	var all_torsos := TFTree.find_all(pelvis, is_torso)
+	# Exactly two torsos found by field match.
+	var all_torsos: Array = TFMarinada.eval_with(["find-all", "pelvis", is_torso], binds)
 	_ok(all_torsos.size() == 2, "case6: exactly two torsos found by field match")
+
+	# Structural discriminator with NO id and NO region field: the front torso is the
+	# torso that itself HAS a torso ancestor; the rear torso has none. Asked in marinada.
 	var front_by_structure: TFPart = null
 	var rear_by_structure: TFPart = null
 	for t in all_torsos:
-		if TFTree.has_ancestor(t, is_torso):
+		var has_anc: bool = TFMarinada.eval_with(["has-ancestor", "t", is_torso], {"t": t})
+		if has_anc:
 			front_by_structure = t
 		else:
 			rear_by_structure = t
@@ -276,9 +262,11 @@ func _case6_relational_disambiguation() -> void:
 	_ok(torso_rear != torso_front, "case6: yet they are distinct parts (structure, not id)")
 
 	# "The nearest torso that isn't me": from a part inside the FRONT torso, the
-	# nearest torso excluding the front is the rear.
+	# nearest torso excluding the front is the rear — authored in marinada.
 	var front_head := TFTree.find_first(torso_front, TFTree.field_is("kind", "head"))
-	var other := TFTree.nearest_ancestor_excluding(front_head, is_torso, torso_front)
+	var other: Variant = TFMarinada.eval_with(
+		["nearest-ancestor-excluding", "head", is_torso, "front"],
+		{"head": front_head, "front": torso_front})
 	_ok(other == torso_rear, "case6: 'nearest torso that isn't me' from front resolves to rear")
 
 
@@ -291,7 +279,7 @@ func _add_human_parts(torso: TFPart) -> void:
 
 
 # ---------------------------------------------------------------------------
-# CASE 7 — replay determinism: same seed + log ⇒ identical tree; different seed
+# CASE 7 — replay determinism: same seed + log => identical tree; different seed
 # differs (a probabilistic transition makes the seed load-bearing).
 # ---------------------------------------------------------------------------
 func _case7_replay_determinism() -> void:
@@ -307,11 +295,11 @@ func _case7_replay_determinism() -> void:
 	for i in range(24):
 		log.append({"op": "tick"})
 
-	var a := TFEngine.run_log(12345, builder, log, _transforms)
-	var b := TFEngine.run_log(12345, builder, log, _transforms)
-	_ok(TFPart.deep_equals(a, b), "case7: same seed + same log ⇒ identical final tree")
+	var a := TFEngine.run_log(12345, builder, log, _lib)
+	var b := TFEngine.run_log(12345, builder, log, _lib)
+	_ok(TFPart.deep_equals(a, b), "case7: same seed + same log => identical final tree")
 
-	var c := TFEngine.run_log(999, builder, log, _transforms)
+	var c := TFEngine.run_log(999, builder, log, _lib)
 	_ok(not TFPart.deep_equals(a, c), "case7: a DIFFERENT seed produces a different tree")
 
 	# Sanity: the probabilistic draws actually fired (counts are within range).

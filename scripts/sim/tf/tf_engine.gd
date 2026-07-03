@@ -1,17 +1,23 @@
 ## The tick and the replay driver — the whole EXECUTION model.
 ##
-## A transformation is a separate, STATELESS plain function referenced by a plain
-## `kind` string; the mapping kind -> function is a plain dispatch table passed in
-## (`transforms`), not a stateful registry object. This is the data/computation
-## seam: the tree (plus each part's transition list) is DATA; `transforms` is the
-## separate COMPUTATION. A transformation has the signature
+## A transformation is now AUTHORED CONTENT, not engine code: a marinada expression
+## (see tf_marinada.gd, tf_library.gd) referenced by a plain `kind` string. The
+## mapping kind -> definition is `library`, a plain Dictionary kind -> marinada
+## closure resolved once from an authored module (TFLibrary.build). This is the
+## data/computation seam: the tree (plus each part's transition list) is DATA;
+## `library` is the separate, authored COMPUTATION.
 ##
-##     func(root: TFPart, part: TFPart, tr: Dictionary, ctx: Dictionary) -> void
+## The engine calls a definition closure with the fixed argument tuple
 ##
-## where `part` is the part the transition rides on, `tr` is the transition record
-## (a plain dict holding its own accumulated progress and params), `root` lets it
-## read any other part relationally, and `ctx` carries {seed, coord} for seeded
-## draws. It reads current field values and writes the next ones.
+##     (part, root, tr, seed, coord, idx, ntrans)
+##
+## and the definition RETURNS a pure result record — marinada stays pure, the
+## ENGINE owns mutation and eval order:
+##
+##     { "transition": <new transition record>, "fields": <record field -> value> }
+##
+## The engine replaces the transition-list entry with `transition` and writes each
+## `fields` entry into `part.fields` IN PLACE.
 ##
 ## A TICK evaluates every active transition in one DETERMINISTIC TOTAL ORDER:
 ## parts in tree PRE-ORDER, and within a part its transition list in order. Fields
@@ -28,8 +34,10 @@
 class_name TFEngine
 extends RefCounted
 
-## Advance the whole body one tick. See the class doc for the ordering contract.
-static func tick(root: TFPart, transforms: Dictionary, seed: int = 0) -> void:
+## Advance the whole body one tick. `library` maps a transition's `kind` to its
+## authored marinada definition closure. See the class doc for the ordering and the
+## pure-return / engine-writes contract.
+static func tick(root: TFPart, library: Dictionary, seed: int = 0) -> void:
 	var order := TFTree.preorder(root)
 	for pi in range(order.size()):
 		var part: TFPart = order[pi]
@@ -42,10 +50,18 @@ static func tick(root: TFPart, transforms: Dictionary, seed: int = 0) -> void:
 		for ti in range(n):
 			var tr: Dictionary = trans[ti]
 			var kind: Variant = tr.get("kind")
-			if not transforms.has(kind):
+			if not library.has(kind):
 				continue
-			var ctx := {"seed": seed, "coord": TFRng.mix2(pi, ti)}
-			transforms[kind].call(root, part, tr, ctx)
+			var coord := TFRng.mix2(pi, ti)
+			# Pure evaluation returns the new transition + field writes; the engine
+			# performs the in-place mutation, keeping marinada pure.
+			var result: Variant = TFMarinada.apply(library[kind], [part, root, tr, seed, coord, ti, n])
+			if result is Dictionary:
+				trans[ti] = result.get("transition", tr)
+				var writes: Variant = result.get("fields", {})
+				if writes is Dictionary:
+					for f in writes:
+						part.fields[f] = writes[f]
 
 
 # ---------------------------------------------------------------------------
@@ -76,10 +92,10 @@ static func _targets(root: TFPart, where: Dictionary) -> Array:
 ##   {"op": "set_field", "where": …, "field": …, "value": …}
 ##   {"op": "start", "where": …, "transition": {…}}     — append a transition
 ##   {"op": "stop",  "where": …, "kind": "…"}           — drop transitions of kind
-static func apply_action(root: TFPart, action: Dictionary, transforms: Dictionary, seed: int) -> void:
+static func apply_action(root: TFPart, action: Dictionary, library: Dictionary, seed: int) -> void:
 	match action.get("op"):
 		"tick":
-			tick(root, transforms, seed)
+			tick(root, library, seed)
 		"set_field":
 			for p in _targets(root, action.get("where", {})):
 				p.fields[action["field"]] = action["value"]
@@ -103,8 +119,8 @@ static func apply_action(root: TFPart, action: Dictionary, transforms: Dictionar
 ## Replay a whole log from scratch: build a fresh tree with `builder`, then fold
 ## every log entry (actions + tick markers) over it. Pure in (seed, log): the same
 ## seed and the same log yield an identical final tree, with no stored snapshot.
-static func run_log(seed: int, builder: Callable, log: Array, transforms: Dictionary) -> TFPart:
+static func run_log(seed: int, builder: Callable, log: Array, library: Dictionary) -> TFPart:
 	var root: TFPart = builder.call()
 	for entry in log:
-		apply_action(root, entry, transforms, seed)
+		apply_action(root, entry, library, seed)
 	return root

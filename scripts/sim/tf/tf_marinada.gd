@@ -32,6 +32,10 @@ extends RefCounted
 class Env extends RefCounted:
 	var vars: Dictionary = {}
 	var parent = null  # Env or null
+	# Strong refs to OTHER Envs this frame must outlive (e.g. modules it imports
+	# from). Held here — never back into `vars` — so it keeps imported frames alive
+	# WITHOUT forming a refcount cycle. See _seal_recursive for the self-capture case.
+	var keepalive: Array = []
 
 	func _init(p = null) -> void:
 		parent = p
@@ -77,6 +81,33 @@ static func eval_with(expr: Variant, bindings: Dictionary) -> Variant:
 	return eval(expr, env)
 
 
+## The lexical environment a closure captured. Normally the closure holds the Env
+## directly (strong); for closures bound into the very frame they capture (letrec /
+## module defs) the back-reference is stored as a WeakRef by `_seal_recursive` to
+## break the refcount self-cycle. Either way this returns the live Env.
+static func _closure_env(fn: Dictionary) -> Env:
+	var e: Variant = fn["env"]
+	if e is WeakRef:
+		return e.get_ref() as Env
+	return e as Env
+
+
+## Break the frame.vars -> closure -> closure.env == frame refcount self-cycle that
+## arises when a closure is bound into the very frame it captures (letrec bindings,
+## module definitions). For each such closure, demote its captured-env back-reference
+## to a WeakRef: the frame still strongly owns the closure, but the closure no longer
+## strongly owns the frame, so once the frame's external owners drop it collects.
+## Purely a lifetime change — `_closure_env` transparently derefs the weak link, so
+## lookup / recursion / application resolve exactly the same Env as before. Only
+## closures whose captured env IS this frame are affected; imported / nested-scope
+## closures (env is some other frame) are left strong and untouched.
+static func _seal_recursive(frame: Env) -> void:
+	for name in frame.vars:
+		var v: Variant = frame.vars[name]
+		if v is Dictionary and v.get("__fn", false) and v.get("env") == frame:
+			v["env"] = weakref(frame)
+
+
 ## Apply a closure value (produced by `fn`) to a list of already-evaluated args.
 ## Exposed so the engine can invoke a transformation-definition closure and so host
 ## ops can invoke marinada lambda predicates.
@@ -84,7 +115,7 @@ static func apply(fn: Variant, args: Array) -> Variant:
 	if not (fn is Dictionary and fn.get("__fn", false)):
 		push_error("TFMarinada.apply: not a function: %s" % str(fn))
 		return null
-	var fenv: Env = (fn["env"] as Env).child()
+	var fenv: Env = _closure_env(fn).child()
 	var params: Array = fn["params"]
 	for i in range(params.size()):
 		var pn: Variant = params[i]
@@ -160,6 +191,13 @@ static func _eval_list(arr: Array, env: Env) -> Variant:
 				ce2.define(b[0], null)     # pre-bind for mutual recursion
 			for b in arr[1]:
 				ce2.vars[b[0]] = eval(b[1], ce2)
+			# A def that is a closure capturing THIS frame makes ce2.vars ->
+			# closure -> closure.env == ce2 a refcount self-cycle, so the frame
+			# would never free. Break it: the closure holds ce2 WEAKLY. ce2 stays
+			# alive as this GDScript local for the whole body eval below (and is
+			# re-derefed on every recursive apply), so semantics are unchanged;
+			# once the body returns the frame is cycle-free and collects.
+			_seal_recursive(ce2)
 			return eval(arr[2], ce2)
 		"fn":
 			return {"__fn": true, "params": arr[1], "body": arr[2], "env": env}

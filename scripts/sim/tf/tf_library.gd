@@ -142,6 +142,10 @@ static func resolve_module(module: Dictionary, resolver: Callable) -> TFMarinada
 		var path := from.substr(sep + 1)
 		var mod: Dictionary = resolver.call(scheme, path)
 		var mod_env := resolve_module(mod, resolver)
+		# Keep the imported module's frame alive for this frame's lifetime (its
+		# exported closures capture it weakly once sealed below). Held off to the
+		# side of `vars`, so no cycle back to this frame.
+		env.keepalive.append(mod_env)
 		for name in imp.get("import", []):
 			env.define(name, mod_env.lookup(name))
 	var defs: Dictionary = module.get("defs", {})
@@ -149,6 +153,13 @@ static func resolve_module(module: Dictionary, resolver: Callable) -> TFMarinada
 		env.define(name, null)
 	for name in defs:
 		env.vars[name] = TFMarinada.eval(defs[name], env)
+	# Module defs are closures bound into the very frame they capture (letrec at
+	# module scope) — a refcount self-cycle that would leak the frame at exit. Seal
+	# it: each such closure holds this frame WEAKLY. The frame is then kept alive by
+	# its external owner (build() anchors the top module env; nested import frames
+	# are held by the importer's `keepalive` above), so lookups still resolve and
+	# the frame collects once that owner drops. Lifetime only — no eval change.
+	TFMarinada._seal_recursive(env)
 	return env
 
 
@@ -162,4 +173,9 @@ static func build() -> Dictionary:
 	var out: Dictionary = {}
 	for name in core_module()["defs"]:
 		out[name] = env.lookup(name)
+	# The module def closures capture `env` weakly (sealed in resolve_module), so the
+	# returned lib must keep the module frame alive for its own lifetime. Anchor it
+	# under a reserved non-kind key: the engine only ever indexes the lib by a
+	# transition `kind`, never iterates it, so this entry is inert to consumers.
+	out["__module_env"] = env
 	return out

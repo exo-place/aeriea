@@ -18,9 +18,19 @@
 class_name TFPart
 extends RefCounted
 
-var parent: TFPart = null           ## parent link (null at the root)
-var children: Array = []            ## ordered Array[TFPart]
+## Weak back-ref to the parent (null at the root). WEAK on purpose: children are
+## the owning strong refs (parent.children holds them), so a strong parent link
+## here would form a RefCounted cycle and a dropped subtree would never free.
+## Read it through `parent()`, never touch `_parent` directly.
+var _parent: WeakRef = null
+var children: Array = []            ## ordered Array[TFPart] — the owning strong refs
 var fields: Dictionary = {}         ## plain field name -> plain value
+
+
+## The parent part, or null at the root. Derefs the weak back-ref; returns null
+## if there is no parent (or, in the degenerate case, the parent was freed).
+func parent() -> TFPart:
+	return _parent.get_ref() if _parent != null else null
 
 
 ## Make a part with an initial field bag. `f` is copied shallowly into fields.
@@ -34,7 +44,7 @@ static func make(f: Dictionary = {}) -> TFPart:
 ## Attach `c` as the last child of this part. Attachment is the SINGLE source of
 ## truth for where a part is — location is structural, never a field.
 func add_child(c: TFPart) -> TFPart:
-	c.parent = self
+	c._parent = weakref(self)
 	children.append(c)
 	return c
 
@@ -42,9 +52,10 @@ func add_child(c: TFPart) -> TFPart:
 ## Detach this part from its parent (structural remove). Identity (its fields)
 ## is untouched — what a part IS travels with it wherever it is re-attached.
 func detach() -> void:
-	if parent != null:
-		parent.children.erase(self)
-		parent = null
+	var p := parent()
+	if p != null:
+		p.children.erase(self)
+	_parent = null
 
 
 ## The list of active transitions on this part (a plain Array field). Created

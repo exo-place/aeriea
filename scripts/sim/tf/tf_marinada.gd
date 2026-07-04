@@ -268,7 +268,7 @@ static func _prim(op: String, a: Array) -> Variant:
 		"chance": return TFRng.chance(a[0], a[1], a[2])
 		# --- AERIEA: tree navigation (wrap TFTree); parts are opaque TFPart values ---
 		"part-field": return _part_field(a)
-		"part-parent": return (a[0] as TFPart).parent if a[0] != null else null
+		"part-parent": return (a[0] as TFPart).parent() if a[0] != null else null
 		"part-children": return (a[0] as TFPart).children if a[0] != null else []
 		"find-first": return TFTree.find_first(a[0], _pred(a[1]))
 		"find-all": return TFTree.find_all(a[0], _pred(a[1]))

@@ -64,22 +64,22 @@ static func find_first(root: TFPart, pred: Callable) -> TFPart:
 ## The nearest ANCESTOR of `part` (walking up parents, NOT including `part`) for
 ## which `pred` holds, or null. "My nearest torso" for a part below it.
 static func nearest_ancestor(part: TFPart, pred: Callable) -> TFPart:
-	var cur: TFPart = part.parent if part != null else null
+	var cur: TFPart = part.parent() if part != null else null
 	while cur != null:
 		if pred.call(cur):
 			return cur
-		cur = cur.parent
+		cur = cur.parent()
 	return null
 
 
 ## Like nearest_ancestor, but also skips any ancestor equal to `exclude`.
 ## "The nearest torso that isn't me" when `part` itself matches the predicate.
 static func nearest_ancestor_excluding(part: TFPart, pred: Callable, exclude: TFPart) -> TFPart:
-	var cur: TFPart = part.parent if part != null else null
+	var cur: TFPart = part.parent() if part != null else null
 	while cur != null:
 		if cur != exclude and pred.call(cur):
 			return cur
-		cur = cur.parent
+		cur = cur.parent()
 	return null
 
 

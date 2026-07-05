@@ -276,6 +276,15 @@ var _clip_loop: bool = false
 ## Overlay weight 0..1, eased in/out so a gesture blends onto the body rather than
 ## snapping. A one-shot gesture eases back to 0 as it ends.
 var _clip_weight: float = 0.0
+## Clip-to-clip crossfade: when play_clip replaces an already-driving clip, the
+## OUTGOING clip's pose is retained (its index + the time it was interrupted at,
+## frozen) and blended into the incoming clip's pose over clip_crossfade_dur via
+## per-bone quaternion slerp, so A->B eases instead of popping. -1 = no crossfade
+## active. This is orthogonal to _clip_weight (the overlay-vs-base ease), which
+## still handles fade-in from rest and fade-out at a one-shot's end.
+var _xfade_idx: int = -1
+var _xfade_prev_time: float = 0.0
+var _xfade_time: float = 0.0
 ## Idle-fidget scheduler: how long the body has been standing still (sim-time accum),
 ## and the next scheduled fidget time. Deterministic (pure delta accumulator + the
 ## cosmetic rng), so the same standing duration -> the same fidget — never wall-clock.
@@ -291,6 +300,10 @@ const IDLE_FIDGET_CLIPS := ["idle_long", "idle_long_idle", "idle_sexy", "sigh", 
 @export var clip_stand_speed: float = 0.3
 ## How fast the overlay weight eases in/out (per second).
 @export var clip_blend_speed: float = 4.0
+## Duration (seconds) of the clip-to-clip pose crossfade when one clip replaces
+## another that is already driving the overlay. Short by design (a gesture swap, not
+## a locomotion blend); 0 disables the crossfade (hard switch). Default 0.15s.
+@export var clip_crossfade_dur: float = 0.15
 
 ## The space state used for foot-IK raycasts; the host supplies its world.
 var _space: PhysicsDirectSpaceState3D
@@ -1278,6 +1291,13 @@ func play_clip(id: String, loop: bool = false) -> bool:
 	var ci := clip_db.clip_index(id)
 	if ci < 0:
 		return false
+	# Crossfade: if a DIFFERENT clip is already driving the overlay, retain its pose
+	# (index + the time it was interrupted at, frozen) so _apply_clip_layer can slerp
+	# it into the incoming clip over clip_crossfade_dur instead of popping to frame 0.
+	if _clip_idx >= 0 and ci != _clip_idx and _clip_weight > 0.001 and clip_crossfade_dur > 0.0:
+		_xfade_idx = _clip_idx
+		_xfade_prev_time = _clip_time
+		_xfade_time = 0.0
 	_clip_idx = ci
 	_clip_time = 0.0
 	_clip_loop = loop
@@ -1325,6 +1345,12 @@ func _apply_clip_layer(delta: float) -> void:
 		_stand_time = 0.0
 		_next_fidget_at = 0.0
 
+	# --- advance the clip-to-clip crossfade timer -----------------------------
+	if _xfade_idx >= 0:
+		_xfade_time += delta
+		if _xfade_time >= clip_crossfade_dur or clip_crossfade_dur <= 0.0:
+			_xfade_idx = -1   # crossfade complete; incoming clip stands alone
+
 	# --- advance the active clip + ease the overlay weight --------------------
 	var target_w := 0.0
 	if _clip_idx >= 0:
@@ -1357,6 +1383,14 @@ func _apply_clip_layer(delta: float) -> void:
 		var rest: Transform3D = _rest_local.get(bname, Transform3D.IDENTITY)
 		var rest_q := rest.basis.get_rotation_quaternion()
 		var clip_q := (rest_q * clip_db.pose_quat(gf, dbi)).normalized()
+		# Crossfade: blend the outgoing clip's (frozen) pose into the incoming pose so
+		# the switch eases rather than cuts. t: 0 = outgoing, 1 = incoming.
+		if _xfade_idx >= 0:
+			var pf := clip_db.frame_at_time(_xfade_idx, _xfade_prev_time)
+			if pf >= 0:
+				var prev_q := (rest_q * clip_db.pose_quat(pf, dbi)).normalized()
+				var t := clampf(_xfade_time / maxf(clip_crossfade_dur, 1e-4), 0.0, 1.0)
+				clip_q = prev_q.slerp(clip_q, t).normalized()
 		var idx: int = _bone_index[bname]
 		# Blend FROM the locomotion pose already on the bone TO the clip pose by weight.
 		var cur := skeleton.get_bone_pose_rotation(idx)

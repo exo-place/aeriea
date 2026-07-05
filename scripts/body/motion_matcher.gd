@@ -36,8 +36,41 @@ var _weights: PackedFloat32Array
 ## clips). Deterministic constant; not learned.
 var goal_speed_scale: float = 0.13
 
+## Continuity / inertia term (the standard motion-matching "favor the current clip"
+## cost). Each search candidate is penalized by its frame-distance from the EXPECTED
+## CONTINUATION of the current clip (current_frame + 1 in the same clip_id). Without
+## it, a steady goal deterministically re-locks the SAME global-argmin frame every
+## search_interval — the clip only ever advances a few frames then snaps back, so the
+## gait freezes mid-stride and skates. With it, an unchanged goal plays the clip
+## through (the continuation frame wins over a distant equally-good match), while a
+## MATERIALLY changed goal still overcomes the penalty and jumps clips. The units are
+## cost-per-frame-of-distance, comparable to the weighted squared feature distance;
+## tuned so a steady locomotion goal visibly cycles. Deterministic (no wall-clock/RNG).
+var continuity_weight: float = 0.15
+## Extra continuity penalty (in frame-distance units) charged to a candidate that
+## lives in a DIFFERENT clip than the current frame — the "cost of switching clips".
+## Keeps within-clip advance preferred while still letting a real goal change pay it.
+var clip_switch_penalty: float = 40.0
+## Goal speed (m/s) below which the continuity term is disabled: a standing goal
+## holds its argmin idle frame (breathing/fidget layers keep it alive) instead of
+## drifting through the idle clip. Above it, continuity carries the locomotion gait.
+var continuity_min_speed: float = 0.5
+## While moving, the matcher plays the current clip through and only RE-SEARCHES when
+## the goal shifts by more than these thresholds since the last search (planar-velocity
+## metres/s, and yaw rate rad/s). Small drifts keep the gait playing; a real turn or a
+## walk↔run change re-plans. Deterministic float compares (seeded-sim safe).
+var goal_change_speed_eps: float = 1.0
+var goal_change_turn_eps: float = 0.5
+
 var current_frame: int = 0
 var _since_search: int = 999
+## The goal (planar velocity + turn rate) at the last search, to detect a material
+## goal change while moving.
+var _last_vel: Vector2 = Vector2.ZERO
+var _last_turn: float = 0.0
+## Set once the matcher has produced at least one real match, so the very first search
+## is a pure goal-only pick (no spurious continuity anchor on the initial frame 0).
+var _has_match: bool = false
 
 
 func setup(p_db: MotionDB) -> void:
@@ -45,6 +78,9 @@ func setup(p_db: MotionDB) -> void:
 	_build_weights()
 	current_frame = 0
 	_since_search = 999
+	_has_match = false
+	_last_vel = Vector2.ZERO
+	_last_turn = 0.0
 
 
 func _build_weights() -> void:
@@ -110,19 +146,53 @@ func step(local_vel: Vector2, turn_rate: float) -> int:
 	if db == null or db.frame_count == 0:
 		return 0
 	_since_search += 1
-	var need_search := _since_search >= search_interval
+	# Decide whether to re-search (global argmin) or continue the current clip.
+	#   - Not yet matched: search (bootstrap).
+	#   - Standing (goal below continuity_min_speed): re-lock periodically to the argmin
+	#     idle frame — a HELD stand kept alive by the breathing/fidget layers.
+	#   - Moving with a STEADY goal: do NOT re-search on the timer — that is exactly what
+	#     snapped the clip back to the best-phase frame every few frames and froze the
+	#     gait. Instead advance the clip (and loop at its end), so the gait plays through
+	#     and cycles.
+	#   - Moving with a MATERIALLY CHANGED goal: re-search so a new direction/speed
+	#     re-plans (the continuity term in search() lets a small change keep the clip and
+	#     a large one jump clips).
+	var moving := local_vel.length() >= continuity_min_speed
+	var need_search := false
+	if not _has_match:
+		need_search = true
+	elif not moving:
+		need_search = _since_search >= search_interval
+	else:
+		need_search = local_vel.distance_to(_last_vel) >= goal_change_speed_eps \
+			or absf(turn_rate - _last_turn) >= goal_change_turn_eps
 	if need_search:
 		current_frame = search(local_vel, turn_rate)
 		_since_search = 0
+		_last_vel = local_vel
+		_last_turn = turn_rate
 	else:
-		# advance along the clip; if we hit the clip end, force a re-search
+		# Advance along the clip. At the clip end, LOOP back to the clip's first frame
+		# (the gait cycle repeats) rather than snapping to the global goal-argmin.
 		var nxt := current_frame + 1
 		if nxt >= db.frame_count or db.clip_id[nxt] != db.clip_id[current_frame]:
-			current_frame = search(local_vel, turn_rate)
-			_since_search = 0
+			current_frame = _clip_start_of(current_frame)
 		else:
 			current_frame = nxt
+	_has_match = true
 	return current_frame
+
+
+## First frame index of the clip that `frame` belongs to (scans back over the
+## contiguous same-clip_id block). Used to loop a clip at its end. Deterministic.
+func _clip_start_of(frame: int) -> int:
+	if db == null or frame < 0 or frame >= db.frame_count:
+		return 0
+	var cid := db.clip_id[frame]
+	var s := frame
+	while s > 0 and db.clip_id[s - 1] == cid:
+		s -= 1
+	return s
 
 
 ## The deterministic argmin. Returns the frame whose normalized feature is
@@ -139,9 +209,26 @@ func search(local_vel: Vector2, turn_rate: float) -> int:
 	var best_cost := INF
 	var fc := db.frame_count
 	var feats := db.features
+	# Continuity anchor: the frame the current clip is expected to continue to. Only
+	# active once we've matched at least once (the initial search is pure goal-only)
+	# AND only for a locomotion goal — below continuity_min_speed the body is standing,
+	# where a held argmin idle frame (plus layered breathing/fidgets) is the intended
+	# alive stand, so continuity there would wrongly drift the idle instead of holding.
+	var use_cont := _has_match and continuity_weight > 0.0 and local_vel.length() >= continuity_min_speed
+	var cur := current_frame
+	var cur_clip := db.clip_id[cur] if (use_cont and cur >= 0 and cur < fc) else -1
+	var expected := cur + 1
 	for f in fc:
-		var base := f * fd
+		# Seed the cost with the continuity penalty so the monotonic early-out below
+		# stays valid (feature terms are non-negative and only add to it).
 		var cost := 0.0
+		if use_cont:
+			var d_frame := absf(float(f - expected))
+			if db.clip_id[f] == cur_clip:
+				cost = continuity_weight * d_frame
+			else:
+				cost = continuity_weight * (clip_switch_penalty + d_frame)
+		var base := f * fd
 		for d in fd:
 			var diff := feats[base + d] - qn[d]
 			cost += _weights[d] * diff * diff

@@ -20,6 +20,20 @@
 
 8. **Time-progression / tick-driver integration — OUTSIDE the TF substrate floor.** What advances ticks — how game-time or real-time maps onto ticks — is **not** part of the TF substrate (thread 7). The substrate only assumes "a tick happens and runs all transition expressions"; what drives that tick belongs to **integrating TF with the rest of the game**. This needs its own design pass + adversarial (co-)design later, and is explicitly flagged as outside the substrate floor (noted in `docs/decisions/body-transformation-substrate.md` Section D). Distinct from thread 7, which is substrate-internal semantics.
 
+## Open threads — Animation (new area; committed work now lives here)
+
+9. **Locomotion upper-body posture — remaining locomotion-quality blocker.** The foot-lock/cadence fix (committed) planted the legs and killed the skate, so legs read as correct; but the Motion-Matching 100STYLE UPPER-BODY layer still hunches the torso, cranes the head down, and occasionally snaps to arms-spread. Visible in BOTH the parkour sandbox and the creator Walk preview. Open (forks, not directives): curate/fix the upper-body mocap layer, drive the upper body separately, or blend better clips — undecided which.
+
+10. **Mirrors in the parkour sandbox — MISSING FEATURE, wants a design pass before build.** Likely the next focus. Kinds requested: environmental mirror, hand mirror, placeable mirror, paperdoll. Quality floor stated explicitly as "VRChat — anything below is an embarrassment." Open questions: reflection approach in Godot 4.6 (planar reflection / SubViewport-camera / paperdoll render-to-texture), perf with multiple simultaneous mirrors, which kinds to do first. Per feature-gating this needs a recorded design pass before code.
+
+11. **Creator sculpt-during-animation offset.** On-body sculpt/glow handle PICKING raycasts the REST-pose mesh, so handles sit visually offset while the body animates (the morph sliders themselves are fine — this is picking only). Follow-up forks: pose-accurate on-body picking, or auto-pause to rest pose while sculpting.
+
+12. **Full-body authored-clip playback ("sit").** The authored clip layer is upper-body-only, so full-body authored clips (e.g. `sit`) can't preview correctly (legs would stand while torso sits); `sit` is currently excluded from the creator picker. Open item: extend the clip layer to legs/root so full-body clips play.
+
+13. **Residual micro-slide (~7-8mm/frame) in foot-lock — LOW priority.** Minor residual, from the MakeHuman bone axis not being exactly local −Y plus the speed ease-blend. Not a blocker.
+
+Note (not a thread): `docs/decisions/animation-approach.md` records the ASPIRATIONAL animation vision (realistic-quality on arbitrary/transformed topology via physics-sim + learned control) — explicitly a frontier R&D bet, NOT committed near-term work. The near-term humanoid stack that is actually built = MakeHuman + motion-matching + foot-lock IK.
+
 Context (not a thread): feature-gating + mandatory-playtesting + green-is-user-granted-only governance is now encoded in `CLAUDE.md`, `docs/FEATURES.md` (Green vs Not-green tiers), and a `.githooks/pre-commit` gate (`AERIEA_GREEN_APPROVED=1`, user-only). New work lands under Not green; only the user promotes to Green.
 
 ## Architecture commitments

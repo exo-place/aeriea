@@ -47,10 +47,18 @@ var goal_speed_scale: float = 0.13
 ## cost-per-frame-of-distance, comparable to the weighted squared feature distance;
 ## tuned so a steady locomotion goal visibly cycles. Deterministic (no wall-clock/RNG).
 var continuity_weight: float = 0.15
-## Extra continuity penalty (in frame-distance units) charged to a candidate that
-## lives in a DIFFERENT clip than the current frame — the "cost of switching clips".
-## Keeps within-clip advance preferred while still letting a real goal change pay it.
-var clip_switch_penalty: float = 40.0
+## Flat continuity penalty (in frame-distance units) charged to a candidate that lives
+## in a DIFFERENT clip than the current frame — the "cost of switching clips". Keeps
+## within-clip advance preferred while still letting a real goal change pay it. LOWERED
+## from 40 to 3: at 40 the switch cost (continuity_weight·40 = 6.0) exceeded a walk-speed
+## goal's feature advantage over the current idle frame, so Walk/Run stayed trapped in
+## the idle clip even after the cross-clip index-distance bug was fixed (see search()).
+## 3 lets a real locomotion goal escape idle while a steady goal still plays its clip
+## through. (Note: with the foot-lock owning the legs and the upper body posed from the
+## idle frame, the matched locomotion frame is not currently shown, so this only governs
+## the matcher's clip-selection behaviour — but it is kept correct for when the captured
+## locomotion pose is re-enabled.)
+var clip_switch_penalty: float = 3.0
 ## Goal speed (m/s) below which the continuity term is disabled: a standing goal
 ## holds its argmin idle frame (breathing/fidget layers keep it alive) instead of
 ## drifting through the idle clip. Above it, continuity carries the locomotion gait.
@@ -172,11 +180,15 @@ func step(local_vel: Vector2, turn_rate: float) -> int:
 		_last_vel = local_vel
 		_last_turn = turn_rate
 	else:
-		# Advance along the clip. At the clip end, LOOP back to the clip's first frame
-		# (the gait cycle repeats) rather than snapping to the global goal-argmin.
+		# Advance along the clip. At the clip end, LOOP back to a SAFE interior frame of
+		# the clip — NOT its literal first frame. Every 100STYLE clip opens with several
+		# settling/reference frames whose retarget is corrupt (a craned head + flung arms),
+		# so looping to frame 0 landed straight on the worst pose each cycle. Looping to
+		# clip_start + loop_lead_in skips that settling window (belt-and-suspenders with the
+		# ingest-side CLIP_TRIM). Deterministic.
 		var nxt := current_frame + 1
 		if nxt >= db.frame_count or db.clip_id[nxt] != db.clip_id[current_frame]:
-			current_frame = _clip_start_of(current_frame)
+			current_frame = _clip_safe_start(current_frame)
 		else:
 			current_frame = nxt
 	_has_match = true
@@ -184,7 +196,7 @@ func step(local_vel: Vector2, turn_rate: float) -> int:
 
 
 ## First frame index of the clip that `frame` belongs to (scans back over the
-## contiguous same-clip_id block). Used to loop a clip at its end. Deterministic.
+## contiguous same-clip_id block). Deterministic.
 func _clip_start_of(frame: int) -> int:
 	if db == null or frame < 0 or frame >= db.frame_count:
 		return 0
@@ -193,6 +205,23 @@ func _clip_start_of(frame: int) -> int:
 	while s > 0 and db.clip_id[s - 1] == cid:
 		s -= 1
 	return s
+
+
+## Frames to skip past a clip's corrupt settling opening when looping. Deterministic.
+var loop_lead_in: int = 12
+
+## A SAFE interior loop target for the clip `frame` belongs to: clip_start + loop_lead_in,
+## clamped to stay inside the clip (so a short clip still loops in-bounds). Avoids the
+## corrupt clip-opening frames every loop. Deterministic.
+func _clip_safe_start(frame: int) -> int:
+	var s := _clip_start_of(frame)
+	# clip length (contiguous same-clip_id run from s)
+	var cid := db.clip_id[s]
+	var e := s
+	while e + 1 < db.frame_count and db.clip_id[e + 1] == cid:
+		e += 1
+	var lead := mini(loop_lead_in, (e - s) / 2)
+	return s + maxi(lead, 0)
 
 
 ## The deterministic argmin. Returns the frame whose normalized feature is
@@ -223,11 +252,20 @@ func search(local_vel: Vector2, turn_rate: float) -> int:
 		# stays valid (feature terms are non-negative and only add to it).
 		var cost := 0.0
 		if use_cont:
-			var d_frame := absf(float(f - expected))
 			if db.clip_id[f] == cur_clip:
+				# Within the current clip, favor the expected continuation frame by its
+				# frame-distance (a genuine motion-continuity signal).
+				var d_frame := absf(float(f - expected))
 				cost = continuity_weight * d_frame
 			else:
-				cost = continuity_weight * (clip_switch_penalty + d_frame)
+				# A DIFFERENT clip: charge ONLY the flat switch penalty. The clips are
+				# concatenated in an arbitrary order, so the array-index distance between
+				# two clips is meaningless — yet the old cost added it (clip_switch_penalty
+				# + d_frame), imposing a penalty of HUNDREDS on any clip far away in the
+				# buffer. That trapped every locomotion goal in whichever clip the matcher
+				# started in (the idle clip), so Walk/Run never left idle. The flat switch
+				# penalty alone is the intended, bounded cost of changing clips.
+				cost = continuity_weight * clip_switch_penalty
 		var base := f * fd
 		for d in fd:
 			var diff := feats[base + d] - qn[d]

@@ -119,6 +119,38 @@ func _ready() -> void:
 		facing_turn > facing_walk,
 		"turn=%.4f > walk=%.4f (matched tag=%s)" % [facing_turn, facing_walk, tag_turn])
 
+	# --- 3b. CONTINUITY TRAP (regression) ------------------------------------
+	# The prior assertions call search() directly, where the continuity term is OFF
+	# (a fresh matcher has _has_match=false). But the LIVE path drives step(), which
+	# turns continuity ON after the first match — and there a locomotion goal was
+	# TRAPPED in whichever clip the matcher started in (the idle clip): Walk/Run in the
+	# creator preview never left idle. The cause was the cross-clip continuity cost
+	# adding the ABSOLUTE array-index distance between clips (meaningless — clips are
+	# concatenated in arbitrary order), so any clip far away in the buffer paid a
+	# penalty of hundreds. These assertions drive step() with a continuity anchor and
+	# require a moving goal to ESCAPE the idle clip — they FAIL under the old cost.
+	var mstep := MotionMatcher.new(); mstep.setup(db)
+	var f_stand := 0
+	for i in 20:
+		f_stand = mstep.step(Vector2.ZERO, 0.0)          # settle into the idle clip (anchor)
+	_assert("step: standing goal holds an idle clip", db.clip_tag_of(f_stand) == "idle",
+		db.clip_tag_of(f_stand))
+	var f_wstep := 0
+	for i in 30:
+		f_wstep = mstep.step(Vector2(0.0, 2.5), 0.0)      # now walk — must leave idle
+	_assert("step: walk goal ESCAPES the idle clip (continuity trap fixed)",
+		db.clip_tag_of(f_wstep) != "idle",
+		"walk-from-idle-anchor matched tag=%s frame=%d" % [db.clip_tag_of(f_wstep), f_wstep])
+	var f_rstep := 0
+	for i in 30:
+		f_rstep = mstep.step(Vector2(0.0, 8.0), 0.0)      # then run — a faster goal
+	_assert("step: run goal (after walk) is not trapped in idle",
+		db.clip_tag_of(f_rstep) != "idle",
+		"run matched tag=%s frame=%d" % [db.clip_tag_of(f_rstep), f_rstep])
+	# Walk and Run visibly DIFFER (different matched frames) even from a shared anchor.
+	_assert("step: walk and run select different frames (not both trapped)",
+		f_wstep != f_rstep, "walk=%d run=%d" % [f_wstep, f_rstep])
+
 	# --- 4. BodyRig wires MM and poses the body ------------------------------
 	var rig := BodyRig.new()
 	add_child(rig)

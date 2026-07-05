@@ -172,6 +172,35 @@ const HAIR_BONE_FRAGMENTS := ["hair"]
 @export var ik_ray_down: float = 0.9         ## ray reach below ankle
 @export var foot_ik_enabled: bool = true
 
+## --- Foot-lock locomotion (kills foot-skate under Motion-Matching) -----------
+## The captured 100STYLE clip's leg swing does NOT match the sim's ground travel, so the
+## stance foot conveyor-belts backward at body speed (skate) and the clip's static section
+## glides. Foot-lock replaces the MM leg pose with a distance-phased, sagittal-plane
+## two-bone IK whose stance foot is WORLD-ANCHORED: the foot target is expressed in the
+## pelvis frame with a backward stance sweep at the nominal locomotion speed, so when the
+## body translates at that speed the planted foot holds its world position (the body passes
+## over it — no skate), and when previewed in place (creator) the same sweep reads as a
+## legible treadmill stride. Cadence matches travel BY CONSTRUCTION: the gait phase advances
+## with distance (speed·dt / stride), never a fixed clip cadence. Deterministic (phase +
+## smoothed speed only; no wall-clock/RNG). The MM pose still owns the upper body/arms.
+@export var foot_lock_enabled: bool = true
+## Metres of ground travel per full L+R gait cycle (one stride = two steps). Kept short
+## enough that the per-foot stance sweep stays inside the leg's reach.
+@export var gait_stride: float = 0.7
+## Fraction of each foot's cycle spent planted (stance). >0.5 gives a double-support overlap
+## (both feet down) like a real walk; the airborne swing gets the rest.
+@export var stance_duty: float = 0.6
+## Peak swing-foot lift (metres) above the ground during the airborne phase.
+@export var foot_lift_height: float = 0.10
+## Locomotion crouch (metres the pelvis lowers while walking). The rest stance stands at
+## near-full leg extension (reach ≈ hip height), leaving no knee-bend room; lowering the
+## pelvis gives the two-bone IK headroom to bend AND reads as a natural lowered-COM gait.
+@export var gait_crouch: float = 0.09
+## Planar speed (m/s) below which foot-lock is inactive (the MM idle stand holds); it eases
+## in between this and foot_lock_full_speed so a start/stop never pops.
+@export var foot_lock_min_speed: float = 0.2
+@export var foot_lock_full_speed: float = 1.2
+
 var skeleton: Skeleton3D
 var mesh_instance: MeshInstance3D
 ## The body SKIN material, shared by the genital proxy so its tone tracks the body skin.
@@ -1207,6 +1236,10 @@ func apply_pose(delta: float) -> void:
 	# Slice-3 procedural cycle when no DB is present (graceful degradation).
 	if matcher != null and use_motion_matching:
 		_apply_motion_matching()
+		# Kill the foot-skate: drive the legs with the world-anchored, distance-phased
+		# foot-lock IK. It OVERRIDES the MM leg pose (the stance foot holds its world
+		# position while the body translates over it); the MM stamp keeps the upper body.
+		_apply_foot_lock(delta)
 		# Foot-IK over MM: the Slice-3 two-bone solver + pelvis-drop were tuned for
 		# the procedural cycle and FIGHT the MM pose (they collapse the pelvis when
 		# layered on captured poses). Re-deriving foot-IK as a gentle additive
@@ -1404,6 +1437,14 @@ func _apply_clip_layer(delta: float) -> void:
 # bones to rest first so the pose is a pure function of the matched frame.
 var _mm_frame: int = 0
 
+## Foot-lock gait phase in [0,1): position within one full L+R gait cycle. Advanced by
+## DISTANCE (speed·dt / gait_stride) so cadence tracks travel — a pure accumulator, no
+## wall-clock/RNG. Left foot uses this phase; the right foot is a half-cycle ahead.
+var _gait_phase: float = 0.0
+## Rest ankle (foot-bone) height above the feet origin, measured once from the rig — the
+## planted ankle sits this far above the ground surface (the sole, not the ankle, touches).
+var _ankle_rest_y: float = -1.0
+
 ## Below this planar speed (m/s) the body is treated as standing still: Motion
 ## Matching resolves the zero-velocity goal to a genuine 100STYLE idle (Neutral_ID)
 ## frame, and the deterministic micro-motion below is layered at full strength so
@@ -1456,6 +1497,144 @@ func _apply_motion_matching() -> void:
 		var idx: int = _bone_index[bname]
 		skeleton.set_bone_pose_position(idx, rest.origin)
 		skeleton.set_bone_pose_rotation(idx, q)
+
+
+## Foot-lock locomotion: replace the MM leg pose with a distance-phased sagittal-plane
+## two-bone IK whose stance foot is anchored in the pelvis frame with a backward sweep at
+## the nominal locomotion speed. When the body translates at that speed the stance foot
+## holds its WORLD position (no skate); in place it reads as a treadmill stride. Cadence is
+## matched by construction (phase advances with distance). RENDER-SIDE + deterministic:
+## a pure function of (_gait_phase, smoothed speed, delta, ground) — never wall-clock/RNG.
+func _apply_foot_lock(delta: float) -> void:
+	if not foot_lock_enabled or not grounded or skeleton == null:
+		return
+	if not (_bone_index.has(HIP_L) and _bone_index.has(FOOT_L) and _bone_index.has(ROOT_BONE)):
+		return
+	var spd := _smoothed_speed
+	# Ease foot-lock in with speed so a start/stop never pops (skate is a high-speed defect;
+	# at a near-stand the MM idle stand holds).
+	var fl_w := clampf((spd - foot_lock_min_speed) / maxf(foot_lock_full_speed - foot_lock_min_speed, 1e-3), 0.0, 1.0)
+	if fl_w <= 0.0:
+		return
+	# Measure the rest ankle (foot-bone) height once: the planted ankle sits this far above
+	# the ground surface (the sole, not the ankle joint, meets the floor).
+	if _ankle_rest_y < 0.0:
+		_ankle_rest_y = skeleton.get_bone_global_rest(_bone_index[FOOT_L]).origin.y
+
+	# Advance the gait phase by DISTANCE (nominal speed) — cadence tracks travel by construction.
+	_gait_phase = fposmod(_gait_phase + spd * delta / maxf(gait_stride, 0.05), 1.0)
+
+	# Locomotion crouch: lower the pelvis for knee-bend headroom (the rest stance is at
+	# near-full extension) and a natural lowered-COM gait. Applied before reading hip pos.
+	var ri: int = _bone_index[ROOT_BONE]
+	var root_rest: Transform3D = _rest_local[ROOT_BONE]
+	skeleton.set_bone_pose_position(ri, root_rest.origin - Vector3(0.0, gait_crouch * fl_w, 0.0))
+
+	var skel_xf := skeleton.global_transform
+	# Sagittal forward = the body's anatomical/travel forward in world. The player rig is yawed
+	# 180°, so its skeleton +Z (basis.z) points along the player's -Z travel direction — that is
+	# the forward the stance sweep must cancel (verified by rendering: the resulting stance foot
+	# holds its world position as the body advances). In the creator (no 180° yaw) basis.z is the
+	# anatomical +Z the in-place stride sweeps along. Flattened to the horizontal plane.
+	var fwd := skel_xf.basis.z
+	fwd.y = 0.0
+	if fwd.length() < 1e-4:
+		return
+	fwd = fwd.normalized()
+	var sweep := gait_stride * stance_duty   # pelvis-relative stance sweep length (m)
+
+	for side in ["L", "R"]:
+		var hip: String = HIP_L if side == "L" else HIP_R
+		var knee: String = KNEE_L if side == "L" else KNEE_R
+		var foot: String = FOOT_L if side == "L" else FOOT_R
+		var base_phase := _gait_phase if side == "L" else fposmod(_gait_phase + 0.5, 1.0)
+		var o := 0.0     # forward offset in the pelvis frame (m)
+		var lift := 0.0
+		if base_phase < stance_duty:
+			var t := base_phase / stance_duty          # 0..1 across stance
+			o = sweep * (0.5 - t)                      # +sweep/2 (front) -> -sweep/2 (back)
+		else:
+			var sp := (base_phase - stance_duty) / maxf(1.0 - stance_duty, 1e-3)
+			o = sweep * (sp - 0.5)                      # -sweep/2 -> +sweep/2 (swing forward)
+			lift = foot_lift_height * sin(PI * sp)
+		# Hip world pos (stable: the leg's parent; unaffected by the leg's own rotation).
+		var hip_w := (skel_xf * skeleton.get_bone_global_pose(_bone_index[hip])).origin
+		# Foot target: pelvis-anchored forward sweep + ground contact height. The lateral
+		# (side-to-side) placement is left to the hip's own X so the foot stays under the hip.
+		var target := hip_w + fwd * o
+		target.y = 0.0
+		var gy := _ground_y(Vector3(target.x, hip_w.y, target.z))
+		target.y = gy + _ankle_rest_y + lift
+		_ik_sagittal(hip, knee, foot, target, fwd, fl_w)
+
+
+## Ground surface Y under a world point (raycast down; falls back to the feet-plane at the
+## skeleton origin when no world / no hit). Deterministic (a physics query, no RNG).
+func _ground_y(world_pos: Vector3) -> float:
+	if _space != null:
+		var from := world_pos + Vector3.UP * ik_ray_up
+		var to := world_pos + Vector3.DOWN * (ik_ray_down + 0.5)
+		var params := PhysicsRayQueryParameters3D.create(from, to)
+		params.exclude = _ik_exclude
+		var hit := _space.intersect_ray(params)
+		if not hit.is_empty():
+			return (hit["position"] as Vector3).y
+	return skeleton.global_transform.origin.y
+
+
+## Analytic two-bone IK by DIRECTION-AIMING: solve the hip/knee joint positions in the
+## sagittal (forward/vertical) plane (law of cosines) so the ankle lands EXACTLY on
+## `target_world`, then aim each leg bone's length axis (MakeHuman bones run down local -Y)
+## along the solved world directions. Aiming by direction (not an angle-about-a-guessed-axis)
+## makes the foot reach the target regardless of the bones' rest orientation — the property
+## that actually kills the skate. Rotations are ABSOLUTE local pose, blended with the current
+## MM pose by `w`. Lateral placement follows the target's own lateral component. Deterministic.
+func _ik_sagittal(hip: String, knee: String, foot: String, target_world: Vector3, fwd: Vector3, w: float) -> void:
+	if not (_bone_index.has(hip) and _bone_index.has(knee) and _bone_index.has(foot)):
+		return
+	var hi: int = _bone_index[hip]
+	var ki: int = _bone_index[knee]
+	var skel_xf := skeleton.global_transform
+	var hip_w := (skel_xf * skeleton.get_bone_global_pose(hi)).origin
+	# Bone (rigid) lengths from the rest child offsets: knee offset from hip = upper leg;
+	# foot offset from knee = lower leg. skeleton.scale is folded in via skel_xf below.
+	var l1 := skeleton.get_bone_rest(ki).origin.length()
+	var l2 := skeleton.get_bone_rest(_bone_index[foot]).origin.length()
+	if l1 < 1e-4 or l2 < 1e-4:
+		return
+	var up := Vector3.UP
+	var lateral := fwd.cross(up).normalized()
+	var d := target_world - hip_w
+	# Project the target into the sagittal plane for the 2-bone solve (forward + vertical).
+	var df := d.dot(fwd)
+	var du := d.dot(up)
+	var d_plane := fwd * df + up * du
+	var c := clampf(d_plane.length(), 1e-3, (l1 + l2) - 1e-3)
+	var chord_hat := d_plane.normalized()
+	# Upper-leg direction: rotate the hip->ankle chord by the law-of-cosines angle about the
+	# lateral axis so the knee bulges FORWARD (verified by rendering).
+	var cos_a := clampf((l1 * l1 + c * c - l2 * l2) / (2.0 * l1 * c), -1.0, 1.0)
+	var a := acos(cos_a)
+	var upper_dir := chord_hat.rotated(lateral, a).normalized()
+	var knee_w := hip_w + upper_dir * l1
+	var lower_dir := (target_world - knee_w).normalized()
+	# Aim each bone's local -Y (its length axis) along the solved world direction. Convert the
+	# world direction into the bone's PARENT frame, then build the local rotation.
+	_aim_bone_neg_y(hi, upper_dir, skel_xf, w)
+	_aim_bone_neg_y(ki, lower_dir, skel_xf, w)
+
+
+## Set bone `bi`'s local pose rotation so its length axis (local -Y) points along the world
+## direction `dir_world`, blended from the current pose by `w`. Uses the parent's current
+## global pose so it composes correctly under the spine/pelvis pose. Roll is left to the
+## shortest-arc solution (irrelevant to foot placement). Deterministic.
+func _aim_bone_neg_y(bi: int, dir_world: Vector3, skel_xf: Transform3D, w: float) -> void:
+	var parent := skeleton.get_bone_parent(bi)
+	var parent_basis := skel_xf.basis if parent < 0 else (skel_xf * skeleton.get_bone_global_pose(parent)).basis
+	var dir_local := (parent_basis.inverse() * dir_world).normalized()
+	# local +Y -> -dir_local, so local -Y (the bone's length axis) -> dir_local.
+	var q := Quaternion(Vector3.UP, -dir_local).normalized()
+	skeleton.set_bone_pose_rotation(bi, skeleton.get_bone_pose_rotation(bi).slerp(q, w).normalized())
 
 
 ## Deterministic breathing / weight-shift micro-motion as a small LOCAL rotation

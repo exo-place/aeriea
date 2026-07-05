@@ -264,6 +264,49 @@ var _image_format: String = "png"
 ## restore itself don't autosave the default over a saved character before it is loaded, §6).
 var _persistence_armed: bool = false
 
+# ---------------------------------------------------------------------------
+# ANIMATION PREVIEW (full-body). The creator is the ONLY "see my character move" surface
+# (no in-world mirror yet), so the body is DRIVEN every frame by BodyRig's real animation
+# stack rather than held in bind: Motion-Matching for locomotion (Idle/Walk/Run in place,
+# so the walk/run cycle plays full-body while the body stays centred for orbit) and the
+# BDCC2 clip layer for authored gestures/idles (an upper-body overlay stamped over the MM
+# idle base, so the LEGS stand+breathe from the idle while the arms/torso do the gesture —
+# the whole body is alive, never a frozen pose). Switching an entry uses the rig's built-in
+# eases (MM speed lerp; clip-to-clip crossfade; overlay weight fade), so it never pops.
+#
+# The picker exposes: Idle / Walk / Run (locomotion) + every authored ClipDB gesture/idle
+# that the upper-body overlay can render (the lower-body "sit" pose is deliberately omitted —
+# an upper-body overlay would sit the torso while the legs stand, which reads as broken).
+var _anim_panel: Control                 ## the animation-selector panel (toggled from the top bar)
+var _anim_entries: Array = []            ## [{label, kind:"loco"|"clip", speed, id, btn}, ...]
+var _anim_selected: int = 0              ## index into _anim_entries of the playing entry
+var _preview_speed: float = 0.0          ## synthetic locomotion speed fed to the rig each frame
+
+## Plain-language labels for the authored BDCC2 clips (ClipDB ids -> what a player reads). Only
+## ids listed here are offered in the picker: this both de-jargons the mined names AND acts as the
+## allow-list that keeps lower-body/full-body poses (e.g. "sit") out of the upper-body overlay
+## preview, where they would render a broken half-pose.
+const ANIM_CLIP_LABELS := {
+	"idle": "Idle sway",
+	"idle_long": "Idle (relaxed)",
+	"idle_long_idle": "Idle (weight shift)",
+	"idle_sexy": "Idle (sultry)",
+	"wave": "Wave",
+	"head_nod": "Nod",
+	"head_shake": "Shake head",
+	"talking": "Talk (both hands)",
+	"talking_one": "Talk (one hand)",
+	"shrug": "Shrug",
+	"sigh": "Sigh",
+	"look_away": "Look away",
+	"happy_hands": "Cheer",
+	"thinking": "Thinking",
+}
+## Locomotion preview entries: label + the synthetic in-place speed (m/s) fed to Motion-Matching.
+## Idle=0 resolves the captured stand; Walk/Run drive the gait cycle full-body (the body stays
+## centred — the rig supplies orientation only, so the cycle plays in place for the orbit view).
+const ANIM_LOCO_ENTRIES := [["Idle", 0.0], ["Walk", 1.6], ["Run", 5.0]]
+
 
 func _ready() -> void:
 	# Build-time gate (§8 #11b): neutral ∈ [a,b] for EVERY control (authored + derived).
@@ -360,23 +403,33 @@ func _build_environment() -> void:
 
 
 func _build_body() -> void:
-	# The real player body, in the authored rest/bind pose. BodyRig.build() (run
-	# from its _ready) constructs the Skeleton3D + skinned mesh and leaves every
-	# bone at its rest pose — a clean neutral stand. We deliberately do NOT call
-	# set_movement_state / apply_pose / setup_ik: this is a static viewer, so the
-	# locomotion + Motion-Matching driver stays detached and the body holds bind.
+	# The real player body, DRIVEN by BodyRig's animation stack. This is the player's only
+	# "see my character move" surface (no in-world mirror yet), so the creator attaches the
+	# locomotion + clip layer and calls apply_pose(delta) every frame (see _process) rather
+	# than holding the static bind pose. Motion-Matching drives Idle/Walk/Run in place; the
+	# BDCC2 clip layer overlays authored gestures/idles on top (see the animation picker).
 	_rig = BodyRig.new()
 	_rig.name = "BodyRig"
-	# Disable the procedural-cycle entry points by leaving them unused; also turn
-	# off MM so even an accidental apply_pose call would not contort the stand.
-	_rig.use_motion_matching = false
-	_rig.foot_ik_enabled = false
+	# Motion-Matching ON (the locomotion driver) + foot-IK enabled for the procedural
+	# fallback; under MM the foot-IK solver is skipped (the captured clips carry ground
+	# contact), so this is harmless when the MM DB is present. clip_stand_speed=0 disables
+	# the auto idle-fidget scheduler so the PICKER is authoritative — a selected entry keeps
+	# playing instead of the body randomly fidgeting out of it.
+	_rig.use_motion_matching = true
+	_rig.foot_ik_enabled = true
+	_rig.clip_stand_speed = 0.0
 	# Drive the rig with THIS creator's BodyState (the single source of truth the
 	# sliders edit). BodyRig already holds a per-instance mesh copy and morphs through
 	# the correct-normals CPU bake (apply_body_state), so the creator no longer
 	# duplicates or bakes itself — it just edits the shared record and re-applies it.
 	_rig.body_state = _body_state
 	add_child(_rig)
+	# Wire foot-IK to the creator's world (the ground plane) so the procedural fallback plants
+	# feet if the MM DB is ever absent. Under MM this space is unused (foot-IK is skipped), but
+	# wiring it keeps the graceful-degradation path correct. Exclude nothing (no player body here).
+	var world := get_world_3d()
+	if world != null:
+		_rig.setup_ik(world.direct_space_state, [])
 
 
 ## Build the drag-to-modify core: the MorphDrag accel structure (per-render-vertex ->
@@ -530,6 +583,14 @@ func _recenter_pivot() -> void:
 ## Free-fly is ADDITIVE — it moves both the camera and the orbit pivot together so the next
 ## orbit/pan/zoom keeps working from the new vantage (the spherical relationship is preserved).
 func _process(delta: float) -> void:
+	# Drive the body's animation stack every frame (the full-body preview). set_movement_state
+	# feeds the synthetic locomotion speed the picker chose (0 = stand for Idle / for a gesture
+	# whose legs come from the idle base); apply_pose advances MM + the clip overlay + micro-life.
+	# The rig supplies bone ORIENTATION only (rest positions kept), so Walk/Run cycle in place and
+	# the body stays centred for the orbit camera.
+	if _rig != null:
+		_rig.set_movement_state(true, _preview_speed)
+		_rig.apply_pose(delta)
 	if _camera == null:
 		return
 	# Handles are screen-projected from world anchors, so any camera move (orbit/pan/zoom/fly) or
@@ -1258,6 +1319,7 @@ func _build_ui() -> void:
 	# undo/redo icons are REMOVED — the single ⤺ History affordance + Ctrl-Z/Ctrl-Shift-Z cover it.)
 	_build_history_panel(canvas)
 	_build_legend_panel(canvas)
+	_build_anim_panel(canvas)
 	# Render the initial (no-focus) contextual surface: dock hidden, breadcrumb empty.
 	_refresh_dock()
 	_apply_state()
@@ -1313,6 +1375,13 @@ func _build_top_bar(canvas: CanvasLayer) -> void:
 	hist_btn.tooltip_text = "Show the edit history (H)"
 	hist_btn.pressed.connect(_toggle_history_panel)
 	row.add_child(hist_btn)
+
+	# Animate — opens the animation-preview picker (Idle/Walk/Run + authored gestures/idles).
+	var anim_btn := Button.new()
+	anim_btn.text = "Animate"
+	anim_btn.tooltip_text = "Preview an animation on the body (movement or a gesture)"
+	anim_btn.pressed.connect(_toggle_anim_panel)
+	row.add_child(anim_btn)
 
 	# Mirror (symmetric edits) — a plain, always-reachable top-bar toggle (§5.1), default ON. Was a
 	# row in the dissolved Advanced popup; it is a real labeled control, not buried behind a popup.
@@ -1900,6 +1969,106 @@ func _build_legend_panel(canvas: CanvasLayer) -> void:
 func _update_legend_visibility() -> void:
 	if _legend_panel != null:
 		_legend_panel.visible = _legend_pinned or _ctrl_down
+
+
+# ---------------------------------------------------------------------------
+# ANIMATION PREVIEW PANEL — the picker. A transient card (like the history panel), anchored
+# top-left below the top bar, HIDDEN until the top-bar "Animate" button opens it. It lists the
+# previewable animations as a single radio group (ButtonGroup): the three locomotion states
+# (Idle/Walk/Run) then every authored gesture/idle clip the upper-body overlay can render. The
+# body animates whether the panel is open or not — opening it just exposes the choice.
+# ---------------------------------------------------------------------------
+func _build_anim_panel(canvas: CanvasLayer) -> void:
+	_anim_panel = PanelContainer.new()
+	_anim_panel.name = "AnimPanel"
+	_anim_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_anim_panel.position = Vector2(16, 56)   # below the top bar; same slot family as History
+	_anim_panel.custom_minimum_size = Vector2(210, 0)
+	_anim_panel.visible = false
+	canvas.add_child(_anim_panel)
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 4)
+	_anim_panel.add_child(vbox)
+
+	var hdr := Label.new()
+	hdr.text = "Animation preview"
+	hdr.add_theme_font_size_override("font_size", 12)
+	vbox.add_child(hdr)
+
+	var group := ButtonGroup.new()
+
+	# Locomotion (Idle / Walk / Run) — plays in place so the gait cycle is visible on the orbit body.
+	var loco_hdr := Label.new()
+	loco_hdr.text = "Movement"
+	loco_hdr.add_theme_font_size_override("font_size", 10)
+	vbox.add_child(loco_hdr)
+	for row in ANIM_LOCO_ENTRIES:
+		_add_anim_button(vbox, group, String(row[0]), "loco", float(row[1]), "")
+
+	# Authored gestures / idles — the BDCC2 clip library (upper-body overlay over the idle base).
+	var clip_hdr := Label.new()
+	clip_hdr.text = "Gestures & idles"
+	clip_hdr.add_theme_font_size_override("font_size", 10)
+	vbox.add_child(clip_hdr)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 220)   # a bounded, scrollable list (~14 clips)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vbox.add_child(scroll)
+	var clip_box := VBoxContainer.new()
+	clip_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(clip_box)
+	if _rig != null and _rig.clip_db != null:
+		for id in _rig.clip_db.clip_ids:
+			var cid := String(id)
+			if not ANIM_CLIP_LABELS.has(cid):
+				continue   # allow-list: keep lower-body poses (sit) out of the upper-body overlay
+			_add_anim_button(clip_box, group, String(ANIM_CLIP_LABELS[cid]), "clip", 0.0, cid)
+
+	# Open on Idle: press its button (visual) and select it (drives the rig). Idle is entry 0.
+	if not _anim_entries.is_empty():
+		(_anim_entries[0]["btn"] as Button).set_pressed_no_signal(true)
+		_select_anim(0)
+
+
+## Add one radio entry to the picker: a toggle Button in the shared group, recording the entry
+## (label + kind + locomotion speed / clip id) and wiring its press to _select_anim.
+func _add_anim_button(parent: Control, group: ButtonGroup, label: String, kind: String,
+		speed: float, id: String) -> void:
+	var b := Button.new()
+	b.text = label
+	b.toggle_mode = true
+	b.button_group = group
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.add_theme_font_size_override("font_size", 11)
+	var idx := _anim_entries.size()
+	b.pressed.connect(func() -> void: _select_anim(idx))
+	_anim_entries.append({"label": label, "kind": kind, "speed": speed, "id": id, "btn": b})
+	parent.add_child(b)
+
+
+## Play the selected animation entry FULL-BODY, looping, on the orbit body:
+##   - locomotion (Idle/Walk/Run): ease out any active gesture (stop_clip) and set the synthetic
+##     in-place speed; MM resolves the stand / gait cycle and _process feeds it each frame.
+##   - authored clip: stand the legs (speed 0 → MM idle base) and play the clip looping. The clip
+##     layer stamps the upper body over that idle base, so legs+torso+arms are all alive. play_clip
+##     crossfades from any already-playing clip so the switch eases rather than pops.
+func _select_anim(i: int) -> void:
+	if i < 0 or i >= _anim_entries.size() or _rig == null:
+		return
+	_anim_selected = i
+	var e: Dictionary = _anim_entries[i]
+	if String(e["kind"]) == "loco":
+		_rig.stop_clip()
+		_preview_speed = float(e["speed"])
+	else:
+		_preview_speed = 0.0
+		_rig.play_clip(String(e["id"]), true)
+
+
+## Toggle the animation-preview picker's visibility (the top-bar "Animate" button).
+func _toggle_anim_panel() -> void:
+	if _anim_panel != null:
+		_anim_panel.visible = not _anim_panel.visible
 
 
 # ---------------------------------------------------------------------------

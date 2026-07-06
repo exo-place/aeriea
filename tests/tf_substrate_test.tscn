@@ -1,6 +1,0 @@
-[gd_scene load_steps=2 format=3 uid="uid://tf_substrate_test_v1"]
-
-[ext_resource type="Script" path="res://tests/tf_substrate_test.gd" id="1_tfsub"]
-
-[node name="TFSubstrateTest" type="Node"]
-script = ExtResource("1_tfsub")

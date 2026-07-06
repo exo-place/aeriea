@@ -42,10 +42,10 @@ static func util_module() -> Dictionary:
 		"defs": {
 			# Linear interpolate a..b by t.
 			"lerp": ["fn", ["a", "b", "t"],
-				["+", "a", ["*", ["-", "b", "a"], "t"]]],
+				["+", ["var", "a"], ["*", ["-", ["var", "b"], ["var", "a"]], ["var", "t"]]]],
 			# A predicate closure: part -> (part.field[k] == v).
 			"field-eq": ["fn", ["k", "v"],
-				["fn", ["p"], ["==", ["part-field", "p", "k"], "v"]]],
+				["fn", ["p"], ["==", ["part-field", ["var", "p"], ["var", "k"]], ["var", "v"]]]],
 		},
 	}
 
@@ -54,15 +54,15 @@ static func util_module() -> Dictionary:
 static func core_module() -> Dictionary:
 	# Advance progress by rate (clamped to 1) and interpolate the named field.
 	var advance := ["fn", ["tr"],
-		["let", [["p2", ["min", 1.0, ["+", ["get", "tr", "prog"], ["get", "tr", "rate"]]]]],
+		["let", [["p2", ["min", 1.0, ["+", ["get", ["var", "tr"], "prog"], ["get", ["var", "tr"], "rate"]]]]],
 			["record",
-				"transition", ["record-set", "tr", "prog", "p2"],
+				"transition", ["record-set", ["var", "tr"], "prog", ["var", "p2"]],
 				"fields", ["record",
-					["get", "tr", "field"],
-					["call", "lerp", ["get", "tr", "from"], ["get", "tr", "to"], "p2"]]]]]
+					["get", ["var", "tr"], "field"],
+					["call", ["var", "lerp"], ["get", ["var", "tr"], "from"], ["get", ["var", "tr"], "to"], ["var", "p2"]]]]]]
 
 	# A frozen result: transition unchanged, no field writes.
-	var frozen := ["record", "transition", "tr", "fields", ["record"]]
+	var frozen := ["record", "transition", ["var", "tr"], "fields", ["record"]]
 
 	return {
 		"imports": [{"from": "lib:tf-util", "import": ["lerp", "field-eq"]}],
@@ -71,49 +71,90 @@ static func core_module() -> Dictionary:
 
 			# CASE 1 & 2 — gradual / parallel accrual.
 			"accrue": ["fn", ["part", "root", "tr", "seed", "coord", "idx", "ntrans"],
-				["call", "advance", "tr"]],
+				["call", ["var", "advance"], ["var", "tr"]]],
 
 			# CASE 3 — pausable: decline to advance while the part's `held` field holds.
 			"accrue_pausable": ["fn", ["part", "root", "tr", "seed", "coord", "idx", "ntrans"],
-				["if", ["part-field", "part", "held", false],
+				["if", ["part-field", ["var", "part"], "held", false],
 					frozen,
-					["call", "advance", "tr"]]],
+					["call", ["var", "advance"], ["var", "tr"]]]],
 
 			# CASE 4 — pause ONLY when most recent (recency = list position: idx==ntrans-1).
 			# Advances prog only (no field write); freezes when held AND most recent.
 			"accrue_recent": ["fn", ["part", "root", "tr", "seed", "coord", "idx", "ntrans"],
-				["if", ["and", ["part-field", "part", "held", false], ["==", "idx", ["-", "ntrans", 1]]],
+				["if", ["and", ["part-field", ["var", "part"], "held", false], ["==", ["var", "idx"], ["-", ["var", "ntrans"], 1]]],
 					frozen,
 					["record",
-						"transition", ["record-set", "tr", "prog",
-							["min", 1.0, ["+", ["get", "tr", "prog"], ["get", "tr", "rate"]]]],
+						"transition", ["record-set", ["var", "tr"], "prog",
+							["min", 1.0, ["+", ["get", ["var", "tr"], "prog"], ["get", ["var", "tr"], "rate"]]]],
 						"fields", ["record"]]]],
 
 			# CASE 5 — cross-part by field: read a breast's size (kind-match) and write thickness.
 			"track_breast": ["fn", ["part", "root", "tr", "seed", "coord", "idx", "ntrans"],
-				["let", [["b", ["find-first", "root", ["call", "field-eq", "kind", "breast"]]]],
+				["let", [["b", ["find-first", ["var", "root"], ["call", ["var", "field-eq"], "kind", "breast"]]]],
 					["record",
-						"transition", "tr",
-						"fields", ["if", ["==", "b", null],
+						"transition", ["var", "tr"],
+						"fields", ["if", ["==", ["var", "b"], null],
 							["record"],
 							["record",
-								["get", "tr", "field"],
-								["*", ["part-field", "b", "size", 0.0], ["get", "tr", "factor"]]]]]]],
+								["get", ["var", "tr"], "field"],
+								["*", ["part-field", ["var", "b"], "size", 0.0], ["get", ["var", "tr"], "factor"]]]]]]],
 
 			# CASE 7 — probabilistic: with probability p, bump a counter. Draw keyed off
 			# (seed, mix2(coord, draw-counter)); the counter persists in the transition so
 			# successive ticks draw fresh, replay-exactly.
 			"maybe_grow": ["fn", ["part", "root", "tr", "seed", "coord", "idx", "ntrans"],
 				["let", [
-						["d", ["get", "tr", "_draws"]],
-						["c2", ["mix2", "coord", "d"]],
-						["hit", ["chance", "seed", "c2", ["get", "tr", "p"]]]],
+						["d", ["get", ["var", "tr"], "_draws"]],
+						["c2", ["mix2", ["var", "coord"], ["var", "d"]]],
+						["hit", ["chance", ["var", "seed"], ["var", "c2"], ["get", ["var", "tr"], "p"]]]],
 					["record",
 						"transition", ["record-set",
-							["record-set", "tr", "_draws", ["+", "d", 1]],
+							["record-set", ["var", "tr"], "_draws", ["+", ["var", "d"], 1]],
 							"count",
-							["if", "hit", ["+", ["get", "tr", "count"], 1], ["get", "tr", "count"]]],
+							["if", ["var", "hit"], ["+", ["get", ["var", "tr"], "count"], 1], ["get", ["var", "tr"], "count"]]],
 						"fields", ["record"]]]],
+
+			# CASE 8 — STRUCTURAL MUTATION: grow a tail. This rides on a TORSO and,
+			# once, GRAFTS a tail child through the engine's `structural` return
+			# channel — the discrete-TOPOLOGY half of the discrete×continuous split.
+			# The grafted tail carries a plain "size" field at 0.0 PLUS its own
+			# `accrue` magnitude transition (the continuous half), so the tail
+			# "grows in" 0→target over subsequent ticks rather than popping full.
+			# Idempotent by structure: if a tail already hangs below the torso it
+			# freezes (no further graft), so replaying more ticks adds no duplicate.
+			# SEED is load-bearing: the tail's target `to` is a SEEDED DRAW off
+			# (seed, coord) — different seeds grow the tail to a different size.
+			# §D [OPEN] note: that draw uses coord = mix2(part-index, ti); grafting
+			# elsewhere in the body would shift this torso's part-index and reshuffle
+			# the draw. Replay stays exact (positions reproduce); stream-stability
+			# under rearrange is the unresolved §D thread, deliberately not fixed.
+			"grow_tail": ["fn", ["part", "root", "tr", "seed", "coord", "idx", "ntrans"],
+				["let", [["existing",
+						["find-first", ["var", "part"],
+							["fn", ["p"], ["==", ["part-field", ["var", "p"], "kind"], "tail"]]]]],
+					["if", ["!=", ["var", "existing"], null],
+						frozen,
+						["record",
+							"transition", ["var", "tr"],
+							"fields", ["record"],
+							"structural", ["array",
+								["record",
+									"op", "graft",
+									"node", ["record",
+										"fields", ["record",
+											"kind", "tail",
+											"size", 0.0,
+											"transitions", ["array",
+												["record",
+													# "accrue" is a bare string — STRING LITERAL under the
+													# correct semantics (bare != var lookup). No __lit needed.
+													"kind", "accrue",
+													"field", "size",
+													"from", 0.0,
+													"to", ["+", 6.0, ["*", 6.0, ["draw-unit", ["var", "seed"], ["var", "coord"]]]],
+													"rate", 0.15,
+													"prog", 0.0]]]]]]]]]],
 		},
 	}
 

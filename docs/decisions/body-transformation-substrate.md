@@ -9,7 +9,8 @@ ordinary expressions.
 **Status: EXPERIMENTAL — built, not user-certified, Not green.** A working substrate
 now exists in `scripts/sim/tf/` (`tf_part.gd`, `tf_tree.gd`, `tf_rng.gd`,
 `tf_marinada.gd`, `tf_library.gd`, `tf_engine.gd`) and is wired into the canonical
-runner as `tf_substrate_test` (8 cases, evaluator conformance + 7 contract cases). No
+runner as `tf_substrate_test` (9 cases, evaluator conformance + 8 contract cases, the
+last being structural mutation — grow-a-tail via graft + magnitude transition). No
 game surface depends on it yet and the user has not verified it. Do not treat it as
 settled; see `scripts/sim/tf/README.md` for the code-level account this doc summarizes.
 
@@ -120,6 +121,33 @@ tested and working but **not** user-certified; a later pass may change any of th
   each field into `part.fields` in place. Marinada stays pure; the engine owns mutation
   and order. (There is no same-property fold and no priority override — within a tick
   the last writer in eval order wins; see Section E.)
+- **[AS-BUILT] Structural mutation — the `structural` return channel.** The result record
+  may carry an OPTIONAL third key, `structural`: a plain-data Array of tree-edit
+  descriptions the engine applies via `TFPart.add_child` / `detach`. This is the
+  discrete-TOPOLOGY half of the topology(discrete) × magnitude(continuous) split
+  (`dynamical-transformation.md`): a part "grows in" as a discrete
+  graft-at-zero-extent PLUS a continuous magnitude transition on the new part, never a
+  half-existing part. Edit ops: `graft` (build a node-spec and add it under `at`,
+  default the host part), `detach` (structural remove), `reparent` (detach then re-add
+  under `to`); `part`/`at`/`to` are opaque TFPart handles from tree queries. A node-spec
+  is `{ "fields": <bag, may include a "transitions" Array>, "children": [ … ] }`,
+  materialized with fields deep-copied so grafts never alias the authored description.
+  New parts are grafted OUTSIDE the tick's pre-order snapshot, so they first tick next
+  tick (the transition-appended-this-tick discipline); edits apply in pre-order ×
+  list-order, so replay is exact. `apply_action` grows twin authoring ops
+  `graft`/`detach`, but the return channel is the primary path. `merge`/`split`
+  (transformation-system.md §4.2) are DEFERRED — they compose from graft/detach/reparent
+  plus field writes; the three built ops prove the mechanism. Marinada stays PURE: it
+  returns a plain-data DESCRIPTION, the engine performs the edit. Proven by
+  `tf_substrate_test` case 8 (grow-a-tail). **Transition `kind` as a bare string
+  literal:** under the correct marinada semantics a bare string ALWAYS evaluates to
+  itself — it is a string literal, never a variable reference. So a transition `kind`
+  authored as a bare `"accrue"` inside `lib:tf-core` yields the literal string "accrue"
+  even though `accrue` is also a bound module def. Variable references are the EXPLICIT
+  `["var", name]` form. `["__lit", v]` is kept as a deprecated backward-compat alias
+  (evaluates to `v` identically to a bare string); it is not the authoring path. The
+  engine guards non-String or unrecognized `kind` values with `push_error` so silent
+  misfires surface immediately.
 - **[AS-BUILT] The seeded-draw coordinate scheme.** `tf_rng.gd` is a seeded,
   coordinate-keyed splitmix64-style draw (`mix2`, `draw-int`, `draw-unit`, `chance`).
   The engine binds `seed` and a base `coord = mix2(part-index, transition-index)` into
@@ -174,6 +202,11 @@ tested and working but **not** user-certified; a later pass may change any of th
   restructuring. If restructure-stable randomness is ever wanted (e.g. a growth that must
   keep drawing the same series after the body is rearranged around it), that is a real
   design question needing an author-supplied stable coordinate — deferred, not decided.
+  This is now concretely exercised: the structural `graft` channel (above) inserts parts
+  and so shifts pre-order indices; `tf_engine.gd`'s tick marks the exact line where
+  `coord` picks up the shifted index, and `grow_tail` notes it. Replay stays exact
+  (case 8 asserts `deep_equals` under same seed+log); only stream-stability across a
+  rearrange remains open.
 - **[OPEN] The `record`-constructor upstream form (flat vs paired).** The local
   extension uses a flat `["record", k, v, k, v, ...]`. Whether marinada should adopt a
   flat or a paired (`[[k, v], ...]`) record literal upstream is the user's

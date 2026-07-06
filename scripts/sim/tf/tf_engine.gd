@@ -14,10 +14,29 @@
 ## and the definition RETURNS a pure result record — marinada stays pure, the
 ## ENGINE owns mutation and eval order:
 ##
-##     { "transition": <new transition record>, "fields": <record field -> value> }
+##     { "transition": <new transition record>,
+##       "fields":     <record field -> value>,
+##       "structural": <optional Array of structural-edit records> }
 ##
-## The engine replaces the transition-list entry with `transition` and writes each
-## `fields` entry into `part.fields` IN PLACE.
+## The engine replaces the transition-list entry with `transition`, writes each
+## `fields` entry into `part.fields` IN PLACE, and — the STRUCTURAL channel — applies
+## each `structural` edit (add/remove/move a subtree) via TFPart's own add_child /
+## detach. This is the discrete-TOPOLOGY half of the topology(discrete) ×
+## magnitude(continuous) split (docs/decisions/dynamical-transformation.md): a part
+## "grows in" as a discrete graft-at-zero-extent PLUS a continuous magnitude
+## transition on the new part — never a half-existing part. Marinada stays PURE:
+## it returns a plain-data DESCRIPTION of the edit; the engine (here) performs it.
+## The common no-structural-op path is unchanged: absent `structural`, nothing runs.
+##
+## Structural edit records (each a plain dict; `part`/`at`/`to` are opaque TFPart
+## handles from tree queries, defaulting to the transition's own host part):
+##   { "op": "graft",    "node": <node-spec>, "at":   <TFPart?> }  — build node-spec, add as child of `at`
+##   { "op": "detach",                         "part": <TFPart?> }  — structural remove
+##   { "op": "reparent", "to":   <TFPart>,     "part": <TFPart?> }  — detach then re-add under `to`
+## A node-spec is plain data describing a new subtree, materialized by `_materialize`:
+##   { "fields": <field bag, may include a "transitions" Array>, "children": [ node-spec, ... ] }
+## (merge / split from transformation-system.md §4.2 are DEFERRED — graft/detach/
+## reparent prove the mechanism; merge/split compose from these plus field writes.)
 ##
 ## A TICK evaluates every active transition in one DETERMINISTIC TOTAL ORDER:
 ## parts in tree PRE-ORDER, and within a part its transition list in order. Fields
@@ -50,11 +69,26 @@ static func tick(root: TFPart, library: Dictionary, seed: int = 0) -> void:
 		for ti in range(n):
 			var tr: Dictionary = trans[ti]
 			var kind: Variant = tr.get("kind")
-			if not library.has(kind):
+			# LOUD GUARD: a transition whose `kind` is not a String, or names no
+			# library definition, silently never fires — a whole authored
+			# transition going dark with no signal (exactly the failure the old
+			# str-concat/__lit literal-quote confusion produced). Report it by
+			# name instead of swallowing it. Report-only: valid programs never
+			# reach this branch, so replay results are unchanged.
+			if not (kind is String) or not library.has(kind):
+				push_error("TFEngine.tick: transition kind %s has no library definition (String naming a lib:tf-core def expected) — transition will NOT fire" % str(kind))
 				continue
+			# §D [OPEN] draw-stream identity bites HERE: `coord` keys off `pi`, the
+			# part's index in THIS tick's pre-order. A structural edit (graft/detach/
+			# reparent) that changes how many parts sort before this one shifts `pi`
+			# next tick, so a stochastic transition's draw series reshuffles under
+			# restructuring. Replay is still EXACT (same seed+log reproduces the same
+			# pre-order, hence the same coords); only "this part's stream is stable
+			# across a rearrange" is what §D does not yet guarantee. Not fixed here.
 			var coord := TFRng.mix2(pi, ti)
-			# Pure evaluation returns the new transition + field writes; the engine
-			# performs the in-place mutation, keeping marinada pure.
+			# Pure evaluation returns the new transition + field writes (+ optional
+			# structural edits); the engine performs the in-place mutation, keeping
+			# marinada pure.
 			var result: Variant = TFMarinada.apply(library[kind], [part, root, tr, seed, coord, ti, n])
 			if result is Dictionary:
 				trans[ti] = result.get("transition", tr)
@@ -62,6 +96,64 @@ static func tick(root: TFPart, library: Dictionary, seed: int = 0) -> void:
 				if writes is Dictionary:
 					for f in writes:
 						part.fields[f] = writes[f]
+				# STRUCTURAL channel: apply described tree edits in eval order. New
+				# parts grafted this tick are NOT in `order` (snapshotted above), so
+				# they first tick NEXT tick — the same discipline as transitions
+				# appended this tick. Applied in pre-order × list-order ⇒ replayable.
+				var edits: Variant = result.get("structural")
+				if edits is Array:
+					_apply_structural(part, edits)
+
+
+# ---------------------------------------------------------------------------
+# Structural mutation — the discrete-TOPOLOGY channel (see class doc).
+# Marinada returns plain-data edit DESCRIPTIONS; these apply them via TFPart's
+# own add_child / detach. Used by both the tick's `structural` return channel and
+# the `graft` / `detach` authoring actions below, so the two paths edit the tree
+# through exactly one implementation.
+# ---------------------------------------------------------------------------
+
+## Build a live subtree from a plain-data node-spec:
+##   { "fields": <field bag — may include a "transitions" Array>, "children": [ node-spec, ... ] }
+## Fields are DEEP-COPIED so the new part never aliases the (possibly shared)
+## authored description — each graft yields an independent part with its own
+## progress. A grafted part carrying a magnitude transition in its "transitions"
+## field is the continuous half of "grows in": it starts small and accrues up.
+static func _materialize(spec: Dictionary) -> TFPart:
+	var p := TFPart.new()
+	p.fields = TFPart._deep_copy_value(spec.get("fields", {}))
+	for cspec in spec.get("children", []):
+		p.add_child(_materialize(cspec))
+	return p
+
+
+## Apply a list of structural-edit records to `host` (the transition's own part is
+## the default target when an edit omits its part/at handle).
+static func _apply_structural(host: TFPart, edits: Array) -> void:
+	for e in edits:
+		if not (e is Dictionary):
+			continue
+		match e.get("op"):
+			"graft":
+				var at: Variant = e.get("at")
+				if at == null:
+					at = host
+				(at as TFPart).add_child(_materialize(e.get("node", {})))
+			"detach":
+				var tgt: Variant = e.get("part")
+				if tgt == null:
+					tgt = host
+				(tgt as TFPart).detach()
+			"reparent":
+				var mv: Variant = e.get("part")
+				if mv == null:
+					mv = host
+				var to: Variant = e.get("to")
+				if to != null:
+					(mv as TFPart).detach()
+					(to as TFPart).add_child(mv)
+			_:
+				push_error("TFEngine._apply_structural: unknown structural op %s" % str(e.get("op")))
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +184,15 @@ static func _targets(root: TFPart, where: Dictionary) -> Array:
 ##   {"op": "set_field", "where": …, "field": …, "value": …}
 ##   {"op": "start", "where": …, "transition": {…}}     — append a transition
 ##   {"op": "stop",  "where": …, "kind": "…"}           — drop transitions of kind
+##   {"op": "graft", "where": …, "node": {…}}           — add a materialized subtree as a child
+##   {"op": "detach","where": …}                        — structurally remove the matched parts
+##
+## graft/detach are the authoring-layer twins of the tick's `structural` return
+## channel (they share `_materialize` / TFPart.detach). The RETURN channel is the
+## primary path — "a transformation adds a part" means a transformation, mid-tick,
+## returns a graft — while these actions let a plain log author the same edits
+## directly. (reparent-as-action is deferred: a plain `where` clause can't name the
+## new-parent target; the tick channel, which has opaque handles, covers reparent.)
 static func apply_action(root: TFPart, action: Dictionary, library: Dictionary, seed: int) -> void:
 	match action.get("op"):
 		"tick":
@@ -112,6 +213,13 @@ static func apply_action(root: TFPart, action: Dictionary, library: Dictionary, 
 						if tr.get("kind") != kind:
 							keep.append(tr)
 					p.fields["transitions"] = keep
+		"graft":
+			for p in _targets(root, action.get("where", {})):
+				p.add_child(_materialize(action["node"]))
+		"detach":
+			# Collect first: detaching mutates the tree the query walked.
+			for p in _targets(root, action.get("where", {})):
+				p.detach()
 		_:
 			push_error("TFEngine.apply_action: unknown op %s" % str(action.get("op")))
 

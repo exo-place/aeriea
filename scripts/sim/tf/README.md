@@ -34,6 +34,58 @@ each `fields` entry into `part.fields` in place. Marinada stays pure; the engine
 mutation and evaluation order. Each definition is a lambda over the fixed tuple
 `(part, root, tr, seed, coord, idx, ntrans)` — see `tf_library.gd`.
 
+**Structural mutation is a third, OPTIONAL return channel** — `structural`. The same result
+record may carry a `structural` key: a plain-data Array of tree-edit DESCRIPTIONS the engine
+applies (add/remove/move a subtree) via `TFPart.add_child` / `detach`. Marinada still returns
+only plain data; the engine performs the edit. This is the discrete-TOPOLOGY half of the
+topology(discrete) × magnitude(continuous) split (`dynamical-transformation.md`): a part
+"grows in" as a discrete graft-at-zero-extent PLUS a continuous magnitude transition riding on
+the new part — never a half-existing part. The common no-structural path is unchanged: absent
+`structural`, nothing extra runs.
+
+    { "transition": <new transition record>,
+      "fields":     <field-name -> new value>,
+      "structural": <Array of edit records — OPTIONAL> }
+
+Each edit is a plain dict; `part`/`at`/`to` are opaque TFPart handles (from tree queries),
+defaulting to the transition's own host part when omitted:
+
+    { "op": "graft",    "node": <node-spec>, "at":   <TFPart?> }  — build node-spec, add as child of `at`
+    { "op": "detach",                         "part": <TFPart?> }  — structural remove
+    { "op": "reparent", "to":   <TFPart>,     "part": <TFPart?> }  — detach then re-add under `to`
+
+A **node-spec** is plain data describing a new subtree, materialized by `TFEngine._materialize`
+(fields deep-copied so grafts never alias the authored description):
+
+    { "fields": <field bag — may include a "transitions" Array>, "children": [ node-spec, ... ] }
+
+A grafted part whose `fields["transitions"]` holds a magnitude transition (e.g. `accrue` on
+`size` from 0) is the continuous half of "grows in". New parts grafted this tick are NOT in the
+tick's pre-order snapshot, so they first tick NEXT tick — the same discipline as transitions
+appended this tick. Applied in pre-order × list-order ⇒ fully replayable. `merge` / `split`
+(transformation-system.md §4.2) are DEFERRED — graft/detach/reparent prove the mechanism and
+merge/split compose from them plus field writes. The authoring layer has twin actions
+`{"op":"graft",…}` / `{"op":"detach",…}` on `apply_action` (sharing `_materialize`), but the
+RETURN channel is primary: "a transformation adds a part" means a transformation, mid-tick,
+returns a graft.
+
+**Transition `kind` is a string literal** — a transition's `kind` field must be the literal
+definition-name string (e.g. `"accrue"`). Under the correct semantics a bare `"accrue"` IS
+already a string literal — it evaluates to itself, never to the `accrue` closure. So `grow_tail`
+authors the grafted transition kind as the bare string `"accrue"` directly; no `__lit` wrapper
+is needed. The `["__lit", v]` form is kept as a deprecated alias only (it still evaluates to
+`v` identically to a bare string). Variable references — the accrue closure when called as a
+function — use `["var", "accrue"]`; that is a separate, explicit form that never appears in a
+`kind` field. The engine guards against non-String or unrecognized kinds with `push_error`.
+
+**§D [OPEN] draw-stream identity under restructuring** — a stochastic transition's `coord`
+keys off `mix2(part-index, transition-index)`, and `part-index` is the part's slot in the
+tick's pre-order. A graft/detach/reparent that changes how many parts sort before a given part
+shifts its index next tick, reshuffling its draw series. Replay stays EXACT (same seed+log ⇒
+same pre-order ⇒ same coords), so determinism holds; only "this part's stream is stable across
+a rearrange" is what §D does not yet guarantee. Deliberately NOT fixed here (see
+`tf_engine.gd` tick comment where `coord` is computed, and `grow_tail`'s note).
+
 **Progress is accumulated plain state.** A part's active transitions live in an ordinary
 field `fields["transitions"]` — a plain Array of plain dicts. Appending starts one; list
 position is recency (last = most recent, exposed to the definition as `idx == ntrans-1`).
@@ -86,15 +138,19 @@ never a global stream. Same seed + same log ⇒ identical draws; a different see
 
 Authority: `/home/me/git/rhizone/dusklight/docs/marinada.md`. We implement the pure
 value/expression subset a transformation needs, conforming to the spec's atom-vs-call form and
-op names. **A bare string in argument position is a variable reference if bound, else a string
-literal** — the pragmatic reading that reconciles the spec's "bare string is a string literal"
-with its fn/let/match bodies referencing bound names as bare strings.
+op names. **A bare string ALWAYS evaluates to itself — it is a STRING LITERAL**, conforming to the
+spec. Variable references are the EXPLICIT special form `["var", name]`, which looks up
+`name` in the environment and errors loudly if unbound. Op names in HEAD position are
+always taken literally. `["__lit", v]` is kept as a deprecated backward-compat alias: it
+evaluates to `v` identically to a bare string — not the authoring path.
 
 **Implemented ops:** get, get-in, set, set-in; + - * / %; == != < > <= >=; and or not;
 if, cond, do, let, letrec, fn, call, match (over capitalized DU constructors); array, count,
 array-get, array-push, array-slice; record (added — see below), record-get, record-set,
 record-del, record-keys, record-vals, record-merge; floor, ceil, round, abs, min, max, pow,
-sqrt, int->float, float->int; to-string, str-concat; untyped/as (identity — no checker).
+sqrt, int->float, float->int; to-string, str-concat; untyped/as (identity — no checker);
+var (variable reference — explicit env lookup, errors on unbound);
+__lit (deprecated alias — evaluates to its payload, same as a bare string).
 
 **Added (marinada gaps the substrate needs):** `record` (literal record constructor — the spec
 lists `record-set`/`record-merge` but no way to build a record from nothing); the seeded-draw
@@ -122,4 +178,5 @@ family and the tree-navigation family above.
 - `tf_library.gd` — `TFLibrary`: the authored `lib:tf-util` / `lib:tf-core` modules, the module
   resolver, and `build()` → the `kind → closure` transformation library.
 - `tf_engine.gd` — `TFEngine`: the tick (applies definitions, writes results), actions, replay.
-- `../../../tests/tf_substrate_test.gd` — the suite (evaluator conformance + 7 contract cases).
+- `../../../tests/tf_substrate_test.gd` — the suite (evaluator conformance + 8 contract cases,
+  the last being structural mutation: grow-a-tail via graft + magnitude transition).

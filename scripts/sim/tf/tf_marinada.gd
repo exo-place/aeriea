@@ -1,12 +1,12 @@
 ## A GDScript evaluator of marinada's PURE CORE SUBSET (see docs authority:
 ## /home/me/git/rhizone/dusklight/docs/marinada.md). Marinada expressions are the
 ## JSON-array s-expression form: an Atom is a JSON primitive; a Call is
-## `[op, arg1, ...]` where `op` is a string. A bare string in ARG position is a
-## VARIABLE REFERENCE if it is bound in the current environment, otherwise a STRING
-## LITERAL (the pragmatic Lisp reading that reconciles the spec's "bare string is a
-## string literal" with its fn/let/match bodies that reference bound names as bare
-## strings — `["+", "x", "y"]` in a fn body means the params, `["get", r, "key"]`
-## means the literal "key"). Op names in HEAD position are never variables.
+## `[op, arg1, ...]` where `op` is a string. A bare string ALWAYS evaluates to
+## itself — it is a STRING LITERAL, conforming to the spec. Variable references are
+## the EXPLICIT special form `["var", name]`, which looks up `name` in the
+## environment and errors loudly if unbound. Op names in HEAD position are always
+## taken literally. `["__lit", v]` is kept as a deprecated alias: it evaluates to
+## `v` identically to a bare string — NOT the authoring path, a back-compat shim.
 ##
 ## This is a TREE-WALKING INTERPRETER of the pure value/expression subset a
 ## transformation needs. It is intentionally NOT the whole language — no reactive
@@ -133,10 +133,7 @@ static func eval(expr: Variant, env: Env) -> Variant:
 	if expr is Array:
 		return _eval_list(expr, env)
 	if expr is String:
-		var e = env.find(expr)
-		if e != null:
-			return e.vars[expr]
-		return expr                       # unbound string => string literal
+		return expr                       # bare string is always a STRING LITERAL
 	return expr                           # atom / opaque host value
 
 
@@ -212,6 +209,21 @@ static func _eval_list(arr: Array, env: Env) -> Variant:
 		"untyped", "as":
 			# Type escape hatch / runtime assert — no checker here, so identity.
 			return eval(arr[arr.size() - 1], env)
+		"var":
+			# Variable reference — the ONLY way to look up a name in the environment.
+			# A bare string evaluates to itself (literal); `["var", name]` is the
+			# explicit reference form. Errors loudly on unbound names so silent
+			# typos surface at the authoring level, not as wrong values downstream.
+			var vname: String = arr[1]
+			if not env.has(vname):
+				push_error("TFMarinada: unbound variable '%s'" % vname)
+				return null
+			return env.lookup(vname)
+		"__lit":
+			# Deprecated alias — `["__lit", v]` returns v as-is, identically to a
+			# bare string (which is already a literal under the correct semantics).
+			# Kept for backward compatibility only; bare strings are preferred.
+			return arr[1]
 
 	# Everything else is a strict primitive: evaluate args left-to-right, then apply.
 	var a: Array = []

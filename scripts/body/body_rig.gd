@@ -131,17 +131,6 @@ const SHOULDER_L := "upperarm01.L"
 const SHOULDER_R := "upperarm01.R"
 const ROOT_BONE := "root"
 
-## MM-driven LEG bones — the only bones taken from the matched LOCOMOTION frame during
-## locomotion (the retarget's legs are its strength, and the distance-phased foot-lock
-## overrides them anyway). Every OTHER MM bone (root + spine/neck/head/clavicles/arms)
-## is taken from the clean idle frame, because the retargeted upper body + root are
-## systemically corrupt (hunch / craned "double head" / flung arms). See
-## _apply_motion_matching and docs/decisions/locomotion-upper-body-posture.md.
-const LEG_MM_BONES := {
-	"upperleg01.L": true, "lowerleg01.L": true, "foot.L": true,
-	"upperleg01.R": true, "lowerleg01.R": true, "foot.R": true,
-}
-
 # Arm chain bone names (MakeHuman default rig). Analytic two-bone arm-IK uses
 # shoulder(upperarm)/elbow(lowerarm)/wrist — mirroring the leg's hip/knee/ankle.
 const UPPERARM_L := "upperarm01.L"
@@ -1454,9 +1443,6 @@ func _apply_clip_layer(delta: float) -> void:
 # the skeleton. RENDER-SIDE; pure function of (goal, DB). Resets the MM-driven
 # bones to rest first so the pose is a pure function of the matched frame.
 var _mm_frame: int = 0
-## Cached clean idle frame (deterministic zero-goal argmin) — the source for the
-## upper-body pose during locomotion. Resolved lazily once the DB is loaded.
-var _idle_mm_frame: int = -1
 
 ## Foot-lock gait phase in [0,1): position within one full L+R gait cycle. Advanced by
 ## DISTANCE (speed·dt / gait_stride) so cadence tracks travel — a pure accumulator, no
@@ -1499,26 +1485,19 @@ func _apply_motion_matching() -> void:
 	# Pure function of the render-side smoothed speed — no accumulation, no sim feedback.
 	var idle_w := 1.0 - clampf((_smoothed_speed - idle_speed) / maxf(idle_blend_top - idle_speed, 1e-3), 0.0, 1.0)
 
-	# POSTURE SOURCE (see docs/decisions/locomotion-upper-body-posture.md):
-	# The 100STYLE→MakeHuman retarget is systemically corrupt in the UPPER BODY — a
-	# large fraction of frames in most clips carry a hunched/twisted torso, a craned
-	# neck+head that folds the skinned head into a "double head", and arms flung wide
-	# (measured: up to ~260 of 360 frames per clip in the back/strafe/StartStop clips;
-	# leading settling frames of every clip are bad too). The corruption compounds down
-	# the chain (no single bone is the culprit) and clip DIRECTION selection is a
-	# separate known-open item (motion_matcher §_query_feature), so a moving goal often
-	# lands on a wrong-direction, heavily-corrupt clip. Until the retarget + selection
-	# are fixed at source, stamping that upper body during locomotion is worse than not.
-	#
-	# So the ROOT + UPPER body (spine/neck/head/clavicles/arms) are driven from the CLEAN
-	# idle frame (Neutral_ID mid-clip — verified upright, arms relaxed) plus a cadence-
-	# matched procedural arm swing; only the LEGS take the matched locomotion frame, and
-	# they are in turn overridden by the distance-phased foot-lock (so the matched-frame
-	# legs only show at a near-stand, where they equal the idle stand anyway). This
-	# guarantees an upright, double-head-free posture for EVERY goal, independent of the
-	# corrupt DB and of which (possibly wrong-direction) clip the search selects.
-	if _idle_mm_frame < 0:
-		_idle_mm_frame = matcher.search(Vector2.ZERO, 0.0)
+	# POSTURE SOURCE:
+	# The 100STYLE→MakeHuman retarget was fixed AT SOURCE (tools/motion_ingest.gd,
+	# docs/decisions/spine-retarget-world-orientation.md): the spine/neck/head chain is
+	# now solved by orientation-driven spline-IK over the CORRECTED topology (all 9 axial
+	# joints driven, torso locked laterally flat, head reproduces the source world
+	# orientation to ~6° — verified across ALL 24 clips incl. the previously-corrupt
+	# back/strafe/StartStop set). So the former upper-body override (which drove the whole
+	# upper body from a clean idle frame because the DB was corrupt — see the git history
+	# of this function and docs/decisions/locomotion-upper-body-posture.md) is LIFTED:
+	# motion-matching now drives the FULL body from the matched frame, which is what
+	# restores real, mocap-driven arm swing (the earlier frozen/mannequin arms were a
+	# symptom of the override). The LEGS are still replaced downstream by the distance-
+	# phased foot-lock (_apply_foot_lock) so the stance foot stays planted (no skate).
 	var nb := motion_db.bone_count
 	for bi in nb:
 		var bname := motion_db.bone_names[bi]
@@ -1526,28 +1505,15 @@ func _apply_motion_matching() -> void:
 			continue
 		var rest: Transform3D = _rest_local.get(bname, Transform3D.IDENTITY)
 		var rest_q := rest.basis.get_rotation_quaternion()
-		# Legs read the matched locomotion frame (foot-lock overrides them); root + the
-		# whole upper body read the clean idle frame.
-		var src_frame := _mm_frame if LEG_MM_BONES.has(bname) else _idle_mm_frame
 		# The DB quats are MH-bone-local pose rotations (rest bases are identity); compose
 		# onto rest to be robust to any future non-identity rest.
-		var q := (rest_q * motion_db.pose_quat(src_frame, bi)).normalized()
+		var q := (rest_q * motion_db.pose_quat(_mm_frame, bi)).normalized()
 		if idle_w > 0.0:
 			q = (q * _idle_micro(bname, idle_w)).normalized()
 		# Keep the bone's rest position (sim owns root translation); supply orientation.
 		var idx: int = _bone_index[bname]
 		skeleton.set_bone_pose_position(idx, rest.origin)
 		skeleton.set_bone_pose_rotation(idx, q)
-
-	# Cadence-matched arm counter-swing over the clean idle arms. Amplitude fades in with
-	# speed (0 at a stand → max at run_speed_ref); phase is the SAME distance-based gait
-	# phase the foot-lock legs use, so the arms swing in lock-step with the stride and the
-	# left arm counters the right leg. Deterministic (pure function of _gait_phase + speed).
-	var arm_amp := deg_to_rad(max_arm_swing_deg) * clampf(_smoothed_speed / maxf(run_speed_ref, 0.01), 0.0, 1.0)
-	if arm_amp > 1e-4:
-		var ph := _gait_phase * TAU
-		_rotate_bone_local(UPPERARM_L, Vector3.RIGHT, sin(ph + PI) * arm_amp, true)
-		_rotate_bone_local(UPPERARM_R, Vector3.RIGHT, sin(ph) * arm_amp, true)
 
 
 ## Foot-lock locomotion: replace the MM leg pose with a distance-phased sagittal-plane

@@ -37,7 +37,7 @@ func _ready() -> void:
 	var db: MotionDB = loaded
 	_assert("frame_count > 0", db.frame_count > 0, "%d frames" % db.frame_count)
 	_assert("feature_dim == 22", db.feature_dim == 22, "%d" % db.feature_dim)
-	_assert("bone_count == 17", db.bone_count == 17, "%d" % db.bone_count)
+	_assert("bone_count == 22", db.bone_count == 22, "%d" % db.bone_count)
 	_assert("features sized frame_count*feature_dim",
 		db.features.size() == db.frame_count * db.feature_dim,
 		"%d == %d" % [db.features.size(), db.frame_count * db.feature_dim])
@@ -75,6 +75,58 @@ func _ready() -> void:
 		ang_root < deg_to_rad(25.0), "root idle angle=%.1f°" % rad_to_deg(ang_root))
 	_assert("retarget: idle forearm pose is relaxed (< 60°, was ~94° under old retarget)",
 		ang_farm < deg_to_rad(60.0), "lowerarm.L idle angle=%.1f°" % rad_to_deg(ang_farm))
+
+	# --- 1c. AXIAL SPLINE-IK RETARGET (regression; anti-double-head + flat torso) ---
+	# The spine/neck/head chain is retargeted at source by orientation-driven spline-IK
+	# over the CORRECTED topology (tools/motion_ingest.gd; docs/decisions/
+	# spine-retarget-world-orientation.md), replacing the old inverted local-rotation copy
+	# that folded the head ~70-90° (the "double head"). Two layers of guard:
+	#   (A) SOURCE-FIDELITY, real: re-solve the axial chain from the vendored source BVH
+	#       and require the target head's de-yawed WORLD orientation to match the source
+	#       head's to <10° (design check 1). The full 24-clip fidelity (incl. BW/BR/SW/SR/
+	#       StartStop) is enforced at INGEST — `nix build .#motion-assets` FAILS if any clip
+	#       exceeds 12° — because only 4 of the 24 raw clips are vendored (the rest live
+	#       only in the pinned nix dataset), so they cannot be recomputed here.
+	#   (B) DB-derived, all 24 clips: FK the chain from the STORED poses (identity rest
+	#       bases → world = product of locals) and pin flat-torso + no-collapse + capped
+	#       twist for EVERY clip's frames.
+	var AXIAL_CHAIN := ["root", "spine05", "spine04", "spine03", "spine02", "spine01",
+		"neck01", "neck02", "neck03", "head"]
+	# (A) source-fidelity on the vendored clips.
+	var head_err_max := _vendored_head_fidelity(AXIAL_CHAIN)
+	_assert("axial: head world-orientation matches source <10° (vendored clips) — anti-double-head",
+		rad_to_deg(head_err_max) < 10.0, "max head_err=%.1f° (full 24-clip guard is at ingest)" % rad_to_deg(head_err_max))
+	# (B) DB-derived, per clip.
+	var nclips := db.clip_names.size()
+	var idxs := {}
+	for n in AXIAL_CHAIN:
+		idxs[n] = db.bone_names.find(n)
+	var wc_spine_cor := 0.0   # worst spine (torso) coronal — must be ~flat
+	var wc_collapse := 0.0    # worst single-joint local fold — double-head signature
+	var wc_twist := 0.0       # worst per-joint axial twist — must stay under cap+margin
+	var wc_sag := 0.0         # worst aggregate spine sagittal — must not blow up
+	for f in range(0, db.frame_count, 3):
+		var sag := 0.0
+		for n in AXIAL_CHAIN:
+			var lq: Quaternion = db.pose_quat(f, idxs[n])
+			if n == "root":
+				continue
+			var e := Basis(lq).get_euler(EULER_ORDER_YXZ)   # x=sagittal, y=twist, z=coronal
+			var ang := 2.0 * acos(clampf(absf(lq.w), -1.0, 1.0))
+			wc_collapse = maxf(wc_collapse, ang)
+			wc_twist = maxf(wc_twist, absf(e.y))
+			if not (n.begins_with("neck") or n == "head"):
+				wc_spine_cor = maxf(wc_spine_cor, absf(e.z))
+				sag += e.x
+		wc_sag = maxf(wc_sag, absf(sag))
+	_assert("axial: spine (torso) coronal locked flat <4° every clip", rad_to_deg(wc_spine_cor) < 4.0,
+		"max spine coronal=%.2f°" % rad_to_deg(wc_spine_cor))
+	_assert("axial: no single-joint fold >55° every clip (anti-double-head collapse)",
+		rad_to_deg(wc_collapse) < 55.0, "max axial joint local=%.1f°" % rad_to_deg(wc_collapse))
+	_assert("axial: per-joint twist within cap+margin <28° every clip (no dump/synthesis)",
+		rad_to_deg(wc_twist) < 28.0, "max per-joint twist=%.1f°" % rad_to_deg(wc_twist))
+	_assert("axial: aggregate spine sagittal bounded <55° (S in aggregate, no blowup)",
+		rad_to_deg(wc_sag) < 55.0, "max aggregate spine sagittal=%.1f°" % rad_to_deg(wc_sag))
 
 	# --- 2. search determinism ------------------------------------------------
 	var m1 := MotionMatcher.new(); m1.setup(db)
@@ -214,6 +266,46 @@ func _ready() -> void:
 			"%s == %s" % [str(frame_seq_a), str(frame_seq_b)])
 
 	_finish()
+
+
+## Re-run the axial spline-IK solve directly from the VENDORED source BVH (fetch-free
+## subset) and return the worst |angle(target head world, source head world)| over all
+## sampled frames of those clips. This is the real anti-double-head fidelity check —
+## it recomputes from source rather than trusting the DB. The full 24-clip version runs
+## at ingest (nix build), since only these 4 clips are vendored in-repo.
+func _vendored_head_fidelity(chain: Array) -> float:
+	var ING = load("res://tools/motion_ingest.gd").new()
+	var dir := "res://vendor/100style-cc-by/100STYLE"
+	var worst := 0.0
+	for name in ["Neutral_ID", "Neutral_FW", "Neutral_FR", "Neutral_TR1"]:
+		var clip: Dictionary = ING._parse_bvh(dir.path_join(name + ".bvh"))
+		if clip.is_empty():
+			continue
+		var joints: Array = clip["joints"]
+		var nj: int = joints.size()
+		var jidx := {}
+		for k in nj:
+			jidx[joints[k]["name"]] = k
+		var ch_base := []
+		ch_base.resize(nj)
+		var acc := 0
+		for k in nj:
+			ch_base[k] = acc
+			acc += (joints[k]["channels"] as Array).size()
+		var tc: int = clip["total_channels"]
+		var frames: int = clip["frames"]
+		var fi := 0
+		while fi < frames:
+			var grot: Array = ING._fk_frame(joints, ch_base, clip["motion"], tc, fi, nj)["grot"]
+			var yinv: Quaternion = ING._yaw_only(grot[jidx["Hips"]]).inverse()
+			var gd := {}
+			for jn in ["Hips", "Chest", "Chest2", "Chest3", "Chest4", "Neck", "Head"]:
+				gd[jn] = (yinv * (grot[jidx[jn]] as Quaternion)).normalized()
+			var tg := {"root": gd["Hips"]}
+			ING._solve_axial(gd, tg)
+			worst = maxf(worst, (tg["head"] as Quaternion).angle_to(gd["Head"] as Quaternion))
+			fi += 12
+	return worst
 
 
 func _pose_angle(db: MotionDB, frame: int, bone: int) -> float:

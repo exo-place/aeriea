@@ -75,9 +75,18 @@ const CLIP_TRIM := 6
 # same map works for a CMU-derived BVH mirror later.
 const BONE_MAP := {
 	"root":          ["Hips", "hip", "Hip"],
-	"spine01":       ["Chest", "Spine", "spine"],
-	"spine03":       ["Chest2", "Chest3", "Spine1", "Spine2"],
+	# Axial chain (spine+neck+head) — NOT single-joint local-rotation copy. These are
+	# solved by orientation-driven spline-IK (_solve_axial); the candidate here only
+	# marks the bone present + resolves an existence check. See AXIAL_CHAIN / AXIAL_ARC
+	# and docs/decisions/spine-retarget-world-orientation.md.
+	"spine05":       ["Hips"],
+	"spine04":       ["Chest"],
+	"spine03":       ["Chest2"],
+	"spine02":       ["Chest3"],
+	"spine01":       ["Chest4"],
 	"neck01":        ["Neck", "neck"],
+	"neck02":        ["Neck"],
+	"neck03":        ["Neck"],
 	"head":          ["Head", "head"],
 	"upperleg01.L":  ["LeftHip", "LeftUpLeg", "LHipJoint", "LeftUpperLeg"],
 	"lowerleg01.L":  ["LeftKnee", "LeftLeg", "LeftLowerLeg"],
@@ -97,12 +106,11 @@ const BONE_MAP := {
 ## so head→tail is the bone's REST DIRECTION in MH space. Used to build the
 ## rest-orientation alignment (BVH bind dir → MH bind dir) per bone. End bones
 ## (foot/head/forearm/lowerleg) point at a representative descendant tip.
+## NOTE: the axial chain (spine*/neck*/head) is absent here on purpose — those bones
+## are solved by orientation-driven spline-IK (_solve_axial), not the bind-direction
+## transfer this table feeds. Only root/legs/arms use segment-direction alignment.
 const MH_TAIL := {
 	"root":          "spine05",
-	"spine01":       "spine02",
-	"spine03":       "neck01",
-	"neck01":        "head",
-	"head":          "__yup",        # no further child of interest; rest dir = +Y
 	"upperleg01.L":  "lowerleg01.L",
 	"lowerleg01.L":  "foot.L",
 	"foot.L":        "toe1-1.L",
@@ -124,10 +132,6 @@ const MH_TAIL := {
 ## world-space bind direction of that segment).
 const BVH_TAIL := {
 	"root":          "Chest",
-	"spine01":       "Chest2",
-	"spine03":       "Neck",
-	"neck01":        "Head",
-	"head":          "__yup",
 	"upperleg01.L":  "LeftKnee",
 	"lowerleg01.L":  "LeftAnkle",
 	"foot.L":        "LeftToe",
@@ -146,25 +150,88 @@ const BVH_TAIL := {
 ## used to convert per-joint GLOBAL rotation deltas into chain-correct LOCAL
 ## rotations on the MakeHuman skeleton. "" = no mapped parent (driven in the
 ## root/world frame).
+## CORRECTED axial topology (was inverted). Real MH chain by parent index:
+## root → spine05 → spine04 → spine03 → spine02 → spine01 → neck01 → neck02 →
+## neck03 → head (spine05 = lumbar/lowest, spine01 = thoracic/highest, parent of
+## neck01). Clavicles attach at spine01 (the top of the spine), not the old spine03.
 const MH_PARENT := {
 	"root":          "",
-	"spine01":       "root",
-	"spine03":       "spine01",
-	"neck01":        "spine03",
-	"head":          "neck01",
+	"spine05":       "root",
+	"spine04":       "spine05",
+	"spine03":       "spine04",
+	"spine02":       "spine03",
+	"spine01":       "spine02",
+	"neck01":        "spine01",
+	"neck02":        "neck01",
+	"neck03":        "neck02",
+	"head":          "neck03",
 	"upperleg01.L":  "root",
 	"lowerleg01.L":  "upperleg01.L",
 	"foot.L":        "lowerleg01.L",
 	"upperleg01.R":  "root",
 	"lowerleg01.R":  "upperleg01.R",
 	"foot.R":        "lowerleg01.R",
-	"clavicle.L":    "spine03",
+	"clavicle.L":    "spine01",
 	"upperarm01.L":  "clavicle.L",
 	"lowerarm01.L":  "upperarm01.L",
-	"clavicle.R":    "spine03",
+	"clavicle.R":    "spine01",
 	"upperarm01.R":  "clavicle.R",
 	"lowerarm01.R":  "upperarm01.R",
 }
+
+## --- Orientation-driven spline-IK for the axial chain ----------------------
+## (docs/decisions/spine-retarget-world-orientation.md). We preserve the SOURCE
+## chain's WORLD-space segment orientation (not parent-relative local rotations,
+## which are segment-count dependent and lossy across skeletons). Per frame we
+## arc-slerp the de-yawed source world orientations onto each target joint's
+## normalized arc position, then constrain (coronal locked flat, sagittal free,
+## axial twist passed-through-but-per-joint-capped) and convert to local over the
+## CORRECTED chain. Closed form → byte-deterministic (no iteration).
+
+## Target axial chain in parent→child order, each with its normalized arc position
+## along the corresponding SOURCE segment (spine = Hips→Neck, neck = Neck→Head).
+## Positions measured from both rigs (see the decision doc's arc tables).
+const AXIAL_CHAIN := ["spine05", "spine04", "spine03", "spine02", "spine01",
+	"neck01", "neck02", "neck03", "head"]
+const AXIAL_ARC := {
+	"spine05": {"seg": "spine", "s": 0.146},
+	"spine04": {"seg": "spine", "s": 0.230},
+	"spine03": {"seg": "spine", "s": 0.345},
+	"spine02": {"seg": "spine", "s": 0.496},
+	"spine01": {"seg": "spine", "s": 0.748},
+	"neck01":  {"seg": "spine", "s": 1.000},
+	"neck02":  {"seg": "neck",  "s": 0.350},
+	"neck03":  {"seg": "neck",  "s": 0.667},
+	"head":    {"seg": "neck",  "s": 1.000},
+}
+## Source de-yawed world-orientation samples along the spine (Hips→Neck) and neck
+## (Neck→Head) arcs: [BVH joint name, normalized arc position]. Ascending.
+const SRC_SPINE_SAMPLES := [
+	["Hips", 0.000], ["Chest", 0.235], ["Chest2", 0.422],
+	["Chest3", 0.590], ["Chest4", 0.759], ["Neck", 1.000],
+]
+const SRC_NECK_SAMPLES := [["Neck", 0.000], ["Head", 1.000]]
+
+## Coronal (lateral / side-to-side) deadband: below this the coronal swing is noise
+## and is zeroed on EVERY axial joint. Design fork resolved to a hard threshold in
+## the 5-8° band. MEASURED DISCOVERY (see the decision doc): the 100STYLE source
+## carries a pervasive, REAL ~15-23°/segment lateral component that is LOAD-BEARING
+## for head orientation — hard-locking all of it flat reintroduces a 27-40° head
+## world-orientation error (i.e. a head-mis-orientation defect akin to the one this
+## fix removes). So the policy is SPLIT: the SPINE (torso) is locked flat above the
+## deadband — the actual "no hunch / upright" intent, spine coronal → 0 — while the
+## NECK passes evidenced coronal through so the head still lands on the source
+## orientation (head_err stays ~6°). NECK_CORONAL_PASSTHROUGH names that split.
+const LAT_EPS_DEG := 6.0
+const NECK_CORONAL_PASSTHROUGH := true
+## Per-joint LOCAL axial-twist ceiling. The arc-slerp of world orientations already
+## DISTRIBUTES source twist smoothly across the chain (the primary distribution
+## mechanism — measured: spine joints ≤4°, twist concentrates naturally in the neck,
+## ≤17° on neck01 in a turn, declining down the neck — anatomically correct, not a
+## dump). This ceiling is the guard that caps any single subsegment so evidenced
+## twist stays spread and none is synthesized/piled onto one joint; set generous so
+## it preserves the natural neck twist (≤17°) and only bites a pathological dump.
+const MAX_JOINT_TWIST_DEG := 25.0
 
 
 func _ready() -> void:
@@ -220,6 +287,12 @@ func _run() -> int:
 		var n := retf.size()
 		var last := n - max_h - 1
 		last = min(last, CLIP_TRIM + MAX_FRAMES_PER_CLIP)
+		# Per-clip axial verification (all emitted frames), in degrees.
+		var head_err_max := 0.0
+		var spine_cor_max := 0.0
+		var neck_cor_max := 0.0
+		var tw_max := 0.0
+		var sag_err_max := 0.0
 		for fi in range(CLIP_TRIM, last):
 			# pose
 			var pose: PackedFloat32Array = retf[fi]["pose"]
@@ -228,7 +301,27 @@ func _run() -> int:
 			var feat := _frame_feature(retf, fi)
 			all_feats.append_array(feat)
 			clip_id_of_frame.append(ci_out)
-		print("  %s: %d sampled frames -> emitted (tag=%s)" % [name, n, _tag_for(name)])
+			head_err_max = maxf(head_err_max, float(retf[fi].get("head_err", 0.0)))
+			spine_cor_max = maxf(spine_cor_max, float(retf[fi].get("spine_cor", 0.0)))
+			neck_cor_max = maxf(neck_cor_max, float(retf[fi].get("neck_cor", 0.0)))
+			tw_max = maxf(tw_max, float(retf[fi].get("tw_max", 0.0)))
+			sag_err_max = maxf(sag_err_max,
+				absf(float(retf[fi].get("sag_sum", 0.0)) - float(retf[fi].get("src_sag", 0.0))))
+		print("  %s: %d frames -> emitted (tag=%s) | axial: head_err<=%.1f° spine_cor<=%.1f° neck_cor<=%.1f° twist<=%.1f° aggr-sag-err<=%.1f°" %
+			[name, n, _tag_for(name), rad_to_deg(head_err_max), rad_to_deg(spine_cor_max),
+			rad_to_deg(neck_cor_max), rad_to_deg(tw_max), rad_to_deg(sag_err_max)])
+		# At-source guard: a craned/double-head retarget shows head_err in the 70-90°
+		# regime; the corrected spline-IK holds ~6°. Fail the build if any clip regresses
+		# past the design's <10° head-fidelity contract (small numeric margin). Also guard
+		# the torso-flat contract (spine coronal must stay ~0).
+		if rad_to_deg(head_err_max) > 12.0:
+			push_error("motion_ingest: %s head world-orientation error %.1f° exceeds 12° guard (double-head regression)" %
+				[name, rad_to_deg(head_err_max)])
+			return 1
+		if rad_to_deg(spine_cor_max) > 4.0:
+			push_error("motion_ingest: %s spine coronal %.1f° exceeds 4° flat-torso guard" %
+				[name, rad_to_deg(spine_cor_max)])
+			return 1
 
 	var frame_count := clip_id_of_frame.size()
 	if frame_count == 0:
@@ -515,8 +608,17 @@ func _retarget_clip(clip: Dictionary, bone_names: PackedStringArray) -> Array:
 			# those bones we pre-multiply by the per-bone A_OFFSET (the A-pose↔T-pose bind
 			# rotation), so a captured arm that hangs ≈ the A-pose lands near identity
 			# instead of carrying the full T→side swing (the earlier 76° double-count).
+			# De-yawed SOURCE world orientations at each axial sample joint — the
+			# orientation profile the target spine/neck/head chain must reproduce.
+			var gd := {}
+			for jn in ["Hips", "Chest", "Chest2", "Chest3", "Chest4", "Neck", "Head"]:
+				if jidx.has(jn):
+					gd[jn] = (yaw_inv * (global_rot[int(jidx[jn])] as Quaternion)).normalized()
 			var tgt_global := {}
 			for tb in MH_PARENT.keys():
+				# Axial bones are solved by spline-IK below, not by single-joint transfer.
+				if AXIAL_ARC.has(tb):
+					continue
 				if not target_to_bvh.has(tb):
 					tgt_global[tb] = Quaternion.IDENTITY
 					continue
@@ -528,10 +630,14 @@ func _retarget_clip(clip: Dictionary, bone_names: PackedStringArray) -> Array:
 					var cap_dir: Vector3 = (g * (_bvh_dir_cache[tb] as Vector3)).normalized()
 					tgt_global[tb] = _shortest_arc(_mh_dir_cache[tb], cap_dir)
 				else:
-					# GLOBAL-ORIENTATION transfer (torso / legs / root): BVH and MH bind
-					# directions agree, so the de-yawed BVH global IS the MH target global,
-					# preserving twist (a natural root/spine/legs).
+					# GLOBAL-ORIENTATION transfer (legs / root): BVH and MH bind directions
+					# agree, so the de-yawed BVH global IS the MH target global.
 					tgt_global[tb] = g
+			# Axial chain: orientation-driven spline-IK over the corrected topology
+			# (writes constrained WORLD orientations into tgt_global; the pose loop
+			# below converts them to local via the corrected MH_PARENT). root must be
+			# resolved first (done above) — it is the base of the axial chain.
+			_solve_axial(gd, tgt_global)
 			var pose := PackedFloat32Array(); pose.resize(nbones * 4)
 			for bi in nbones:
 				var tb: String = bone_names[bi]
@@ -546,10 +652,46 @@ func _retarget_clip(clip: Dictionary, bone_names: PackedStringArray) -> Array:
 				pose[bi * 4 + 1] = q.y
 				pose[bi * 4 + 2] = q.z
 				pose[bi * 4 + 3] = q.w
+			var m := _axial_metrics(gd, tgt_global)
 			out.append({"pose": pose, "root_xz": root_xz, "facing": facing,
-				"foot_l": foot_l, "foot_r": foot_r})
+				"foot_l": foot_l, "foot_r": foot_r,
+				"head_err": m["head_err"], "spine_cor": m["spine_cor"], "neck_cor": m["neck_cor"],
+				"tw_max": m["tw_max"], "sag_sum": m["sag_sum"], "src_sag": m["src_sag"]})
 		fi += 1
 	return out
+
+
+## Verification metrics for one solved axial frame (all radians), compared against
+## the SOURCE de-yawed world orientations (gd). head_err = angle(target head world,
+## source head world) — the anti-double-head guard. cor_max/tw_max = worst per-joint
+## coronal / axial-twist over the axial chain. sag_sum = aggregate spine (root→neck01)
+## sagittal bend; src_sag = source Hips→Neck total sagittal (the aggregate S target).
+func _axial_metrics(gd: Dictionary, tgt_global: Dictionary) -> Dictionary:
+	var head_err := 0.0
+	if gd.has("Head") and tgt_global.has("head"):
+		head_err = (tgt_global["head"] as Quaternion).angle_to(gd["Head"] as Quaternion)
+	var spine_cor := 0.0
+	var neck_cor := 0.0
+	var tw_max := 0.0
+	var sag_sum := 0.0
+	for tb in AXIAL_CHAIN:
+		var par: String = MH_PARENT.get(tb, "")
+		var pw: Quaternion = tgt_global.get(par, Quaternion.IDENTITY)
+		var lq := (pw.inverse() * (tgt_global.get(tb, Quaternion.IDENTITY) as Quaternion)).normalized()
+		var e := Basis(lq).get_euler(EULER_ORDER_YXZ)
+		if tb.begins_with("neck") or tb == "head":
+			neck_cor = maxf(neck_cor, absf(e.z))
+		else:
+			spine_cor = maxf(spine_cor, absf(e.z))
+		tw_max = maxf(tw_max, absf(e.y))
+		if AXIAL_ARC[tb]["seg"] == "spine":
+			sag_sum += e.x
+	var src_sag := 0.0
+	if gd.has("Hips") and gd.has("Neck"):
+		var sl := ((gd["Hips"] as Quaternion).inverse() * (gd["Neck"] as Quaternion)).normalized()
+		src_sag = Basis(sl).get_euler(EULER_ORDER_YXZ).x
+	return {"head_err": head_err, "spine_cor": spine_cor, "neck_cor": neck_cor,
+		"tw_max": tw_max, "sag_sum": sag_sum, "src_sag": src_sag}
 
 
 ## Normalized REST (bind) segment directions per mapped bone, in each skeleton's
@@ -620,6 +762,67 @@ func _shortest_arc(a: Vector3, b: Vector3) -> Quaternion:
 		return Quaternion(axis.normalized(), PI)
 	var axis2 := a.cross(b).normalized()
 	return Quaternion(axis2, acos(clampf(d, -1.0, 1.0)))
+
+
+## Orientation-driven spline-IK for the axial chain. For each target axial joint,
+## arc-slerp the de-yawed source world orientations at its normalized arc position,
+## convert to local over the CORRECTED chain (parent already resolved in tgt_global),
+## constrain the local pose (coronal flat / sagittal free / twist capped), then
+## re-accumulate the CONSTRAINED world orientation so children build on it. Writes
+## world orientations into tgt_global; the caller's pose loop recovers the exact
+## constrained local via (parent_world)^-1 · (this_world). Closed-form/deterministic.
+func _solve_axial(gd: Dictionary, tgt_global: Dictionary) -> void:
+	for tb in AXIAL_CHAIN:
+		var info: Dictionary = AXIAL_ARC[tb]
+		var samples: Array = SRC_SPINE_SAMPLES if info["seg"] == "spine" else SRC_NECK_SAMPLES
+		var desired_world := _arc_slerp(gd, samples, info["s"])
+		var par: String = MH_PARENT.get(tb, "")
+		var par_world: Quaternion = tgt_global.get(par, Quaternion.IDENTITY)
+		var local_raw := (par_world.inverse() * desired_world).normalized()
+		var is_neck: bool = tb.begins_with("neck") or tb == "head"
+		var local_c := _constrain_axial_local(local_raw, is_neck)
+		tgt_global[tb] = (par_world * local_c).normalized()
+
+
+## Slerp the arc-parameterized source orientation curve at normalized position s.
+## samples: [[joint_name, arc_pos], ...] ascending. Clamps to the end samples.
+func _arc_slerp(gd: Dictionary, samples: Array, s: float) -> Quaternion:
+	var n := samples.size()
+	if n == 0:
+		return Quaternion.IDENTITY
+	if s <= float(samples[0][1]):
+		return (gd.get(samples[0][0], Quaternion.IDENTITY) as Quaternion)
+	if s >= float(samples[n - 1][1]):
+		return (gd.get(samples[n - 1][0], Quaternion.IDENTITY) as Quaternion)
+	for i in range(n - 1):
+		var a := float(samples[i][1])
+		var b := float(samples[i + 1][1])
+		if s >= a and s <= b:
+			var t := (s - a) / maxf(b - a, 1e-6)
+			var qa := (gd.get(samples[i][0], Quaternion.IDENTITY) as Quaternion)
+			var qb := (gd.get(samples[i + 1][0], Quaternion.IDENTITY) as Quaternion)
+			return qa.slerp(qb, t).normalized()
+	return (gd.get(samples[n - 1][0], Quaternion.IDENTITY) as Quaternion)
+
+
+## Apply the anatomical joint limits to ONE axial joint's LOCAL pose. Swing/twist
+## decomposition via Euler YXZ (ex = sagittal / fore-aft about X, ey = axial twist
+## about Y, ez = coronal / lateral about Z) — exact and reconstructable:
+##   - coronal (ez): below LAT_EPS → 0 (noise) on every joint; above LAT_EPS the SPINE
+##     locks flat (torso upright, no hunch) while the NECK passes evidenced lateral
+##     through (needed for head orientation fidelity — see NECK_CORONAL_PASSTHROUGH).
+##   - axial twist (ey): passed through but CAPPED per joint (never dumped/synthesized).
+##   - sagittal (ex): FREE — driven only by the sampled orientations, so the S-curve
+##     emerges in aggregate across the chain, never imposed per-segment.
+func _constrain_axial_local(local_q: Quaternion, is_neck: bool) -> Quaternion:
+	var e := Basis(local_q).get_euler(EULER_ORDER_YXZ)  # (x=sagittal, y=twist, z=coronal)
+	if absf(e.z) < deg_to_rad(LAT_EPS_DEG):
+		e.z = 0.0
+	elif not (is_neck and NECK_CORONAL_PASSTHROUGH):
+		e.z = 0.0  # spine (torso): lock even evidenced lateral flat — no hunch/sway
+	var tmax := deg_to_rad(MAX_JOINT_TWIST_DEG)
+	e.y = clampf(e.y, -tmax, tmax)
+	return Basis.from_euler(e, EULER_ORDER_YXZ).get_rotation_quaternion()
 
 
 ## The YAW (twist about world UP) component of a rotation — swing/twist decomposition.
